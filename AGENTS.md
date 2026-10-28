@@ -52,6 +52,11 @@ changes.
   - `FlowScene`: the flow graph's items, kept in line with the document by its
     signals, and the edits as commands. `FlowView` shows it (zoom, pan, context
     menus). `SceneNodeItem` and `TransitionEdgeItem` are its items.
+  - `SceneCanvas`: one scene's entities (`EntityItem`), likewise following the
+    document; it rebuilds its items when the tree's shape changes and updates them
+    in place otherwise, since an item may be inside its own mouse handler.
+    `SceneView` is its tab, `SceneTreePanel` its layers-and-entities dock.
+    `CanvasView` holds the zoom and pan both views share.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the

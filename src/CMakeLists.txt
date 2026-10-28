@@ -47,6 +47,10 @@ shoal_set_warnings(shoal_assets)
 
 # editor: the Qt Widgets application, as a library so tests can create its windows.
 add_library(shoal_editor STATIC
+    editor/CanvasView.cpp
+    editor/CanvasView.h
+    editor/EntityItem.cpp
+    editor/EntityItem.h
     editor/FlowScene.cpp
     editor/FlowScene.h
     editor/FlowView.cpp
@@ -55,6 +59,12 @@ add_library(shoal_editor STATIC
     editor/MainWindow.h
     editor/NewProjectDialog.cpp
     editor/NewProjectDialog.h
+    editor/SceneCanvas.cpp
+    editor/SceneCanvas.h
+    editor/SceneTreePanel.cpp
+    editor/SceneTreePanel.h
+    editor/SceneView.cpp
+    editor/SceneView.h
     editor/SceneNodeItem.cpp
     editor/SceneNodeItem.h
     editor/TransitionEdgeItem.cpp

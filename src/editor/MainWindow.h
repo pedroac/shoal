@@ -4,9 +4,12 @@
 #include <QMainWindow>
 #include <memory>
 
+#include "assets/SheetCache.h"
 #include "core/ProjectStore.h"
 
 class QAction;
+class QDockWidget;
+class QTabWidget;
 
 namespace shoal::core {
 class ProjectDocument;
@@ -14,10 +17,14 @@ class ProjectDocument;
 
 namespace shoal::editor {
 
+class CanvasView;
 class FlowScene;
 class FlowView;
+class SceneTreePanel;
+class SceneView;
 
-/// The editor's top-level window: one open project, shown in the flow view.
+/// The editor's top-level window: one open project, with the flow view in the first tab
+/// and a tab for each open scene. The docks follow the current scene tab.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -30,6 +37,13 @@ public:
     core::ProjectDocument* document() const { return m_document.get(); }
     FlowScene* flowScene() const { return m_flowScene.get(); }
     FlowView* flowView() const { return m_flowView; }
+    QTabWidget* tabs() const { return m_tabs; }
+    SceneTreePanel* sceneTreePanel() const { return m_sceneTree; }
+    assets::SheetCache& sheets() { return m_sheets; }
+    /// The current tab's scene view, or null when the flow tab is current.
+    SceneView* currentSceneView() const;
+    /// Opens a scene in its tab, or switches to the tab it already has.
+    SceneView* openScene(const QString& sceneId);
 
     /// Shows `document` (or nothing), replacing the current one without asking.
     void setDocument(std::unique_ptr<core::ProjectDocument> document);
@@ -61,10 +75,21 @@ private:
     void updateTitle();
     void updateActions();
     void showAbout();
+    CanvasView* currentCanvasView() const;
+    void closeSceneTab(int index);
+    void onCurrentTabChanged();
+    /// Loads the sheets the manifest declares, relative to the project folder.
+    void updateSheets();
 
     std::unique_ptr<core::ProjectDocument> m_document;
     std::unique_ptr<FlowScene> m_flowScene;
     FlowView* m_flowView = nullptr;
+    QTabWidget* m_tabs = nullptr;
+    assets::SheetCache m_sheets;
+    QMap<QString, QString> m_declaredSheets;
+    QString m_sheetsBase;
+    QDockWidget* m_sceneTreeDock = nullptr;
+    SceneTreePanel* m_sceneTree = nullptr;
 
     QAction* m_newAction = nullptr;
     QAction* m_openAction = nullptr;
@@ -82,6 +107,7 @@ private:
     QAction* m_zoomOutAction = nullptr;
     QAction* m_actualSizeAction = nullptr;
     QAction* m_fitAction = nullptr;
+    QAction* m_snapAction = nullptr;
 };
 
 }  // namespace shoal::editor

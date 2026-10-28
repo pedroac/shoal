@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGraphicsItem>
@@ -11,6 +12,8 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QStatusBar>
+#include <QTabBar>
+#include <QTabWidget>
 #include <QTimer>
 
 #include "assets/SpratLibrary.h"
@@ -20,6 +23,9 @@
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
 #include "editor/NewProjectDialog.h"
+#include "editor/SceneCanvas.h"
+#include "editor/SceneTreePanel.h"
+#include "editor/SceneView.h"
 
 namespace shoal::editor {
 
@@ -51,6 +57,11 @@ QAction* makeAction(QObject* parent, const QString& objectName, const QString& t
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
     resize(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+    m_sceneTree = new SceneTreePanel(this);
+    m_sceneTreeDock = new QDockWidget(tr("Scene"), this);
+    m_sceneTreeDock->setObjectName(QStringLiteral("sceneTreeDock"));
+    m_sceneTreeDock->setWidget(m_sceneTree);
+    addDockWidget(Qt::LeftDockWidgetArea, m_sceneTreeDock);
     createActions();
     createMenus();
     setDocument(nullptr);
@@ -112,15 +123,18 @@ void MainWindow::createActions()
     }
     m_deleteAction = makeAction(this, QStringLiteral("deleteAction"), tr("&Delete"), deleteKeys);
     connect(m_deleteAction, &QAction::triggered, this, [this] {
-        if (m_flowScene) {
+        if (SceneView* view = currentSceneView()) {
+            view->canvas().removeSelection();
+        }
+        else if (m_flowScene) {
             m_flowScene->removeSelection();
         }
     });
     m_selectAllAction = makeAction(this, QStringLiteral("selectAllAction"), tr("Select &All"),
                                    {QKeySequence::SelectAll});
     connect(m_selectAllAction, &QAction::triggered, this, [this] {
-        if (m_flowScene) {
-            for (QGraphicsItem* item : m_flowScene->items()) {
+        if (CanvasView* view = currentCanvasView()) {
+            for (QGraphicsItem* item : view->scene()->items()) {
                 item->setSelected(item->flags() & QGraphicsItem::ItemIsSelectable);
             }
         }
@@ -155,19 +169,27 @@ void MainWindow::createActions()
                                     {QKeySequence(Qt::CTRL | Qt::Key_1)});
     m_fitAction = makeAction(this, QStringLiteral("fitAction"), tr("&Fit to Window"),
                              {QKeySequence(Qt::CTRL | Qt::Key_0)});
-    const std::pair<QAction*, void (FlowView::*)()> viewActions[] = {
-        {m_zoomInAction, &FlowView::zoomIn},
-        {m_zoomOutAction, &FlowView::zoomOut},
-        {m_actualSizeAction, &FlowView::resetZoom},
-        {m_fitAction, &FlowView::fitAll},
+    const std::pair<QAction*, void (CanvasView::*)()> viewActions[] = {
+        {m_zoomInAction, &CanvasView::zoomIn},
+        {m_zoomOutAction, &CanvasView::zoomOut},
+        {m_actualSizeAction, &CanvasView::resetZoom},
+        {m_fitAction, &CanvasView::fitAll},
     };
     for (const auto& [action, slot] : viewActions) {
         connect(action, &QAction::triggered, this, [this, slot = slot] {
-            if (m_flowView) {
-                (m_flowView->*slot)();
+            if (CanvasView* view = currentCanvasView()) {
+                (view->*slot)();
             }
         });
     }
+    m_snapAction = makeAction(this, QStringLiteral("snapAction"), tr("&Snap to Grid"),
+                              {QKeySequence(Qt::CTRL | Qt::Key_Apostrophe)});
+    m_snapAction->setCheckable(true);
+    connect(m_snapAction, &QAction::toggled, this, [this](bool snapping) {
+        for (int i = 1; m_tabs && i < m_tabs->count(); ++i) {
+            static_cast<SceneView*>(m_tabs->widget(i))->canvas().setSnapping(snapping);
+        }
+    });
 }
 
 void MainWindow::createMenus()
@@ -198,6 +220,10 @@ void MainWindow::createMenus()
     viewMenu->addAction(m_zoomOutAction);
     viewMenu->addAction(m_actualSizeAction);
     viewMenu->addAction(m_fitAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_snapAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_sceneTreeDock->toggleViewAction());
 
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
     helpMenu->addAction(tr("&About Shoal"), this, &MainWindow::showAbout);
@@ -206,21 +232,41 @@ void MainWindow::createMenus()
 
 void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
 {
-    // Tear down the old view first: it shows the old scene, which follows the old document.
-    // The scene emits selectionChanged() as it goes, which must no longer reach this window.
+    // Tear down the views first: they show the old document. Its scenes emit
+    // selectionChanged() as they go, which must no longer reach this window.
+    m_sceneTree->setCanvas(nullptr);
+    if (m_tabs) {
+        disconnect(m_tabs, nullptr, this, nullptr);
+        for (int i = 1; i < m_tabs->count(); ++i) {
+            disconnect(&static_cast<SceneView*>(m_tabs->widget(i))->canvas(), nullptr, this,
+                       nullptr);
+        }
+    }
     delete takeCentralWidget();
+    m_tabs = nullptr;
     m_flowView = nullptr;
     if (m_flowScene) {
         disconnect(m_flowScene.get(), nullptr, this, nullptr);
     }
     m_flowScene.reset();
     m_document = std::move(document);
+    updateSheets();
 
     if (m_document) {
         m_flowScene = std::make_unique<FlowScene>(*m_document);
-        m_flowView = new FlowView(*m_flowScene, this);
+        m_tabs = new QTabWidget(this);
+        m_tabs->setObjectName(QStringLiteral("workspaceTabs"));
+        m_tabs->setDocumentMode(true);
+        m_tabs->setTabsClosable(true);
+        m_tabs->setMovable(true);
+        m_flowView = new FlowView(*m_flowScene, m_tabs);
         m_flowView->setObjectName(QStringLiteral("flowView"));
-        setCentralWidget(m_flowView);
+        m_tabs->addTab(m_flowView, tr("Flow"));
+        m_tabs->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);  // not closable
+        m_tabs->tabBar()->setTabButton(0, QTabBar::LeftSide, nullptr);
+        setCentralWidget(m_tabs);
+        connect(m_tabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeSceneTab);
+        connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onCurrentTabChanged);
 
         core::CommandStack& commands = m_document->commands();
         connect(&commands, &core::CommandStack::indexChanged, this, &MainWindow::updateActions);
@@ -229,10 +275,25 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
                 &MainWindow::updateActions);
         connect(m_document.get(), &core::ProjectDocument::startSceneChanged, this,
                 &MainWindow::updateActions);
-        connect(m_flowScene.get(), &FlowScene::sceneActivated, this, [this] {
-            statusBar()->showMessage(tr("The scene editor isn't available yet."),
-                                     STATUS_TIMEOUT_MS);
-        });
+        connect(m_document.get(), &core::ProjectDocument::changed, this, &MainWindow::updateSheets);
+        connect(m_flowScene.get(), &FlowScene::sceneActivated, this, &MainWindow::openScene);
+        connect(m_document.get(), &core::ProjectDocument::sceneRemoved, this,
+                [this](const QString& id) {
+                    for (int i = m_tabs->count() - 1; i >= 1; --i) {
+                        if (static_cast<SceneView*>(m_tabs->widget(i))->canvas().sceneId() == id) {
+                            closeSceneTab(i);
+                        }
+                    }
+                });
+        connect(
+            m_document.get(), &core::ProjectDocument::sceneRenamed, this,
+            [this](const QString& from, const QString& to) {
+                for (int i = 1; i < m_tabs->count(); ++i) {
+                    if (static_cast<SceneView*>(m_tabs->widget(i))->canvas().sceneId() == from) {
+                        m_tabs->setTabText(i, to);
+                    }
+                }
+            });
         // Once the window has its final size.
         QTimer::singleShot(0, m_flowView, &FlowView::fitAll);
     }
@@ -244,6 +305,74 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     }
     updateTitle();
     updateActions();
+}
+
+SceneView* MainWindow::currentSceneView() const
+{
+    return m_tabs && m_tabs->currentIndex() > 0 ? static_cast<SceneView*>(m_tabs->currentWidget())
+                                                : nullptr;
+}
+
+CanvasView* MainWindow::currentCanvasView() const
+{
+    return m_tabs ? static_cast<CanvasView*>(m_tabs->currentWidget()) : nullptr;
+}
+
+SceneView* MainWindow::openScene(const QString& sceneId)
+{
+    if (!m_document || !m_document->project().scenes.contains(sceneId)) {
+        return nullptr;
+    }
+    for (int i = 1; i < m_tabs->count(); ++i) {
+        auto* view = static_cast<SceneView*>(m_tabs->widget(i));
+        if (view->canvas().sceneId() == sceneId) {
+            m_tabs->setCurrentIndex(i);
+            return view;
+        }
+    }
+    auto* view = new SceneView(*m_document, m_sheets, sceneId, m_tabs);
+    view->setObjectName(QStringLiteral("sceneView"));
+    view->canvas().setSnapping(m_snapAction->isChecked());
+    connect(&view->canvas(), &QGraphicsScene::selectionChanged, this, &MainWindow::updateActions);
+    m_tabs->setCurrentIndex(m_tabs->addTab(view, sceneId));
+    QTimer::singleShot(0, view, &CanvasView::fitAll);
+    return view;
+}
+
+void MainWindow::closeSceneTab(int index)
+{
+    if (!m_tabs || index <= 0) {
+        return;  // the flow tab stays
+    }
+    auto* view = static_cast<SceneView*>(m_tabs->widget(index));
+    disconnect(&view->canvas(), nullptr, this, nullptr);
+    if (m_sceneTree->canvas() == &view->canvas()) {
+        m_sceneTree->setCanvas(nullptr);
+    }
+    m_tabs->removeTab(index);
+    view->deleteLater();
+}
+
+void MainWindow::onCurrentTabChanged()
+{
+    SceneView* view = currentSceneView();
+    m_sceneTree->setCanvas(view ? &view->canvas() : nullptr);
+    updateActions();
+}
+
+void MainWindow::updateSheets()
+{
+    QMap<QString, QString> declared;
+    QString base;
+    if (m_document) {
+        declared = m_document->project().manifest.sheets;
+        base = m_document->directory().isEmpty() ? QDir::currentPath() : m_document->directory();
+    }
+    if (declared != m_declaredSheets || base != m_sheetsBase) {
+        m_declaredSheets = declared;
+        m_sheetsBase = base;
+        m_sheets.setSheets(declared, base);
+    }
 }
 
 QList<core::FileError> MainWindow::openProject(const QString& directory)
@@ -279,6 +408,7 @@ core::SaveResult MainWindow::saveProjectAs(const QString& directory)
 {
     Q_ASSERT(m_document);
     core::SaveResult result = m_document->saveAs(directory);
+    updateSheets();  // relative to the new folder
     updateTitle();
     return result;
 }
@@ -420,13 +550,20 @@ void MainWindow::updateActions()
     m_redoAction->setEnabled(canRedo);
     m_redoAction->setText(canRedo ? tr("&Redo %1").arg(commands->redoText()) : tr("&Redo"));
 
-    const QStringList scenes = open ? m_flowScene->selectedSceneIds() : QStringList();
-    const QStringList transitions = open ? m_flowScene->selectedTransitionIds() : QStringList();
-    m_deleteAction->setEnabled(!scenes.isEmpty() || !transitions.isEmpty());
+    const bool flow = open && !currentSceneView();
+    m_addSceneAction->setEnabled(flow);
+    const QStringList scenes = flow ? m_flowScene->selectedSceneIds() : QStringList();
+    const QStringList transitions = flow ? m_flowScene->selectedTransitionIds() : QStringList();
     const bool oneScene = scenes.size() == 1 && transitions.isEmpty();
     m_renameSceneAction->setEnabled(oneScene);
     m_startSceneAction->setEnabled(oneScene &&
                                    m_document->project().manifest.start != scenes.first());
+    if (SceneView* view = currentSceneView()) {
+        m_deleteAction->setEnabled(!view->canvas().selectedPaths().isEmpty());
+    }
+    else {
+        m_deleteAction->setEnabled(!scenes.isEmpty() || !transitions.isEmpty());
+    }
 }
 
 void MainWindow::showAbout()

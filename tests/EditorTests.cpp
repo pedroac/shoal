@@ -1,6 +1,7 @@
 #include <QAction>
 #include <QLabel>
 #include <QMenuBar>
+#include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -78,7 +79,8 @@ private slots:
         MainWindow window;
         QCOMPARE(window.openProject(dir.path()), QList<FileError>());
         QVERIFY(window.document());
-        QCOMPARE(window.centralWidget(), static_cast<QWidget*>(window.flowView()));
+        QCOMPARE(window.centralWidget(), static_cast<QWidget*>(window.tabs()));
+        QCOMPARE(window.tabs()->widget(0), static_cast<QWidget*>(window.flowView()));
         QCOMPARE(window.windowTitle(), QStringLiteral("Fixture Game[*] — Shoal"));
         QVERIFY(!window.isWindowModified());
         QVERIFY(action(window, "saveAction")->isEnabled());

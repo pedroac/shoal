@@ -571,6 +571,23 @@ element's parent is the viewport, or the safe area.
 - **Scene view (micro):** the canvas, with layers, a hierarchy tree, an inspector,
   a sprat sheet browser (drag sprites onto the canvas), selection and
   move/rotate/scale gizmos, a grid and snapping.
+  - Each open scene has a tab next to the flow's; double-clicking a scene node
+    opens it. Tabs follow renames and close when their scene is removed.
+  - Entities draw relative to their parent. **Flips mirror only the entity's own
+    drawing**, as in sprat, not its children.
+  - Regions, cameras and paths exist only in the editor, so on the canvas they sit
+    under what the game draws, whatever their order in the file; a room-sized
+    region would otherwise catch every click.
+  - The scene tree lists layers back to front, each with its entities. Dropping an
+    entity on another makes it a child; above or below, a sibling; on a layer, a
+    top-level entity drawn in front of that layer's others. A drop is one undo step.
+  - Hiding and locking layers, the current layer (where new entities go) and the
+    grid are editor state: they never modify the project. They are kept in memory
+    for now and will move to `.shoal/session.json`.
+  - A drag is one undo step. Snapping rounds to the grid (16 units); Alt drags
+    freely. Arrow keys nudge by a unit, or a grid cell when snapping, ten with
+    Shift.
+  - Screen-space layers are listed but not drawn until the UI layout step.
 - **Transition editor:** trigger and requirements, the effect and its parameters,
   the persisted state, and the mapping of entities to marks.
 - **Modifier editor:** the host scene's canvas with the action list underneath.

@@ -4,8 +4,6 @@
 #include <QInputDialog>
 #include <QMenu>
 #include <QMessageBox>
-#include <QScrollBar>
-#include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
 
@@ -18,77 +16,12 @@
 namespace shoal::editor {
 
 namespace {
-constexpr double MIN_ZOOM = 0.1;
-constexpr double MAX_ZOOM = 4;
-constexpr double ZOOM_STEP = 1.25;
-constexpr double WHEEL_ZOOM_BASE = 1.0015;  ///< Per eighth of a degree of wheel rotation.
-constexpr double FIT_MARGIN = 40;
 constexpr double NEW_SCENE_NUDGE = 24;
 }  // namespace
 
 FlowView::FlowView(FlowScene& flowScene, QWidget* parent)
-    : QGraphicsView(&flowScene, parent), m_flowScene(flowScene)
+    : CanvasView(&flowScene, parent), m_flowScene(flowScene)
 {
-    setRenderHint(QPainter::Antialiasing);
-    setDragMode(RubberBandDrag);
-    setTransformationAnchor(AnchorUnderMouse);
-    setResizeAnchor(AnchorViewCenter);
-
-    // Room to drag and pan past the nodes, without jumping when content shrinks.
-    connect(&m_flowScene, &QGraphicsScene::changed, this, [this] {
-        const QRectF visible = mapToScene(viewport()->rect()).boundingRect();
-        const QRectF content = m_flowScene.itemsBoundingRect().adjusted(
-            -visible.width(), -visible.height(), visible.width(), visible.height());
-        const QRectF rect = content.united(visible);
-        if (rect != sceneRect()) {
-            setSceneRect(rect);
-        }
-    });
-}
-
-double FlowView::zoom() const
-{
-    return transform().m11();
-}
-
-void FlowView::setZoom(double zoom)
-{
-    const double clamped = std::clamp(zoom, MIN_ZOOM, MAX_ZOOM);
-    const double factor = clamped / this->zoom();
-    scale(factor, factor);
-}
-
-void FlowView::zoomIn()
-{
-    setZoom(zoom() * ZOOM_STEP);
-}
-
-void FlowView::zoomOut()
-{
-    setZoom(zoom() / ZOOM_STEP);
-}
-
-void FlowView::resetZoom()
-{
-    setZoom(1);
-}
-
-void FlowView::fitAll()
-{
-    const QRectF content = m_flowScene.itemsBoundingRect();
-    if (content.isEmpty()) {
-        resetZoom();
-        return;
-    }
-    fitInView(content.adjusted(-FIT_MARGIN, -FIT_MARGIN, FIT_MARGIN, FIT_MARGIN),
-              Qt::KeepAspectRatio);
-    if (zoom() > 1) {  // a small graph is shown at its size, not blown up
-        resetZoom();
-    }
-    else if (zoom() < MIN_ZOOM) {
-        setZoom(MIN_ZOOM);
-    }
-    centerOn(content.center());
 }
 
 void FlowView::addScene()
@@ -148,53 +81,6 @@ void FlowView::promptRename(const QString& sceneId)
                      "underscores or hyphens.");
         QMessageBox::warning(this, tr("Rename Scene"), reason);
     }
-}
-
-void FlowView::wheelEvent(QWheelEvent* event)
-{
-    if (event->modifiers() & Qt::ControlModifier) {
-        setZoom(zoom() * std::pow(WHEEL_ZOOM_BASE, event->angleDelta().y()));
-        event->accept();
-        return;
-    }
-    QGraphicsView::wheelEvent(event);
-}
-
-void FlowView::mousePressEvent(QMouseEvent* event)
-{
-    if (event->button() == Qt::MiddleButton) {
-        m_panning = true;
-        m_panFrom = event->position().toPoint();
-        viewport()->setCursor(Qt::ClosedHandCursor);
-        event->accept();
-        return;
-    }
-    QGraphicsView::mousePressEvent(event);
-}
-
-void FlowView::mouseMoveEvent(QMouseEvent* event)
-{
-    if (m_panning) {
-        const QPoint position = event->position().toPoint();
-        const QPoint delta = position - m_panFrom;
-        m_panFrom = position;
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
-        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
-        event->accept();
-        return;
-    }
-    QGraphicsView::mouseMoveEvent(event);
-}
-
-void FlowView::mouseReleaseEvent(QMouseEvent* event)
-{
-    if (m_panning && event->button() == Qt::MiddleButton) {
-        m_panning = false;
-        viewport()->unsetCursor();
-        event->accept();
-        return;
-    }
-    QGraphicsView::mouseReleaseEvent(event);
 }
 
 void FlowView::contextMenuEvent(QContextMenuEvent* event)
