@@ -1,0 +1,13 @@
+# Build output
+build*/
+compile_commands.json
+.cache/
+
+# Qt Creator and IDEs
+CMakeLists.txt.user*
+.qtcreator/
+.vscode/
+.idea/
+
+# Per-user Shoal state inside example projects
+.shoal/

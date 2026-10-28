@@ -1,0 +1,74 @@
+# AGENTS.md
+
+Guidance for AI agents (and humans) working on **Shoal**.
+
+## Purpose
+
+Shoal is a visual scene graph and scene flow editor for custom game engines, part of
+the Sprat ecosystem. It is **declarative, not a game engine**: Shoal is the Set
+Designer that declares *where*, *what* and *when*, and the engine reading its export
+is the Director that decides *how*.
+
+`docs/DESIGN.md` is the specification. Read it before changing the model, the file
+formats or the editor's behavior, and update it in the same commit when a decision
+changes.
+
+## Priorities
+
+1. **Never lose or corrupt a user's project.** Loading tolerates bad input with a
+   clear message; saving is deterministic, so an unchanged project saves to the same
+   bytes.
+2. **Keep the export simple for engines.** Resolve what the editor can resolve at
+   export time. Don't add anything that needs an expression evaluator or runtime
+   measurement in the engine.
+3. **Stay portable.** It must build with GCC, Clang and MSVC, on Linux, Windows and
+   macOS, with Qt 6.5 or later.
+
+## Code layout
+
+- `src/core/`: the model, commands, files, validation and export. **QtCore only**;
+  never include Gui or Widgets headers here, so core stays testable headless.
+- `src/assets/`: sprat sheets and atlases, through sprat-lib. The only place that
+  includes `<sprat/sprat.h>`.
+- `src/editor/`: the Qt Widgets application, built as a library (`shoal_editor`)
+  so tests can create its windows. `main.cpp` is the executable's only source.
+- `tests/`: one Qt Test executable per area, registered with CTest and run on the
+  offscreen platform.
+- `docs/`: the design specification, and the file format specifications as they
+  are written.
+
+## Dependencies
+
+- **Qt 6** (Core, Gui, Widgets, Test).
+- **sprat-lib** through `FetchContent`, pinned to a commit in `CMakeLists.txt`. To
+  build against a local checkout, pass `-DFETCHCONTENT_SOURCE_DIR_SPRAT=../sprat-lib`.
+  Follow its "load, bind, convert, free" pattern: copy what the editor needs out of a
+  sheet, then free it.
+
+## Coding practices
+
+- C++20. Namespaces follow the folders: `shoal::core`, `shoal::assets`,
+  `shoal::editor`.
+- Qt conventions: `m_` prefix for members, `UPPER_CASE` constants, signals named
+  `<property>Changed()`, slots named `on<Signal>()` or `handle<Event>()`.
+- Files are named after the class they hold, in PascalCase, with `#pragma once`.
+- Every model change goes through an undo command.
+- Format with the repository's `.clang-format`.
+- Keep the build warning-free with `-Wall -Wextra -Wpedantic -Wshadow -Wconversion`
+  (`/W4` on MSVC).
+
+## Build and test
+
+```sh
+cmake -S . -B build -DBUILD_TESTING=ON -DSHOAL_SANITIZE=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+Add or update tests for every behavior change or bug fix.
+
+## Versioning and commits
+
+- Update `VERSION` (`vMAJOR.MINOR.PATCH`) in the same commit as the change.
+- Commit messages: `feat: ...`, `fix: ...`, `docs: ...`, `test: ...`, `refactor: ...`.
+- Never commit build output.
