@@ -36,7 +36,7 @@ Designer, and the engine that reads its files is the Director. Shoal declares
 | Part | Choice |
 |---|---|
 | Editor | Qt 6 Widgets, `QGraphicsView` for the flow graph and the scene canvas, C++20, CMake |
-| Undo | `QUndoStack`; every model change is a command |
+| Undo | `core::CommandStack`, modeled on `QUndoStack` (which is in QtGui, while core uses QtCore only); every model change is a command |
 | Sprites | [sprat-lib](https://github.com/pedroac/sprat-lib) through `FetchContent`, pinned to a commit, with `-DFETCHCONTENT_SOURCE_DIR_SPRAT=../sprat-lib` for local work (as sprat-raylib does) |
 | Runtime loader (after v1) | `shoal-lib`, C99, no dependencies, modeled on sprat-lib |
 
@@ -145,15 +145,43 @@ tooltips and autocompletes from them.
 ### Writing files
 
 - **Deterministic.** Shoal writes its own JSON, not `QJsonDocument` (which sorts
-  keys): a fixed key order per object type (`id`, `type`, `classes` first), arrays
-  in their meaningful order (z-order), 2-space indent, a trailing newline, and
-  numbers in their shortest round-trip form. Saving an unchanged project changes
-  no bytes.
+  keys): a fixed key order per object type (`format` and `version` first, then
+  `id`, `type`, `classes`, ...), arrays in their meaningful order (z-order),
+  2-space indent, `\n` line endings, a trailing newline, UTF-8 without escaping
+  non-ASCII text, and numbers in their shortest round-trip form. Arrays of scalars
+  are written on one line (`"pos": [320, 640]`), other arrays one element per
+  line. Saving an unchanged project changes no bytes, and touches no files.
+- **Short scene files.** In scenes and modifiers, a value equal to its default is
+  left out (`active: true`, `rot: 0`, `parallax: [1, 1]`, an empty `classes`).
+  Settings files (the manifest) write every value, so they document themselves.
 - **Merge-friendly.** Unordered collections, such as transitions and state keys,
-  are written sorted by id.
+  are written sorted by id, and maps sorted by key.
+- **Nothing is lost.** Keys the model doesn't know are kept and written back, after
+  the known ones, sorted. This keeps hand-added annotations, and lets data the
+  editor doesn't model yet (sprite references, shapes, camera settings, layouts,
+  modifier actions) round-trip until the roadmap step that models it.
 - **Versioned.** Every file has `format` and `version`. The editor migrates older
   versions on load and refuses newer ones with a clear message. Migrations are
   tested with fixture files.
+
+### Reading files
+
+- **A file fails to load only when the model can't represent it:** bad JSON, wrong
+  types, unknown enum values, invalid ids, transitions whose fields contradict their
+  mode, unsupported versions. Messages name the value at fault by its path, quote
+  what was found and say what was expected, like sprat-lib's:
+  `scenes/level_1/scene.json: entities[2].transform.flip: expected [horizontal, vertical], each true or false, found an array`.
+  Syntax errors carry a line and column.
+- **References that don't resolve still load**, such as a transition to a missing
+  scene or an entity on a missing layer. They are the Problems panel's to report,
+  so a hand edit never locks a user out of their project.
+- Each broken file is reported; a project opens only when every file reads.
+- `project.shoal.json` and `flow.json` are required; `classes.json` and `presets/`
+  are optional. A modifier whose scene folder has no `scene.json` is an error.
+- **Saving removes only what Shoal loaded or wrote before**, when the project no
+  longer has it (a deleted or renamed scene, for example), along with folders left
+  empty. Other files in the project folder, such as art or notes, are never
+  touched. Each file is written atomically.
 
 ## 6. Flow
 
@@ -244,7 +272,7 @@ The flow is a **stack** of scenes. Transitions change it in one of four ways:
 | `visible` | Default `true` |
 | `transform` | World layers: `pos`, `rot`, `scale`, `flip` |
 | `layout` | Screen layers: anchors and offsets (section 11) |
-| `props` | Typed custom key-values the engine reads (`bool`, `int`, `float`, `string`, `point`, `color`) |
+| `props` | Custom key-values the engine reads; typed (`bool`, `int`, `float`, `string`, `point`, `color`) once the open question on prop types is settled |
 | `children` | Child entities, with transforms relative to the parent |
 
 | `type` | Contents |
@@ -323,6 +351,8 @@ the typical blocking modifier; an ambient earthquake is a typical background one
 - `blocking: true` suspends the host's gameplay while the modifier drives; the scene
   still renders. `blocking: false` runs in the background alongside gameplay.
 - `skippable: true` lets the engine skip to the end.
+- When left out, `blocking` is `true` and `skippable` is `false`; Shoal always
+  writes both.
 - `priority` is a hint for the engine's conflict resolution.
 - **Action lists** are blocks: `seq` runs its children in order, `par` runs them
   together and ends when the last one ends. Blocks nest. Keyframe tracks may come
@@ -480,8 +510,18 @@ element's parent is the viewport, or the safe area.
   Camera, and projects add their own in `presets/`.
 - **Linked prefabs are out of scope**: they need tree diffing and cross-file
   reference tracking, which conflicts with simple export structures.
-- **Project templates** set manifest defaults and presets for a new project, for
-  example "Default" (`expand`) and "Pixel Art" (`letterbox`, `integer_scale`).
+- **Project templates** set manifest defaults and presets for a new project:
+  "Default" (1920×1080, `expand`) and "Pixel Art" (640×360, `letterbox`,
+  `integer_scale`).
+- **A new project** has one scene, `main`, as its start scene, and a
+  `classes.json` declaring the classes the built-in presets use (`camera_bounds`,
+  `main`, `spawn`, `trigger`).
+- **A new scene** is the size of the design resolution, with a `world` layer
+  (world space), a `hud` layer (screen space), and `#camera` tagged `.main` at its
+  center.
+- **Preset files** start with `"format": "shoal-preset"` and a `version`, like
+  every source file; the rest is kept as written until the preset editor defines
+  it.
 
 ## 13. The editor
 
@@ -615,6 +655,10 @@ tracks, a command-line exporter, a WASM build, zipped projects.
 
 ## 18. Open questions
 
+- **Typed props:** a number written as `4.0` reads back as `4`, so JSON alone can't
+  keep an `int` prop apart from a `float` one. Props are kept as written until this
+  is decided: declare prop types somewhere (per class, or per prop as
+  `{ "float": 4 }`), or write float props always with a decimal point.
 - **Text:** literal strings, localization keys, or both? How are fonts referenced?
 - **Audio:** stage-direction cues (`cue("door_creak")`) that the engine maps to
   files, or no audio in v1?

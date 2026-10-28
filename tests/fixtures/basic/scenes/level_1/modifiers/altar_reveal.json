@@ -1,0 +1,39 @@
+{
+  "format": "shoal-modifier",
+  "version": 1,
+  "blocking": true,
+  "skippable": true,
+  "on_end": {
+    "mode": "restore",
+    "blend_ms": 600
+  },
+  "actions": {
+    "seq": [
+      {
+        "do": "unfollow",
+        "target": "#camera"
+      },
+      {
+        "par": [
+          {
+            "do": "pan_to",
+            "duration_ms": 2000,
+            "easing": "ease_in_out",
+            "target": "#camera",
+            "to": "#mark_altar"
+          },
+          {
+            "do": "move_to",
+            "duration_ms": 2000,
+            "target": "#hero",
+            "to": "#mark_altar_front"
+          }
+        ]
+      },
+      {
+        "do": "emit",
+        "event": "altar_revealed"
+      }
+    ]
+  }
+}

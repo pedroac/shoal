@@ -1,0 +1,106 @@
+{
+  "format": "shoal-scene",
+  "version": 1,
+  "size": [3840, 1080],
+  "layers": [
+    {
+      "id": "bg",
+      "space": "world",
+      "parallax": [0.5, 0.5]
+    },
+    {
+      "id": "world",
+      "space": "world"
+    },
+    {
+      "id": "hud",
+      "space": "screen"
+    }
+  ],
+  "entities": [
+    {
+      "id": "camera",
+      "type": "camera",
+      "layer": "world",
+      "classes": ["main"],
+      "transform": {
+        "pos": [960, 540]
+      },
+      "bounds": ".camera_bounds"
+    },
+    {
+      "id": "player",
+      "type": "sprite",
+      "layer": "world",
+      "classes": ["actor"],
+      "transform": {
+        "pos": [320, 640],
+        "flip": [true, false]
+      },
+      "props": {
+        "speed": 4.5
+      },
+      "sprite": {
+        "path": "hero/idle.png",
+        "sheet": "hero"
+      }
+    },
+    {
+      "type": "sprite",
+      "layer": "bg",
+      "transform": {
+        "pos": [700.25, 650],
+        "rot": -12.5,
+        "scale": [2, 2]
+      },
+      "sprite": {
+        "path": "props/bush.png",
+        "sheet": "hero"
+      }
+    },
+    {
+      "id": "altar_group",
+      "type": "group",
+      "layer": "world",
+      "transform": {
+        "pos": [2400, 600]
+      },
+      "children": [
+        {
+          "id": "mark_altar",
+          "type": "mark"
+        },
+        {
+          "id": "mark_altar_front",
+          "type": "mark",
+          "transform": {
+            "pos": [0, 80]
+          }
+        }
+      ]
+    },
+    {
+      "id": "secret_door",
+      "type": "sprite",
+      "layer": "world",
+      "active": false,
+      "visible": false,
+      "transform": {
+        "pos": [2600, 640]
+      },
+      "sprite": {
+        "path": "props/door.png",
+        "sheet": "hero"
+      }
+    },
+    {
+      "id": "room_1_bounds",
+      "type": "region",
+      "layer": "world",
+      "classes": ["camera_bounds"],
+      "shape": {
+        "rect": [0, 0, 1920, 1080]
+      }
+    }
+  ]
+}

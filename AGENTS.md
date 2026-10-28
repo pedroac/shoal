@@ -28,12 +28,24 @@ changes.
 
 - `src/core/`: the model, commands, files, validation and export. **QtCore only**;
   never include Gui or Widgets headers here, so core stays testable headless.
+  - `Model.h`: plain value types mirroring the source files; unmodeled keys live in
+    each object's `extras`, so they survive a save.
+  - `JsonReader` / `JsonWriter`: path-named format errors, and the canonical writer.
+  - `ProjectCodec`: files to model and back, pure (no disk access). `ProjectStore`:
+    the disk side, atomic writes, skipping unchanged files, removing stale ones.
+  - `CommandStack`: undo history, like `QUndoStack` (which is in QtGui).
+    `ProjectDocument`: the open project, its mutators and change signals.
+    `FlowCommands`: the commands that change scenes and transitions.
+  - `ProjectTemplates`: new projects and scenes.
 - `src/assets/`: sprat sheets and atlases, through sprat-lib. The only place that
   includes `<sprat/sprat.h>`.
 - `src/editor/`: the Qt Widgets application, built as a library (`shoal_editor`)
   so tests can create its windows. `main.cpp` is the executable's only source.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the
-  offscreen platform.
+  offscreen platform. `tests/fixtures/basic/` is a project in canonical form: loading
+  and saving it must reproduce every byte, so a change to the writer or the format
+  shows up there. A new or changed error message goes in `ProjectCodecTests`' table,
+  exactly.
 - `docs/`: the design specification, and the file format specifications as they
   are written.
 

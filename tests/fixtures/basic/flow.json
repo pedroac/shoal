@@ -1,0 +1,85 @@
+{
+  "format": "shoal-flow",
+  "version": 1,
+  "state": [
+    {
+      "key": "inventory",
+      "doc": "Carried between levels"
+    },
+    {
+      "key": "player.hp"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "l1_altar",
+      "from": "level_1",
+      "mode": "push_modifier",
+      "modifier": "altar_reveal",
+      "trigger": {
+        "event": "altar_reached"
+      }
+    },
+    {
+      "id": "l1_pause",
+      "from": "level_1",
+      "to": "pause",
+      "mode": "push",
+      "underlying": "paused",
+      "trigger": {
+        "event": "pause_pressed"
+      }
+    },
+    {
+      "id": "l1_to_l2",
+      "from": "level_1",
+      "to": "level_2",
+      "mode": "replace",
+      "trigger": {
+        "event": "door_west_entered",
+        "requires": ["has_key"]
+      },
+      "effect": {
+        "type": "fade",
+        "duration_ms": 400,
+        "easing": "ease_out",
+        "params": {
+          "color": "#000000"
+        }
+      },
+      "persist": {
+        "state": ["player.hp", "inventory"],
+        "entities": {
+          "player": "spawn_west_door"
+        }
+      }
+    },
+    {
+      "id": "menu_start",
+      "from": "main_menu",
+      "to": "level_1",
+      "mode": "replace",
+      "trigger": {
+        "event": "start_pressed"
+      }
+    },
+    {
+      "id": "pause_close",
+      "from": "pause",
+      "mode": "pop",
+      "trigger": {
+        "event": "resume_pressed"
+      }
+    }
+  ],
+  "editor": {
+    "nodes": {
+      "level_1": [480, 80],
+      "level_2": [840, 80],
+      "main_menu": [120, 80],
+      "pause": [480, 300.5]
+    },
+    "zoom_hint": 1
+  },
+  "x_engine_note": "kept as written"
+}

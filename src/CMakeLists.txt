@@ -1,5 +1,23 @@
 # core: the model, files, validation and export. QtCore only, so it is tested headless.
 add_library(shoal_core STATIC
+    core/CommandStack.cpp
+    core/CommandStack.h
+    core/FlowCommands.cpp
+    core/FlowCommands.h
+    core/JsonReader.cpp
+    core/JsonReader.h
+    core/JsonWriter.cpp
+    core/JsonWriter.h
+    core/Model.cpp
+    core/Model.h
+    core/ProjectCodec.cpp
+    core/ProjectCodec.h
+    core/ProjectDocument.cpp
+    core/ProjectDocument.h
+    core/ProjectStore.cpp
+    core/ProjectStore.h
+    core/ProjectTemplates.cpp
+    core/ProjectTemplates.h
     core/Version.cpp
     core/Version.h
 )

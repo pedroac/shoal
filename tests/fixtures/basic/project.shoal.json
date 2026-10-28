@@ -1,0 +1,18 @@
+{
+  "format": "shoal-project",
+  "version": 1,
+  "name": "Fixture Game",
+  "design_resolution": [1920, 1080],
+  "fit": "expand",
+  "integer_scale": false,
+  "start": "main_menu",
+  "sheets": {
+    "hero": "art/hero.sprat",
+    "ui": "art/ui.sprat"
+  },
+  "export": {
+    "dir": "export",
+    "targets": ["raw", "json"],
+    "bundle": false
+  }
+}
