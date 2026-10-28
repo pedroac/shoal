@@ -67,6 +67,10 @@ add_library(shoal_editor STATIC
     editor/SceneView.h
     editor/SceneNodeItem.cpp
     editor/SceneNodeItem.h
+    editor/SheetBrowserPanel.cpp
+    editor/SheetBrowserPanel.h
+    editor/SheetItem.cpp
+    editor/SheetItem.h
     editor/TransformHandle.cpp
     editor/TransformHandle.h
     editor/TransitionEdgeItem.cpp

@@ -1,4 +1,8 @@
 #include <QAction>
+#include <QDropEvent>
+#include <QLineEdit>
+#include <QMimeData>
+#include <QStatusBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -15,6 +19,7 @@
 #include "editor/SceneCanvas.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
+#include "editor/SheetBrowserPanel.h"
 #include "editor/TransformHandle.h"
 
 using namespace shoal::core;
@@ -23,6 +28,10 @@ using namespace shoal::editor;
 namespace {
 
 const QString LEVEL_1 = QStringLiteral("level_1");
+const SheetItem IDLE_SPRITE{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+                            QStringLiteral("hero/idle.png")};
+const SheetItem IDLE_ANIMATION{SheetItem::Kind::Animation, QStringLiteral("hero"),
+                               QStringLiteral("idle")};
 
 QByteArray readFile(const QString& path)
 {
@@ -64,6 +73,29 @@ struct Fixture {
         QTest::mouseMove(view->viewport(), from + (to - from) / 2);
         QTest::mouseMove(view->viewport(), to);
         QTest::mouseRelease(view->viewport(), Qt::LeftButton, {}, to);
+    }
+
+    /// Drags `item` from the sheet browser over the view and drops it at `at`; returns
+    /// whether the view accepted the drop. QDrag::exec() runs its own event loop, so the
+    /// events are sent as it would send them.
+    bool dropOnView(const SheetItem& item, QPoint point)
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+        const QPointF at(point);  // the QPoint constructors are deprecated
+#else
+        const QPoint at = point;
+#endif
+        const std::unique_ptr<QMimeData> data(item.toMimeData());
+        QDragEnterEvent enter(at, Qt::CopyAction, data.get(), Qt::LeftButton, {});
+        QApplication::sendEvent(view->viewport(), &enter);
+        if (!enter.isAccepted()) {
+            return false;
+        }
+        QDragMoveEvent move(at, Qt::CopyAction, data.get(), Qt::LeftButton, {});
+        QApplication::sendEvent(view->viewport(), &move);
+        QDropEvent drop(at, Qt::CopyAction, data.get(), Qt::LeftButton, {});
+        QApplication::sendEvent(view->viewport(), &drop);
+        return drop.isAccepted();
     }
 };
 
@@ -344,6 +376,153 @@ private slots:
         QVERIFY(file.open(QIODevice::WriteOnly) && file.write(sheet) == sheet.size());
         file.close();
         QTRY_COMPARE(f.canvas().item({2})->visualRect(), before.translated(0, 8));
+    }
+
+    void theSheetBrowserListsSpritesAndAnimations()
+    {
+        Fixture f;
+        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        QTreeWidgetItem* hero = browser->sheetRow(QStringLiteral("hero"));
+        QVERIFY(hero);
+        QCOMPARE(hero->childCount(), 2);
+        QCOMPARE(hero->child(0)->text(0), QStringLiteral("Sprites (4)"));
+        QCOMPARE(hero->child(1)->text(0), QStringLiteral("Animations (1)"));
+        // In the sheet's order, by path, each with a thumbnail.
+        QCOMPARE(hero->child(0)->child(2)->text(0), QStringLiteral("props/door.png"));
+        QTreeWidgetItem* idle = browser->itemRow(IDLE_SPRITE);
+        QVERIFY(idle);
+        QVERIFY(!idle->icon(0).isNull());
+        QCOMPARE(SheetBrowserPanel::itemOf(idle), IDLE_SPRITE);
+        QVERIFY(browser->itemRow(IDLE_ANIMATION));
+        QVERIFY(!SheetBrowserPanel::itemOf(hero));
+
+        // The manifest declares a ui sheet that isn't there: it says why.
+        QTreeWidgetItem* ui = browser->sheetRow(QStringLiteral("ui"));
+        QVERIFY(ui);
+        QCOMPARE(ui->text(0), QStringLiteral("ui (not loaded)"));
+        QCOMPARE(ui->childCount(), 0);
+        QVERIFY(ui->toolTip(0).startsWith(QStringLiteral("Couldn't load: ")));
+
+        // A drag carries the sprite, not the sheet.
+        const std::unique_ptr<QMimeData> data(
+            browser->tree()->model()->mimeData({browser->tree()->indexFromItem(idle)}));
+        QCOMPARE(SheetItem::fromMimeData(data.get()), IDLE_SPRITE);
+    }
+
+    void theSheetBrowserFilters()
+    {
+        Fixture f;
+        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        browser->setFilter(QStringLiteral("DOOR"));
+        const auto door = SheetItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+                                    QStringLiteral("props/door.png")};
+        QVERIFY(!browser->itemRow(door)->isHidden());
+        QVERIFY(browser->itemRow(IDLE_SPRITE)->isHidden());
+        QVERIFY(browser->sheetRow(QStringLiteral("hero"))->child(1)->isHidden());  // animations
+        QVERIFY(browser->sheetRow(QStringLiteral("ui"))->isHidden());
+        browser->findChild<QLineEdit*>(QStringLiteral("sheetFilter"))->clear();
+        QVERIFY(!browser->itemRow(IDLE_SPRITE)->isHidden());
+    }
+
+    void theSheetBrowserFollowsTheSheets()
+    {
+        Fixture f;
+        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        // A sheet written again by sprat: the bush is renamed, keeping the string total.
+        QByteArray sheet = readFile(f.dir.filePath(QStringLiteral("art/hero.sprat")));
+        QVERIFY(sheet.contains("props/bush.png"));
+        sheet.replace("props/bush.png", "props/tree.png");
+        QFile file(f.dir.filePath(QStringLiteral("art/hero.sprat")));
+        QVERIFY(file.open(QIODevice::WriteOnly) && file.write(sheet) == sheet.size());
+        file.close();
+        const auto tree = SheetItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+                                    QStringLiteral("props/tree.png")};
+        QTRY_VERIFY(browser->itemRow(tree));
+        QVERIFY(!browser->itemRow(SheetItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+                                            QStringLiteral("props/bush.png")}));
+
+        // Closing the project empties it.
+        f.window.setDocument(nullptr);
+        QCOMPARE(browser->tree()->topLevelItemCount(), 0);
+    }
+
+    void droppingASpritePlacesItWhereTheCursorIs()
+    {
+        Fixture f;
+        f.view->zoomIn();  // the drop point is mapped through the zoom and the pan
+        QVERIFY(f.view->zoom() > 1);
+        f.view->centerOn(500, 500);
+        const QPointF where(520, 488);
+        QVERIFY(f.dropOnView(IDLE_SPRITE, f.at(where)));
+
+        QCOMPARE(f.document().commands().count(), 1);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Add sprite"));
+        const EntityPath path{int(f.scene().entities.size()) - 1};
+        const Entity* added = entityAt(f.scene(), path);
+        QCOMPARE(added->type, EntityType::Sprite);
+        QCOMPARE(added->sprite->sheet, QStringLiteral("hero"));
+        QCOMPARE(added->sprite->path, QStringLiteral("hero/idle.png"));
+        QCOMPARE(added->layer, f.canvas().currentLayer());
+        QVERIFY(std::abs(added->transform.pos.x - where.x()) <= 0.5);
+        QVERIFY(std::abs(added->transform.pos.y - where.y()) <= 0.5);
+        // Selected, and in the scene tree.
+        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{path});
+        QVERIFY(f.window.sceneTreePanel()->entityRow(path));
+        QVERIFY(f.window.sceneTreePanel()->entityRow(path)->isSelected());
+
+        f.document().commands().undo();
+        QVERIFY(!entityAt(f.scene(), path));
+        QVERIFY(!f.window.sceneTreePanel()->entityRow(path));
+        f.document().commands().redo();
+        QVERIFY(f.window.sceneTreePanel()->entityRow(path));
+    }
+
+    void dropsSnapToTheGrid()
+    {
+        Fixture f;
+        f.canvas().setSnapping(true);
+        QVERIFY(f.dropOnView(IDLE_ANIMATION, f.at(QPointF(357, 653))));
+        const Entity& added = f.scene().entities.back();
+        QCOMPARE(added.type, EntityType::Animation);
+        QCOMPARE(added.animation->name, QStringLiteral("idle"));
+        QCOMPARE(added.transform.pos, (Point{352, 656}));
+    }
+
+    void aHiddenOrLockedLayerRefusesDrops()
+    {
+        Fixture f;
+        const QString layer = f.canvas().currentLayer();
+        f.canvas().setLayerLocked(layer, true);
+        QVERIFY(!f.dropOnView(IDLE_SPRITE, f.at(QPointF(320, 600))));
+        f.canvas().setLayerLocked(layer, false);
+        f.canvas().setLayerHidden(layer, true);
+        QVERIFY(!f.dropOnView(IDLE_SPRITE, f.at(QPointF(320, 600))));
+        QCOMPARE(f.document().commands().count(), 0);
+
+        // Something else dropped is left to the view.
+        QMimeData text;
+        text.setText(QStringLiteral("hero/idle.png"));
+        QDropEvent drop(f.at(QPointF(320, 600)), Qt::CopyAction, &text, Qt::LeftButton, {});
+        QApplication::sendEvent(f.view->viewport(), &drop);
+        QCOMPARE(f.document().commands().count(), 0);
+    }
+
+    void activatingARowPlacesItInTheMiddleOfTheView()
+    {
+        Fixture f;
+        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        emit browser->tree()->itemActivated(browser->itemRow(IDLE_ANIMATION), 0);
+        QCOMPARE(f.document().commands().count(), 1);
+        const Entity& added = f.scene().entities.back();
+        QCOMPARE(added.type, EntityType::Animation);
+        const QPointF middle = f.view->mapToScene(f.view->viewport()->rect().center());
+        QCOMPARE(added.transform.pos, (Point{middle.x(), middle.y()}));
+
+        // With the flow tab current there is nowhere to put it.
+        f.window.tabs()->setCurrentIndex(0);
+        emit browser->tree()->itemActivated(browser->itemRow(IDLE_SPRITE), 0);
+        QCOMPARE(f.document().commands().count(), 1);
+        QVERIFY(f.window.statusBar()->currentMessage().startsWith(QStringLiteral("Open a scene")));
     }
 };
 

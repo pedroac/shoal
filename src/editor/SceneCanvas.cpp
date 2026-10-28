@@ -196,10 +196,17 @@ QPointF SceneCanvas::snap(QPointF point) const
 
 // --- edits ---
 
+bool SceneCanvas::canAddEntities() const
+{
+    const core::Scene* current = scene();
+    return current && core::layerIndex(*current, m_currentLayer) >= 0 &&
+           !isLayerHidden(m_currentLayer) && !isLayerLocked(m_currentLayer);
+}
+
 EntityPath SceneCanvas::addEntity(Entity entity, QPointF scenePosition)
 {
     const core::Scene* current = scene();
-    if (!current || core::layerIndex(*current, m_currentLayer) < 0) {
+    if (!canAddEntities()) {
         return {};
     }
     const QPointF at = snap(scenePosition);

@@ -1,6 +1,8 @@
 #include "editor/SceneView.h"
 
+#include <QDropEvent>
 #include <QKeyEvent>
+#include <QMimeData>
 #include <QPainter>
 #include <cmath>
 
@@ -26,6 +28,20 @@ SceneView::SceneView(core::ProjectDocument& document, assets::SheetCache& sheets
 SceneView::~SceneView()
 {
     setScene(nullptr);
+}
+
+core::EntityPath SceneView::place(const SheetItem& item, QPointF scenePosition)
+{
+    const core::EntityPath path = m_canvas->addEntity(item.toEntity(), scenePosition);
+    if (!path.isEmpty()) {
+        setFocus();  // so Delete and the arrow keys reach the new entity
+    }
+    return path;
+}
+
+core::EntityPath SceneView::placeAtCenter(const SheetItem& item)
+{
+    return place(item, mapToScene(viewport()->rect().center()));
 }
 
 QRectF SceneView::contentRect() const
@@ -85,6 +101,52 @@ void SceneView::keyPressEvent(QKeyEvent* event)
     }
     m_canvas->nudgeSelection(direction * step);
     event->accept();
+}
+
+// --- drops from the sheet browser ---
+
+void SceneView::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (!SheetItem::fromMimeData(event->mimeData())) {
+        CanvasView::dragEnterEvent(event);
+        return;
+    }
+    // Refused on a hidden or locked layer, where the new entity couldn't be seen or picked.
+    if (m_canvas->canAddEntities()) {
+        event->acceptProposedAction();
+    }
+    else {
+        event->ignore();
+    }
+}
+
+void SceneView::dragMoveEvent(QDragMoveEvent* event)
+{
+    if (!SheetItem::fromMimeData(event->mimeData())) {
+        CanvasView::dragMoveEvent(event);
+        return;
+    }
+    if (m_canvas->canAddEntities()) {
+        event->acceptProposedAction();
+    }
+    else {
+        event->ignore();
+    }
+}
+
+void SceneView::dropEvent(QDropEvent* event)
+{
+    const std::optional<SheetItem> item = SheetItem::fromMimeData(event->mimeData());
+    if (!item) {
+        CanvasView::dropEvent(event);
+        return;
+    }
+    // The drop is in viewport pixels; mapToScene() undoes the zoom and the pan.
+    if (place(*item, mapToScene(event->position().toPoint())).isEmpty()) {
+        event->ignore();
+        return;
+    }
+    event->acceptProposedAction();
 }
 
 }  // namespace shoal::editor

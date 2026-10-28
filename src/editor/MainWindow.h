@@ -22,6 +22,8 @@ class FlowScene;
 class FlowView;
 class SceneTreePanel;
 class SceneView;
+class SheetBrowserPanel;
+struct SheetItem;
 
 /// The editor's top-level window: one open project, with the flow view in the first tab
 /// and a tab for each open scene. The docks follow the current scene tab.
@@ -39,6 +41,7 @@ public:
     FlowView* flowView() const { return m_flowView; }
     QTabWidget* tabs() const { return m_tabs; }
     SceneTreePanel* sceneTreePanel() const { return m_sceneTree; }
+    SheetBrowserPanel* sheetBrowser() const { return m_sheetBrowser; }
     assets::SheetCache& sheets() { return m_sheets; }
     /// The current tab's scene view, or null when the flow tab is current.
     SceneView* currentSceneView() const;
@@ -80,6 +83,8 @@ private:
     void onCurrentTabChanged();
     /// Loads the sheets the manifest declares, relative to the project folder.
     void updateSheets();
+    /// Places a sprite or animation from the sheet browser in the current scene's view.
+    void placeSheetItem(const SheetItem& item);
 
     std::unique_ptr<core::ProjectDocument> m_document;
     std::unique_ptr<FlowScene> m_flowScene;
@@ -90,6 +95,8 @@ private:
     QString m_sheetsBase;
     QDockWidget* m_sceneTreeDock = nullptr;
     SceneTreePanel* m_sceneTree = nullptr;
+    QDockWidget* m_sheetBrowserDock = nullptr;
+    SheetBrowserPanel* m_sheetBrowser = nullptr;
 
     QAction* m_newAction = nullptr;
     QAction* m_openAction = nullptr;

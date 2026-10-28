@@ -2,7 +2,9 @@
 
 #include <memory>
 
+#include "core/SceneTree.h"
 #include "editor/CanvasView.h"
+#include "editor/SheetItem.h"
 
 namespace shoal::assets {
 class SheetCache;
@@ -17,6 +19,7 @@ class SceneCanvas;
 
 /// A scene's tab: its canvas, with the scene's rectangle and the grid behind the entities.
 /// Arrow keys nudge the selection by a unit, or a grid cell when snapping (ten with Shift).
+/// Sprites and animations dragged from the sheet browser drop where the cursor is.
 class SceneView : public CanvasView {
     Q_OBJECT
 public:
@@ -26,10 +29,19 @@ public:
 
     SceneCanvas& canvas() const { return *m_canvas; }
 
+    /// Adds a sheet's sprite or animation on the current layer at `scenePosition`, as a
+    /// drop does; one undo step. Empty if the current layer can't take it.
+    core::EntityPath place(const SheetItem& item, QPointF scenePosition);
+    /// Adds it in the middle of what the view shows.
+    core::EntityPath placeAtCenter(const SheetItem& item);
+
 protected:
     QRectF contentRect() const override;
     void drawBackground(QPainter* painter, const QRectF& rect) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     std::unique_ptr<SceneCanvas> m_canvas;

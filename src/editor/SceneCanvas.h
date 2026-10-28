@@ -69,7 +69,11 @@ public:
 
     // --- edits, each one undo step ---
 
+    /// Whether new entities can go on the current layer: it must be shown and unlocked, or
+    /// they couldn't be seen or selected.
+    bool canAddEntities() const;
     /// Adds `entity` at the top level of the current layer, at `scenePosition`; selects it.
+    /// Empty if canAddEntities() is false.
     core::EntityPath addEntity(core::Entity entity, QPointF scenePosition);
     void removeSelection();
     /// Moves the selected entities by `delta`, in their parents' units.

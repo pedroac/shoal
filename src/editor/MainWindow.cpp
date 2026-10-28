@@ -26,6 +26,7 @@
 #include "editor/SceneCanvas.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
+#include "editor/SheetBrowserPanel.h"
 
 namespace shoal::editor {
 
@@ -62,6 +63,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_sceneTreeDock->setObjectName(QStringLiteral("sceneTreeDock"));
     m_sceneTreeDock->setWidget(m_sceneTree);
     addDockWidget(Qt::LeftDockWidgetArea, m_sceneTreeDock);
+    m_sheetBrowser = new SheetBrowserPanel(m_sheets, this);
+    m_sheetBrowserDock = new QDockWidget(tr("Sheets"), this);
+    m_sheetBrowserDock->setObjectName(QStringLiteral("sheetBrowserDock"));
+    m_sheetBrowserDock->setWidget(m_sheetBrowser);
+    addDockWidget(Qt::LeftDockWidgetArea, m_sheetBrowserDock);  // under the scene tree
+    connect(m_sheetBrowser, &SheetBrowserPanel::placeRequested, this, &MainWindow::placeSheetItem);
     createActions();
     createMenus();
     setDocument(nullptr);
@@ -224,6 +231,7 @@ void MainWindow::createMenus()
     viewMenu->addAction(m_snapAction);
     viewMenu->addSeparator();
     viewMenu->addAction(m_sceneTreeDock->toggleViewAction());
+    viewMenu->addAction(m_sheetBrowserDock->toggleViewAction());
 
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
     helpMenu->addAction(tr("&About Shoal"), this, &MainWindow::showAbout);
@@ -372,6 +380,19 @@ void MainWindow::updateSheets()
         m_declaredSheets = declared;
         m_sheetsBase = base;
         m_sheets.setSheets(declared, base);
+    }
+}
+
+void MainWindow::placeSheetItem(const SheetItem& item)
+{
+    SceneView* view = currentSceneView();
+    if (!view) {
+        statusBar()->showMessage(tr("Open a scene to place %1 in it.").arg(item.name),
+                                 STATUS_TIMEOUT_MS);
+        return;
+    }
+    if (view->placeAtCenter(item).isEmpty()) {
+        statusBar()->showMessage(tr("The current layer is hidden or locked."), STATUS_TIMEOUT_MS);
     }
 }
 

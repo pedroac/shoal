@@ -57,6 +57,8 @@ changes.
     in place otherwise, since an item may be inside its own mouse handler.
     `SceneView` is its tab, `SceneTreePanel` its layers-and-entities dock.
     `CanvasView` holds the zoom and pan both views share.
+  - `SheetBrowserPanel`: the project's sheets, sprites and animations as thumbnails.
+    A drag or a double-click hands a `SheetItem` to `SceneView`, which places it.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the

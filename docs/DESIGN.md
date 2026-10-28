@@ -592,6 +592,16 @@ element's parent is the viewport, or the safe area.
     turn and scale it about its position, where a sprite's sprat pivot sits (screen
     elements will use `layout.pivot`); Shift snaps rotation to 15 degrees.
     Releasing the mouse is one undo step, and a click changes nothing.
+  - The sheet browser lists each declared sheet with its sprites (by path, in the
+    sheet's order) and animations, as thumbnails, and filters them by name. A sheet
+    that didn't load says why. It follows the sheet cache, so a sheet written again
+    by sprat shows up at once.
+  - Dropping a sprite or an animation on the canvas adds a `sprite` or `animation`
+    entity with no id, on the current layer, at the drop point (snapped when
+    snapping is on), and selects it; double-clicking it in the browser places it in
+    the middle of the view. Either is one undo step. A hidden or locked current layer
+    refuses it, since the new entity couldn't be seen or picked. Nine-slice sprites
+    are placed as plain sprites until nine-slice sizes are modeled.
   - Screen-space layers are listed but not drawn until the UI layout step.
 - **Transition editor:** trigger and requirements, the effect and its parameters,
   the persisted state, and the mapping of entities to marks.
