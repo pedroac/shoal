@@ -61,8 +61,8 @@ private slots:
             titles << menu->text();
         }
         QCOMPARE(titles, (QStringList{QStringLiteral("&File"), QStringLiteral("&Edit"),
-                                      QStringLiteral("F&low"), QStringLiteral("&View"),
-                                      QStringLiteral("&Help")}));
+                                      QStringLiteral("&Arrange"), QStringLiteral("F&low"),
+                                      QStringLiteral("&View"), QStringLiteral("&Help")}));
     }
 
     void aboutNamesBothVersions()

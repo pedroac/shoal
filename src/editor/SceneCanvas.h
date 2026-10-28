@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QGraphicsScene>
 #include <QHash>
+#include <QKeySequence>
 #include <QPixmap>
 #include <QSet>
 #include <QString>
@@ -10,6 +11,8 @@
 
 #include "core/Model.h"
 #include "core/SceneTree.h"
+
+class QMenu;
 
 namespace shoal::assets {
 class SheetCache;
@@ -81,8 +84,21 @@ public:
     QList<core::EntityPath> addPreset(const QString& presetId, QPointF scenePosition,
                                       QString* error = nullptr);
     void removeSelection();
+    /// Moves the selected entities in draw order among their siblings (on their own layer,
+    /// for top-level ones), keeping them selected. Nothing if none would move.
+    void arrangeSelection(core::Arrange arrange);
     /// Moves the selected entities by `delta`, in their parents' units.
     void nudgeSelection(QPointF delta);
+
+    // --- the arrange commands, for the menus ---
+
+    static constexpr core::Arrange ARRANGES[] = {core::Arrange::ToFront, core::Arrange::Forward,
+                                                 core::Arrange::Backward, core::Arrange::ToBack};
+    static QString arrangeText(core::Arrange arrange);
+    static QKeySequence arrangeShortcut(core::Arrange arrange);
+    /// Adds the four arrange commands for the selection to a context menu, each enabled
+    /// when it would move something.
+    void addArrangeActions(QMenu& menu);
 
     // --- for the items ---
 

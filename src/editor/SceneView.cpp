@@ -1,11 +1,14 @@
 #include "editor/SceneView.h"
 
+#include <QContextMenuEvent>
 #include <QDropEvent>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QMimeData>
 #include <QPainter>
 #include <cmath>
 
+#include "editor/EntityItem.h"
 #include "editor/PresetsPanel.h"
 #include "editor/SceneCanvas.h"
 
@@ -117,6 +120,28 @@ void SceneView::keyPressEvent(QKeyEvent* event)
     }
     m_canvas->nudgeSelection(direction * step);
     event->accept();
+}
+
+void SceneView::contextMenuEvent(QContextMenuEvent* event)
+{
+    // The entity under the cursor, or the one an item under it belongs to.
+    QGraphicsItem* hit = itemAt(event->pos());
+    while (hit && !qgraphicsitem_cast<EntityItem*>(hit)) {
+        hit = hit->parentItem();
+    }
+    auto* entity = qgraphicsitem_cast<EntityItem*>(hit);
+    if (!entity || !(entity->flags() & QGraphicsItem::ItemIsSelectable)) {
+        CanvasView::contextMenuEvent(event);
+        return;
+    }
+    if (!entity->isSelected()) {
+        m_canvas->select({entity->path()});
+    }
+    QMenu menu(this);
+    m_canvas->addArrangeActions(menu);
+    menu.addSeparator();
+    menu.addAction(tr("Remove"), m_canvas.get(), &SceneCanvas::removeSelection);
+    menu.exec(event->globalPos());
 }
 
 // --- drops from the sheet browser and the presets ---

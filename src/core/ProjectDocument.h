@@ -85,6 +85,9 @@ public:
     /// Inserts `entity` so that it ends up at `path`.
     void insertEntity(const QString& sceneId, const EntityPath& path, Entity entity);
     Entity removeEntity(const QString& sceneId, const EntityPath& path);
+    /// Reorders the children of `parent` (the top level if empty): `order[i]` is the index,
+    /// before, of the entity that ends at index i.
+    void reorderEntities(const QString& sceneId, const EntityPath& parent, const QList<int>& order);
     /// Replaces an entity's own fields; its children stay.
     void setEntityFields(const QString& sceneId, const EntityPath& path, const Entity& fields);
     void insertLayer(const QString& sceneId, int index, Layer layer);

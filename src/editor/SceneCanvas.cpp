@@ -1,10 +1,14 @@
 #include "editor/SceneCanvas.h"
 
+#include <QAction>
 #include <QCoreApplication>
+#include <QMenu>
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
 #include "assets/SheetCache.h"
+#include "core/CommandStack.h"
 #include "core/Presets.h"
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
@@ -33,7 +37,10 @@ QStringList treeShape(const core::Scene& scene)
         for (int index : path) {
             indexes << QString::number(index);
         }
-        shape << indexes.join(u'.') + u':' + entity.layer;
+        // The type too: regions, cameras and paths take a different z value.
+        shape << QStringLiteral("%1:%2:%3")
+                     .arg(indexes.join(u'.'), entity.layer)
+                     .arg(int(entity.type));
     });
     return shape;
 }
@@ -264,6 +271,79 @@ void SceneCanvas::removeSelection()
     clearSelection();  // the paths will name other entities afterwards
     m_document.commands().push(
         std::make_unique<core::RemoveEntitiesCommand>(m_document, m_sceneId, paths));
+}
+
+void SceneCanvas::arrangeSelection(core::Arrange arrange)
+{
+    const core::Scene* current = scene();
+    if (!current) {
+        return;
+    }
+    const QList<EntityPath> paths = selectedPaths();
+    const QMap<EntityPath, QList<int>> orders = core::arrangedOrders(*current, paths, arrange);
+    if (orders.isEmpty()) {
+        return;  // already there
+    }
+    const QString text = arrangeText(arrange);
+    // Deepest lists first: reordering a list changes the paths below it, not above.
+    QList<EntityPath> parents = orders.keys();
+    std::stable_sort(parents.begin(), parents.end(),
+                     [](const EntityPath& a, const EntityPath& b) { return a.size() > b.size(); });
+    QList<EntityPath> after;
+    for (const EntityPath& path : paths) {
+        after << core::pathAfterReorder(path, orders);
+    }
+    clearSelection();  // the paths will name other entities meanwhile
+    core::CommandStack& commands = m_document.commands();
+    commands.beginMacro(text);
+    for (const EntityPath& parent : parents) {
+        commands.push(std::make_unique<core::ReorderEntitiesCommand>(m_document, m_sceneId, parent,
+                                                                     orders.value(parent), text));
+    }
+    commands.endMacro();
+    select(after);
+}
+
+QString SceneCanvas::arrangeText(core::Arrange arrange)
+{
+    switch (arrange) {
+        case core::Arrange::ToFront:
+            return tr("Bring to Front");
+        case core::Arrange::Forward:
+            return tr("Bring Forward");
+        case core::Arrange::Backward:
+            return tr("Send Backward");
+        case core::Arrange::ToBack:
+            return tr("Send to Back");
+    }
+    return {};
+}
+
+QKeySequence SceneCanvas::arrangeShortcut(core::Arrange arrange)
+{
+    switch (arrange) {
+        case core::Arrange::ToFront:
+            return QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_BracketRight);
+        case core::Arrange::Forward:
+            return QKeySequence(Qt::CTRL | Qt::Key_BracketRight);
+        case core::Arrange::Backward:
+            return QKeySequence(Qt::CTRL | Qt::Key_BracketLeft);
+        case core::Arrange::ToBack:
+            return QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_BracketLeft);
+    }
+    return {};
+}
+
+void SceneCanvas::addArrangeActions(QMenu& menu)
+{
+    const QList<EntityPath> paths = selectedPaths();
+    const core::Scene* current = scene();
+    for (const core::Arrange arrange : ARRANGES) {
+        QAction* action = menu.addAction(arrangeText(arrange), this,
+                                         [this, arrange] { arrangeSelection(arrange); });
+        action->setShortcut(arrangeShortcut(arrange));  // shown; the window's action has it
+        action->setEnabled(current && !core::arrangedOrders(*current, paths, arrange).isEmpty());
+    }
 }
 
 void SceneCanvas::nudgeSelection(QPointF delta)

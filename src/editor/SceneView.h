@@ -45,6 +45,9 @@ protected:
     QRectF contentRect() const override;
     void drawBackground(QPainter* painter, const QRectF& rect) override;
     void keyPressEvent(QKeyEvent* event) override;
+    /// On an entity: arrange or remove the selection, selecting the entity first if it
+    /// isn't selected.
+    void contextMenuEvent(QContextMenuEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dropEvent(QDropEvent* event) override;

@@ -498,6 +498,50 @@ private slots:
         QCOMPARE(f.window.document()->commands().undoText(), QStringLiteral("Add sheets"));
     }
 
+    void arrangesTheSelectionInDrawOrder()
+    {
+        Fixture f;
+        const auto action = [&](const char* name) {
+            return f.window.findChild<QAction*>(QLatin1StringView(name));
+        };
+        QAction* forward = action("bringForwardAction");
+        QAction* toFront = action("bringToFrontAction");
+        QAction* backward = action("sendBackwardAction");
+        QAction* toBack = action("sendToBackAction");
+        QVERIFY(forward && toFront && backward && toBack);
+        QVERIFY(!forward->isEnabled());  // nothing selected
+
+        // The player (1) passes the altar group (3), not bg's sprite (2) on another layer.
+        f.canvas().select({{1}});
+        QVERIFY(forward->isEnabled() && toFront->isEnabled());
+        forward->trigger();
+        QCOMPARE(entityAt(f.scene(), {3})->id, QStringLiteral("player"));
+        QCOMPARE(entityAt(f.scene(), {1})->id, QStringLiteral("altar_group"));
+        // Still selected, and drawn in front of the group.
+        QCOMPARE(f.canvas().selectedPaths(), (QList<EntityPath>{{3}}));
+        QVERIFY(f.canvas().item({3})->zValue() > f.canvas().item({1})->zValue());
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Bring Forward"));
+
+        toFront->trigger();
+        QCOMPARE(entityAt(f.scene(), {6})->id, QStringLiteral("player"));
+        QCOMPARE(f.canvas().selectedPaths(), (QList<EntityPath>{{6}}));
+        QVERIFY(!forward->isEnabled() && !toFront->isEnabled());  // already in front
+        QVERIFY(backward->isEnabled() && toBack->isEnabled());
+
+        // Ctrl+Shift+[ sends it to the back.
+        f.window.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&f.window));
+        f.view->setFocus();
+        QTest::keyClick(f.view, Qt::Key_BracketLeft, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(entityAt(f.scene(), {0})->id, QStringLiteral("player"));
+        QVERIFY(!backward->isEnabled());
+
+        f.document().commands().undo();
+        f.document().commands().undo();
+        f.document().commands().undo();
+        QCOMPARE(entityAt(f.scene(), {1})->id, QStringLiteral("player"));
+    }
+
     void theSheetBrowserFilters()
     {
         Fixture f;

@@ -162,6 +162,61 @@ private slots:
         QCOMPARE(entityAt(scene(document, LEVEL_1), {1})->id, QStringLiteral("mark_altar"));
     }
 
+    void arrangesEntitiesAmongTheirSiblingsOnTheirLayer()
+    {
+        // level_1's top level: world 0 1 3 4 5 6, with bg's sprite at 2 between them.
+        const Scene level1 = fixtureProject().scenes[LEVEL_1];
+        const EntityPath top;
+        const EntityPath player{1};
+        const auto ordersOf = [&](const QList<EntityPath>& paths, Arrange arrange) {
+            return arrangedOrders(level1, paths, arrange);
+        };
+        using Orders = QMap<EntityPath, QList<int>>;
+
+        // Only world entities trade places; bg's stays where it is.
+        QCOMPARE(ordersOf({player}, Arrange::Forward), (Orders{{top, {0, 3, 2, 1, 4, 5, 6}}}));
+        QCOMPARE(ordersOf({player}, Arrange::ToFront), (Orders{{top, {0, 3, 2, 4, 5, 6, 1}}}));
+        QCOMPARE(ordersOf({player}, Arrange::Backward), (Orders{{top, {1, 0, 2, 3, 4, 5, 6}}}));
+        QCOMPARE(ordersOf({{6}}, Arrange::ToBack), (Orders{{top, {6, 0, 2, 1, 3, 4, 5}}}));
+        // Several move as one block, keeping their order.
+        QCOMPARE(ordersOf({{1}, {3}}, Arrange::Backward), (Orders{{top, {1, 3, 2, 0, 4, 5, 6}}}));
+        QCOMPARE(ordersOf({{4}, {1}}, Arrange::ToFront), (Orders{{top, {0, 3, 2, 5, 6, 1, 4}}}));
+
+        // Nothing to do: already in front or behind, or alone on its layer.
+        QVERIFY(ordersOf({{6}}, Arrange::ToFront).isEmpty());
+        QVERIFY(ordersOf({{6}}, Arrange::Forward).isEmpty());
+        QVERIFY(ordersOf({{0}}, Arrange::Backward).isEmpty());
+        QVERIFY(ordersOf({{2}}, Arrange::ToFront).isEmpty());
+        QVERIFY(ordersOf({}, Arrange::ToFront).isEmpty());
+
+        // Children trade places with their siblings.
+        const Orders children = ordersOf({{3, 0}}, Arrange::ToFront);
+        QCOMPARE(children, (Orders{{{3}, {1, 0}}}));
+        // A path follows its own list and its ancestors' ones.
+        const Orders both = ordersOf({{3, 0}, player}, Arrange::ToFront);
+        QCOMPARE(both.size(), 2);
+        QCOMPARE(pathAfterReorder({3, 0}, both), (EntityPath{1, 1}));
+        QCOMPARE(pathAfterReorder(player, both), (EntityPath{6}));
+        QCOMPARE(pathAfterReorder({2}, both), (EntityPath{2}));
+    }
+
+    void reordersEntities()
+    {
+        ProjectDocument document(fixtureProject());
+        const QList<int> order{0, 3, 2, 1, 4, 5, 6};
+        QVERIFY(pushAndCheckUndo<ReorderEntitiesCommand>(document, LEVEL_1, EntityPath(), order,
+                                                         QStringLiteral("Bring Forward")));
+        QCOMPARE(entityAt(scene(document, LEVEL_1), {3})->id, QStringLiteral("player"));
+        QCOMPARE(entityAt(scene(document, LEVEL_1), {1, 1})->id,
+                 QStringLiteral("mark_altar_front"));
+        QCOMPARE(document.commands().undoText(), QStringLiteral("Bring Forward"));
+
+        QVERIFY(pushAndCheckUndo<ReorderEntitiesCommand>(document, LEVEL_1, EntityPath{1},
+                                                         QList<int>{1, 0}, QStringLiteral("x")));
+        QCOMPARE(entityAt(scene(document, LEVEL_1), {1, 0})->id,
+                 QStringLiteral("mark_altar_front"));
+    }
+
     void removingALayerRemovesItsEntities()
     {
         ProjectDocument document(fixtureProject());

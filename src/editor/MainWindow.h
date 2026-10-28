@@ -3,9 +3,11 @@
 #include <QList>
 #include <QMainWindow>
 #include <memory>
+#include <utility>
 
 #include "assets/SheetCache.h"
 #include "core/ProjectStore.h"
+#include "core/SceneTree.h"
 
 class QAction;
 class QDockWidget;
@@ -130,6 +132,7 @@ private:
     QAction* m_redoAction = nullptr;
     QAction* m_deleteAction = nullptr;
     QAction* m_selectAllAction = nullptr;
+    QList<std::pair<core::Arrange, QAction*>> m_arrangeActions;
     QAction* m_addSceneAction = nullptr;
     QAction* m_renameSceneAction = nullptr;
     QAction* m_startSceneAction = nullptr;

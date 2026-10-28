@@ -318,6 +318,23 @@ Entity ProjectDocument::removeEntity(const QString& sceneId, const EntityPath& p
     return removed;
 }
 
+void ProjectDocument::reorderEntities(const QString& sceneId, const EntityPath& parent,
+                                      const QList<int>& order)
+{
+    Scene& scene = sceneForEdit(sceneId);
+    Entity* parentEntity = parent.isEmpty() ? nullptr : entityAt(scene, parent);
+    Q_ASSERT(parent.isEmpty() || parentEntity);
+    std::vector<Entity>& siblings = parentEntity ? parentEntity->children : scene.entities;
+    Q_ASSERT(size_t(order.size()) == siblings.size());
+    std::vector<Entity> reordered;
+    reordered.reserve(siblings.size());
+    for (const int index : order) {
+        reordered.push_back(std::move(siblings[size_t(index)]));
+    }
+    siblings = std::move(reordered);
+    emitSceneContentChanged(sceneId);
+}
+
 void ProjectDocument::setEntityFields(const QString& sceneId, const EntityPath& path,
                                       const Entity& fields)
 {

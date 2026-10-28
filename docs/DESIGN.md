@@ -603,6 +603,12 @@ element's parent is the viewport, or the safe area.
   - The scene tree lists layers back to front, each with its entities. Dropping an
     entity on another makes it a child; above or below, a sibling; on a layer, a
     top-level entity drawn in front of that layer's others. A drop is one undo step.
+  - The Arrange menu, and the context menus of the canvas and the scene tree, bring
+    the selection to the front (Ctrl+Shift+]) or forward (Ctrl+]), or send it
+    backward (Ctrl+[) or to the back (Ctrl+Shift+[), among its siblings: top-level
+    entities only trade places with those on their own layer, and children with
+    their parent's other children. Several selected entities move as a block,
+    keeping their order. Each is one undo step, and the selection stays selected.
   - Hiding and locking layers, the current layer (where new entities go) and the
     grid are editor state: they never modify the project. They are kept in memory
     for now and will move to `.shoal/session.json`.

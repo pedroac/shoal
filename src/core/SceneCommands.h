@@ -84,6 +84,24 @@ private:
     QString m_toLayer;
 };
 
+/// Reorders the children of `parent` (the top level if empty), as arrangedOrders() gives:
+/// `order[i]` is the index, before, of the entity that ends at index i.
+class ReorderEntitiesCommand : public Command {
+public:
+    ReorderEntitiesCommand(ProjectDocument& document, QString sceneId, EntityPath parent,
+                           QList<int> order, QString text);
+    QString text() const override { return m_text; }
+    void redo() override;
+    void undo() override;
+
+private:
+    ProjectDocument& m_document;
+    QString m_sceneId;
+    EntityPath m_parent;
+    QList<int> m_order;
+    QString m_text;
+};
+
 class AddLayerCommand : public Command {
 public:
     AddLayerCommand(ProjectDocument& document, QString sceneId, int index, Layer layer);

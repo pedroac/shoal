@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 #include <functional>
@@ -47,5 +48,18 @@ EntityPath pathAfterRemoval(EntityPath path, const EntityPath& removed);
 
 /// `paths` without those inside another one of them, sorted.
 QList<EntityPath> outermost(QList<EntityPath> paths);
+
+/// Where arranged entities go in draw order, among their siblings.
+enum class Arrange { ToFront, Forward, Backward, ToBack };
+
+/// The new order of each list of siblings that arranging the entities at `paths` changes,
+/// by parent path (empty for the top level): `order[i]` is the index, before, of the entity
+/// that ends at index i. Forward and backward pass the next sibling that isn't arranged too.
+/// Top-level entities trade places only with those on their own layer.
+QMap<EntityPath, QList<int>> arrangedOrders(const Scene& scene, const QList<EntityPath>& paths,
+                                            Arrange arrange);
+
+/// `path` once the sibling lists are reordered as `orders` says (see arrangedOrders()).
+EntityPath pathAfterReorder(const EntityPath& path, const QMap<EntityPath, QList<int>>& orders);
 
 }  // namespace shoal::core

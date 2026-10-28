@@ -478,6 +478,8 @@ void SceneTreePanel::showContextMenu(const QPoint& position)
         });
     }
     else {
+        m_canvas->addArrangeActions(menu);
+        menu.addSeparator();
         menu.addAction(tr("Remove"), m_canvas.data(), &SceneCanvas::removeSelection);
     }
     menu.exec(m_tree->viewport()->mapToGlobal(position));

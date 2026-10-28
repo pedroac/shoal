@@ -197,6 +197,32 @@ void MoveEntityCommand::undo()
     m_document.insertEntity(m_sceneId, m_from, std::move(entity));
 }
 
+// --- ReorderEntitiesCommand ---
+
+ReorderEntitiesCommand::ReorderEntitiesCommand(ProjectDocument& document, QString sceneId,
+                                               EntityPath parent, QList<int> order, QString text)
+    : m_document(document),
+      m_sceneId(std::move(sceneId)),
+      m_parent(std::move(parent)),
+      m_order(std::move(order)),
+      m_text(std::move(text))
+{
+}
+
+void ReorderEntitiesCommand::redo()
+{
+    m_document.reorderEntities(m_sceneId, m_parent, m_order);
+}
+
+void ReorderEntitiesCommand::undo()
+{
+    QList<int> inverse(m_order.size());
+    for (qsizetype i = 0; i < m_order.size(); ++i) {
+        inverse[m_order[i]] = int(i);
+    }
+    m_document.reorderEntities(m_sceneId, m_parent, inverse);
+}
+
 // --- AddLayerCommand ---
 
 AddLayerCommand::AddLayerCommand(ProjectDocument& document, QString sceneId, int index, Layer layer)

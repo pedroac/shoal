@@ -162,6 +162,24 @@ void MainWindow::createActions()
         }
     });
 
+    const std::pair<core::Arrange, const char*> arrangeNames[] = {
+        {core::Arrange::ToFront, "bringToFrontAction"},
+        {core::Arrange::Forward, "bringForwardAction"},
+        {core::Arrange::Backward, "sendBackwardAction"},
+        {core::Arrange::ToBack, "sendToBackAction"},
+    };
+    for (const auto& [arrange, name] : arrangeNames) {
+        QAction* action =
+            makeAction(this, QLatin1StringView(name), SceneCanvas::arrangeText(arrange),
+                       {SceneCanvas::arrangeShortcut(arrange)});
+        connect(action, &QAction::triggered, this, [this, arrange = arrange] {
+            if (SceneView* view = currentSceneView()) {
+                view->canvas().arrangeSelection(arrange);
+            }
+        });
+        m_arrangeActions.append({arrange, action});
+    }
+
     m_addSceneAction = makeAction(this, QStringLiteral("addSceneAction"), tr("&Add Scene"));
     connect(m_addSceneAction, &QAction::triggered, this, [this] {
         if (m_flowView) {
@@ -231,6 +249,11 @@ void MainWindow::createMenus()
     editMenu->addSeparator();
     editMenu->addAction(m_deleteAction);
     editMenu->addAction(m_selectAllAction);
+
+    QMenu* arrangeMenu = menuBar()->addMenu(tr("&Arrange"));
+    for (const auto& [arrange, action] : m_arrangeActions) {
+        arrangeMenu->addAction(action);
+    }
 
     QMenu* flowMenu = menuBar()->addMenu(tr("F&low"));
     flowMenu->addAction(m_addSceneAction);
@@ -670,8 +693,15 @@ void MainWindow::updateActions()
     m_renameSceneAction->setEnabled(oneScene);
     m_startSceneAction->setEnabled(oneScene &&
                                    m_document->project().manifest.start != scenes.first());
-    if (SceneView* view = currentSceneView()) {
-        m_deleteAction->setEnabled(!view->canvas().selectedPaths().isEmpty());
+    SceneView* view = currentSceneView();
+    const core::Scene* scene = view ? view->canvas().scene() : nullptr;
+    const QList<core::EntityPath> selected =
+        view ? view->canvas().selectedPaths() : QList<core::EntityPath>();
+    for (const auto& [arrange, action] : m_arrangeActions) {
+        action->setEnabled(scene && !core::arrangedOrders(*scene, selected, arrange).isEmpty());
+    }
+    if (view) {
+        m_deleteAction->setEnabled(!selected.isEmpty());
     }
     else {
         m_deleteAction->setEnabled(!scenes.isEmpty() || !transitions.isEmpty());
