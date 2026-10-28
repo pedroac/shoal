@@ -5,6 +5,9 @@
 #include <QPointF>
 #include <QString>
 #include <QStringList>
+#include <optional>
+
+#include "core/Model.h"
 
 namespace shoal::core {
 class ProjectDocument;
@@ -49,7 +52,11 @@ public:
     void removeSelection();
     /// Renames a scene; false if `to` isn't a valid id or another scene has it.
     bool renameScene(const QString& from, const QString& to);
+    /// Why renameScene() refused `to`, for the user.
+    static QString renameRefusal(const QString& to);
     void setStartScene(const QString& sceneId);
+    /// Sets a scene's size, and the fit that overrides the project's (null for none).
+    void setSceneSettings(const QString& sceneId, core::Size size, std::optional<core::Fit> fit);
     /// Adds a `replace` transition with no trigger yet; returns its id.
     QString addTransition(const QString& from, const QString& to);
 

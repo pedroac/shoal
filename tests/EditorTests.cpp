@@ -1,5 +1,11 @@
 #include <QAction>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -12,10 +18,15 @@
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
 #include "editor/MainWindow.h"
+#include "editor/SceneCanvas.h"
+#include "editor/SceneSettingsPanel.h"
+#include "editor/SceneView.h"
+#include "editor/ScenesPanel.h"
 
 using namespace shoal::core;
 using shoal::editor::FlowView;
 using shoal::editor::MainWindow;
+using shoal::editor::SceneSettingsPanel;
 
 namespace {
 
@@ -24,6 +35,22 @@ QAction* action(const MainWindow& window, const char* name)
     auto* found = window.findChild<QAction*>(QLatin1StringView(name));
     Q_ASSERT(found);
     return found;
+}
+
+QDockWidget* dock(const MainWindow& window, const char* name)
+{
+    auto* found = window.findChild<QDockWidget*>(QLatin1StringView(name));
+    Q_ASSERT(found);
+    return found;
+}
+
+/// Whether a dock is open, and listed in the View menu.
+bool offered(const MainWindow& window, const char* name)
+{
+    const QDockWidget* found = dock(window, name);
+    const bool listed = found->toggleViewAction()->isVisible();
+    Q_ASSERT(listed || found->isHidden());
+    return listed && !found->isHidden();
 }
 
 /// A copy of the basic fixture, which tests may change and save.
@@ -189,6 +216,117 @@ private slots:
         QVERIFY(window.openProject(dir.path()).isEmpty());
         window.show();
         QVERIFY(window.close());
+    }
+    void docksFollowTheCurrentTab()
+    {
+        QTemporaryDir dir;
+        QVERIFY(copyFixture(dir));
+        MainWindow window;
+        QVERIFY(window.openProject(dir.path()).isEmpty());
+        window.show();
+        const auto onFlow = [&] {
+            return offered(window, "scenesDock") && offered(window, "sceneSettingsDock") &&
+                   !offered(window, "sceneTreeDock") && !offered(window, "presetsDock") &&
+                   !offered(window, "inspectorDock");
+        };
+        const auto onScene = [&] {
+            return !offered(window, "scenesDock") && !offered(window, "sceneSettingsDock") &&
+                   offered(window, "sceneTreeDock") && offered(window, "presetsDock") &&
+                   offered(window, "inspectorDock");
+        };
+        QVERIFY(onFlow());
+        QVERIFY(offered(window, "sheetBrowserDock") && offered(window, "classesDock"));
+
+        window.openScene(QStringLiteral("level_1"));
+        QVERIFY(onScene());
+        QVERIFY(offered(window, "sheetBrowserDock") && offered(window, "classesDock"));
+
+        // A dock the user closes stays closed when they come back to that kind of tab.
+        dock(window, "inspectorDock")->close();
+        window.tabs()->setCurrentIndex(0);
+        QVERIFY(onFlow());
+        dock(window, "scenesDock")->close();
+        window.openScene(QStringLiteral("level_2"));
+        QVERIFY(dock(window, "inspectorDock")->isHidden());
+        QVERIFY(dock(window, "inspectorDock")->toggleViewAction()->isVisible());
+        QVERIFY(offered(window, "sceneTreeDock"));
+        window.tabs()->setCurrentIndex(0);
+        QVERIFY(dock(window, "scenesDock")->isHidden());
+        QVERIFY(offered(window, "sceneSettingsDock"));
+    }
+
+    void scenesPanelSharesTheFlowSelection()
+    {
+        QTemporaryDir dir;
+        QVERIFY(copyFixture(dir));
+        MainWindow window;
+        QVERIFY(window.openProject(dir.path()).isEmpty());
+        QListWidget* list = window.scenesPanel()->list();
+        QCOMPARE(list->count(), 4);
+        QCOMPARE(window.scenesPanel()->sceneRow(QStringLiteral("main_menu"))->text(),
+                 QStringLiteral("main_menu (start)"));
+
+        window.flowScene()->select({QStringLiteral("level_2")});
+        QCOMPARE(list->selectedItems(),
+                 QList{window.scenesPanel()->sceneRow(QStringLiteral("level_2"))});
+        window.scenesPanel()->sceneRow(QStringLiteral("pause"))->setSelected(true);
+        QCOMPARE(window.flowScene()->selectedSceneIds(),
+                 (QStringList{QStringLiteral("level_2"), QStringLiteral("pause")}));
+
+        window.flowScene()->addScene(QPointF(0, 600));
+        QVERIFY(window.scenesPanel()->sceneRow(QStringLiteral("scene")));
+
+        emit list->itemActivated(window.scenesPanel()->sceneRow(QStringLiteral("level_1")));
+        QVERIFY(window.currentSceneView());
+        QCOMPARE(window.currentSceneView()->canvas().sceneId(), QStringLiteral("level_1"));
+    }
+
+    void sceneSettingsEditTheSelectedScene()
+    {
+        QTemporaryDir dir;
+        QVERIFY(copyFixture(dir));
+        MainWindow window;
+        QVERIFY(window.openProject(dir.path()).isEmpty());
+        SceneSettingsPanel* panel = window.sceneSettingsPanel();
+        const ProjectDocument& document = *window.document();
+        QVERIFY(!panel->idField()->isEnabled());
+
+        window.flowScene()->select({QStringLiteral("pause")});
+        QCOMPARE(panel->idField()->text(), QStringLiteral("pause"));
+        QCOMPARE(panel->widthBox()->value(), 1920.0);
+        QCOMPARE(panel->fitBox()->currentText(), QStringLiteral("letterbox"));
+        QCOMPARE(panel->fitBox()->itemText(0), QStringLiteral("Project's (expand)"));
+        QVERIFY(!panel->startBox()->isChecked());
+
+        panel->widthBox()->setValue(1280);
+        QCOMPARE(document.project().scenes.value(QStringLiteral("pause")).size, (Size{1280, 1080}));
+        panel->fitBox()->setCurrentIndex(0);
+        emit panel->fitBox()->activated(0);
+        QCOMPARE(document.project().scenes.value(QStringLiteral("pause")).fit, std::nullopt);
+        action(window, "undoAction")->trigger();
+        QCOMPARE(panel->fitBox()->currentText(), QStringLiteral("letterbox"));
+        action(window, "undoAction")->trigger();
+        QCOMPARE(panel->widthBox()->value(), 1920.0);
+
+        panel->idField()->setText(QStringLiteral("1bad"));
+        QVERIFY(!panel->applyId());
+        QVERIFY(!panel->message().isEmpty());
+        panel->idField()->setText(QStringLiteral("level_1"));
+        QVERIFY(!panel->applyId());
+        QCOMPARE(panel->message(),
+                 shoal::editor::FlowScene::renameRefusal(QStringLiteral("level_1")));
+        panel->idField()->setText(QStringLiteral("paused"));
+        QVERIFY(panel->applyId());
+        QVERIFY(document.project().scenes.contains(QStringLiteral("paused")));
+        QCOMPARE(window.flowScene()->selectedSceneIds(), QStringList{QStringLiteral("paused")});
+
+        panel->startBox()->click();
+        QCOMPARE(document.project().manifest.start, QStringLiteral("paused"));
+        QVERIFY(!panel->startBox()->isEnabled());
+
+        window.flowScene()->select({QStringLiteral("level_1"), QStringLiteral("level_2")});
+        QVERIFY(!panel->idField()->isEnabled());
+        QCOMPARE(panel->summary()->text(), QStringLiteral("2 scenes selected."));
     }
 };
 

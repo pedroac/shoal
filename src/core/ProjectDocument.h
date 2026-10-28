@@ -77,6 +77,8 @@ public:
     void renameScene(const QString& from, const QString& to);
     void setSceneNodePosition(const QString& id, std::optional<Point> position);
     void setStartScene(const QString& id);
+    /// Sets a scene's size, and the fit that overrides the project's (null for none).
+    void setSceneSettings(const QString& id, Size size, std::optional<Fit> fit);
     void insertTransition(Transition transition);
     Transition removeTransition(const QString& id);
     /// Replaces the transition with the same id.
@@ -105,6 +107,8 @@ signals:
     void sceneRenamed(const QString& from, const QString& to);
     void sceneNodeMoved(const QString& id);
     void startSceneChanged(const QString& id);
+    /// A scene's size or fit changed.
+    void sceneSettingsChanged(const QString& id);
     void transitionAdded(const QString& id);
     void transitionRemoved(const QString& id);
     void transitionChanged(const QString& id);

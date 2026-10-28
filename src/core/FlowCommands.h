@@ -89,6 +89,25 @@ private:
     QString m_to;
 };
 
+/// Changes a scene's size and the fit that overrides the project's.
+class SetSceneSettingsCommand : public Command {
+public:
+    SetSceneSettingsCommand(ProjectDocument& document, QString id, Size size,
+                            std::optional<Fit> fit, QString text);
+    QString text() const override { return m_text; }
+    void redo() override;
+    void undo() override;
+
+private:
+    ProjectDocument& m_document;
+    QString m_id;
+    QString m_text;
+    Size m_sizeBefore;
+    Size m_sizeAfter;
+    std::optional<Fit> m_fitBefore;
+    std::optional<Fit> m_fitAfter;
+};
+
 class AddTransitionCommand : public Command {
 public:
     AddTransitionCommand(ProjectDocument& document, Transition transition);

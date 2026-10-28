@@ -173,12 +173,35 @@ bool FlowScene::renameScene(const QString& from, const QString& to)
     return true;
 }
 
+QString FlowScene::renameRefusal(const QString& to)
+{
+    return core::isValidId(to)
+               ? tr("Another scene is already called %1. Scene ids are compared ignoring case, "
+                    "since they name folders.")
+                     .arg(to)
+               : tr("An id starts with a letter or an underscore, followed by letters, digits, "
+                    "underscores or hyphens.");
+}
+
 void FlowScene::setStartScene(const QString& sceneId)
 {
     if (m_document.project().manifest.start != sceneId) {
         m_document.commands().push(
             std::make_unique<core::SetStartSceneCommand>(m_document, sceneId));
     }
+}
+
+void FlowScene::setSceneSettings(const QString& sceneId, core::Size size,
+                                 std::optional<core::Fit> fit)
+{
+    const auto it = m_document.project().scenes.constFind(sceneId);
+    if (it == m_document.project().scenes.constEnd() || (size == it->size && fit == it->fit)) {
+        return;
+    }
+    const QString text = size != it->size ? tr("Resize scene %1").arg(sceneId)
+                                          : tr("Set the fit of scene %1").arg(sceneId);
+    m_document.commands().push(
+        std::make_unique<core::SetSceneSettingsCommand>(m_document, sceneId, size, fit, text));
 }
 
 QString FlowScene::addTransition(const QString& from, const QString& to)

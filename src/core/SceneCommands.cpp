@@ -21,12 +21,6 @@ const Scene& sceneOf(const ProjectDocument& document, const QString& sceneId)
     return *it;
 }
 
-/// An entity's name in a command's text: its id, or its type.
-QString describe(const Entity& entity)
-{
-    return entity.id.isEmpty() ? enumName(entity.type) : entity.id;
-}
-
 Entity withoutChildren(Entity entity)
 {
     entity.children.clear();

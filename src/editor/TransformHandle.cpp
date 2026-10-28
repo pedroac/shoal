@@ -15,7 +15,9 @@ namespace {
 constexpr double HANDLE_SIZE = 10;    ///< On screen, in pixels.
 constexpr double ROTATE_OFFSET = 24;  ///< How far above the outline the rotate handle sits.
 constexpr double ANGLE_SNAP = 15;
-constexpr double MIN_SCALE = 1e-3;
+/// Below this fraction of a nine-slice on the handle's side of its origin, that axis
+/// follows the distance instead, like a scale.
+constexpr double MIN_SIDE = 0.05;
 
 double angleTo(QPointF from, QPointF to)
 {
@@ -81,6 +83,13 @@ void TransformHandle::mousePressEvent(QGraphicsSceneMouseEvent* event)
     m_startDistance = QLineF(m_origin, event->scenePos()).length();
     m_rotation = item->entity().transform.rot;
     m_scale = item->entity().transform.scale;
+    m_startSize = item->nineSliceSize();
+    m_size = m_startSize;
+    m_resize = m_kind == Kind::Scale && !m_startSize.isEmpty();
+    if (m_resize) {
+        const QRectF rect = item->visualRect();
+        m_side = QPointF(rect.right() / rect.width(), rect.bottom() / rect.height());
+    }
     event->accept();
 }
 
@@ -88,6 +97,22 @@ void TransformHandle::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
 {
     EntityItem* item = m_canvas.item(m_target);
     if (!item) {
+        return;
+    }
+    const double factor =
+        m_startDistance > 0 ? QLineF(m_origin, event->scenePos()).length() / m_startDistance : 1;
+    if (m_resize) {
+        const QPointF local = item->mapFromScene(event->scenePos());
+        const auto length = [&](double along, double side, double start) {
+            const double result = side > MIN_SIDE ? along / side : start * factor;
+            return std::max(1.0, std::round(result));
+        };
+        m_size = QSizeF(length(local.x(), m_side.x(), m_startSize.width()),
+                        length(local.y(), m_side.y(), m_startSize.height()));
+        core::Entity resized = item->entity();
+        core::setEntitySize(resized, m_size);
+        item->setEntity(resized);
+        attach(m_target);
         return;
     }
     const core::Transform start = item->entity().transform;
@@ -98,11 +123,11 @@ void TransformHandle::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
         }
         m_rotation = std::remainder(rotation, 360.0);
     }
-    else if (m_startDistance > 0) {
-        const double factor = QLineF(m_origin, event->scenePos()).length() / m_startDistance;
+    else {
         const auto scaled = [&](double value) {
             const double result = value * factor;
-            return std::abs(result) < MIN_SCALE ? std::copysign(MIN_SCALE, value) : result;
+            return std::abs(result) < core::MIN_SCALE ? std::copysign(core::MIN_SCALE, value)
+                                                      : result;
         };
         m_scale = core::Point{scaled(start.scale.x), scaled(start.scale.y)};
     }
@@ -114,6 +139,11 @@ void TransformHandle::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
 void TransformHandle::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
 {
     Q_UNUSED(event);
+    if (m_resize) {
+        m_resize = false;
+        m_canvas.commitSize(m_target, m_size);  // a click leaves the size as it was
+        return;
+    }
     m_canvas.commitTransform(
         m_target, m_rotation, m_scale,
         m_kind == Kind::Rotate ? SceneCanvas::tr("Rotate") : SceneCanvas::tr("Scale"));

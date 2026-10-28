@@ -1,7 +1,7 @@
 #include "editor/EntityItem.h"
 
+#include <QApplication>
 #include <QGraphicsSceneMouseEvent>
-#include <QGuiApplication>
 #include <QJsonArray>
 #include <QPainter>
 #include <QStyleOptionGraphicsItem>
@@ -78,8 +78,7 @@ QPainterPath linePath(const core::Entity& entity)
 
 QRectF boxRect(const core::Entity& entity)
 {
-    const QPointF size = pointOf(entity.extras.value(QStringLiteral("size")));
-    return {0, 0, size.x(), size.y()};
+    return {QPointF(), core::entitySize(entity).value_or(QSizeF())};
 }
 
 QPen cosmeticPen(const QColor& color, double width = 1.5, Qt::PenStyle style = Qt::SolidLine)
@@ -114,6 +113,8 @@ void EntityItem::refreshVisual()
 {
     prepareGeometryChange();
     m_hasImage = false;
+    m_nineSliceSize = {};
+    m_nineSlice = {};
     QRectF bounds;
     const bool flipX = m_entity.transform.flipX;
     const bool flipY = m_entity.transform.flipY;
@@ -121,19 +122,25 @@ void EntityItem::refreshVisual()
         case EntityType::Sprite:
         case EntityType::NineSlice:
         case EntityType::Animation: {
-            SceneCanvas::SpriteVisual visual;
-            if (m_entity.type == EntityType::Animation && m_entity.animation) {
-                visual =
-                    m_canvas.animationVisual(m_entity.animation->sheet, m_entity.animation->name);
+            const SceneCanvas::SpriteVisual visual = m_canvas.visualOf(m_entity);
+            if (m_entity.type == EntityType::NineSlice) {
+                m_nineSliceSize = SceneCanvas::nineSliceSize(m_entity, visual);
             }
-            else if (m_entity.sprite) {
-                visual = m_canvas.spriteVisual(m_entity.sprite->sheet, m_entity.sprite->path);
+            if (visual.sprite && m_entity.type == EntityType::NineSlice) {
+                m_hasImage = true;
+                m_nineSlice = assets::placeNineSlice(*visual.sprite, visual.drawScale,
+                                                     m_nineSliceSize, flipX, flipY);
+                bounds = m_nineSlice.bounds;
             }
-            if (visual.sprite) {
+            else if (visual.sprite) {
                 m_hasImage = true;
                 bounds = assets::placeSprite(*visual.sprite, visual.drawScale,
                                              flipX != visual.flipX, flipY != visual.flipY)
                              .bounds;
+            }
+            else if (!m_nineSliceSize.isEmpty()) {
+                // Where it would be with a pivot at 0, 0.
+                bounds = QRectF(QPointF(), m_nineSliceSize);
             }
             else {
                 bounds = QRectF(-PLACEHOLDER_SIZE / 2, -PLACEHOLDER_SIZE / 2, PLACEHOLDER_SIZE,
@@ -207,13 +214,7 @@ void EntityItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
 void EntityItem::paintSprite(QPainter* painter, bool selected)
 {
     Q_UNUSED(selected);
-    SceneCanvas::SpriteVisual visual;
-    if (m_entity.type == EntityType::Animation && m_entity.animation) {
-        visual = m_canvas.animationVisual(m_entity.animation->sheet, m_entity.animation->name);
-    }
-    else if (m_entity.sprite) {
-        visual = m_canvas.spriteVisual(m_entity.sprite->sheet, m_entity.sprite->path);
-    }
+    const SceneCanvas::SpriteVisual visual = m_canvas.visualOf(m_entity);
     if (!visual.sprite || visual.atlas.isNull()) {
         // Missing sheet, sprite or atlas: a box the size the sprite would have, if known.
         painter->setPen(cosmeticPen(PLACEHOLDER_COLOR));
@@ -221,6 +222,15 @@ void EntityItem::paintSprite(QPainter* painter, bool selected)
         painter->drawRect(m_bounds);
         painter->drawLine(m_bounds.topLeft(), m_bounds.bottomRight());
         painter->drawLine(m_bounds.topRight(), m_bounds.bottomLeft());
+        return;
+    }
+    if (m_entity.type == EntityType::NineSlice) {
+        for (const assets::SpritePlacement& cell : m_nineSlice.cells) {
+            painter->save();
+            painter->setTransform(cell.transform, true);
+            painter->drawPixmap(cell.target, visual.atlas, cell.source);
+            painter->restore();
+        }
         return;
     }
     const assets::SpritePlacement placement = assets::placeSprite(
@@ -307,7 +317,22 @@ void EntityItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
     if (event->button() == Qt::LeftButton) {
         m_canvas.setDragging(true);
     }
+    m_moving = false;
     QGraphicsItem::mousePressEvent(event);
+}
+
+void EntityItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
+{
+    // A view that scrolls, as when a panel's layout resizes it, replays the last mouse
+    // event: the cursor stays still on screen but moves in the scene.
+    if (!m_moving) {
+        const QPoint moved = event->screenPos() - event->buttonDownScreenPos(Qt::LeftButton);
+        if (moved.manhattanLength() < QApplication::startDragDistance()) {
+            return;
+        }
+        m_moving = true;
+    }
+    QGraphicsItem::mouseMoveEvent(event);
 }
 
 void EntityItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)

@@ -72,14 +72,7 @@ void FlowView::promptRename(const QString& sceneId)
         if (!ok || m_flowScene.renameScene(sceneId, text)) {
             return;
         }
-        const QString reason =
-            core::isValidId(text)
-                ? tr("Another scene is already called %1. Scene ids are compared ignoring case, "
-                     "since they name folders.")
-                      .arg(text)
-                : tr("An id starts with a letter or an underscore, followed by letters, digits, "
-                     "underscores or hyphens.");
-        QMessageBox::warning(this, tr("Rename Scene"), reason);
+        QMessageBox::warning(this, tr("Rename Scene"), FlowScene::renameRefusal(text));
     }
 }
 

@@ -108,6 +108,9 @@ public:
     /// nothing if they didn't change.
     void commitTransform(const core::EntityPath& path, double rotation, core::Point scale,
                          const QString& verb);
+    /// Pushes one command setting a nine-slice's size, as the scale handle leaves it;
+    /// nothing if it didn't change.
+    void commitSize(const core::EntityPath& path, QSizeF size);
     /// Puts the rotate and scale handles on the one selected entity, or hides them.
     void updateHandles();
     TransformHandle* rotateHandle() const { return m_rotateHandle; }
@@ -125,6 +128,15 @@ public:
     SpriteVisual spriteVisual(const QString& sheet, const QString& path) const;
     /// The first frame of an animation.
     SpriteVisual animationVisual(const QString& sheet, const QString& name) const;
+    /// What a sprite, nine-slice or animation entity draws.
+    SpriteVisual visualOf(const core::Entity& entity) const;
+    /// A nine-slice's size: its `size`, or its sprite's natural size if it has none. Empty
+    /// for other entities, or when the sprite can't be found.
+    static QSizeF nineSliceSize(const core::Entity& entity, const SpriteVisual& visual);
+    QSizeF nineSliceSize(const core::Entity& entity) const
+    {
+        return nineSliceSize(entity, visualOf(entity));
+    }
     /// The color of the first declared class that has one, or `fallback`.
     QColor classColor(const QStringList& classes, const QColor& fallback) const;
     QSizeF designResolution() const;

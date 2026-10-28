@@ -7,6 +7,7 @@
 #include <QRect>
 #include <QRectF>
 #include <QSize>
+#include <QSizeF>
 #include <QString>
 #include <QStringList>
 #include <QTransform>
@@ -80,5 +81,23 @@ struct SpritePlacement {
 /// Places `sprite` drawn at `drawScale` (1 / sheet scale gives the art's original size),
 /// mirrored about its pivot when flipped.
 SpritePlacement placeSprite(const Sprite& sprite, double drawScale, bool flipX, bool flipY);
+
+/// The size a sprite draws at, trim included: its original image at `drawScale`.
+QSizeF naturalSize(const Sprite& sprite, double drawScale);
+
+/// A nine-slice: the cells to draw, each like a sprite, and the box they fill.
+struct NineSlicePlacement {
+    std::vector<SpritePlacement> cells;
+    QRectF bounds;  ///< The box, flipped, in pivot space; empty for an empty size.
+};
+
+/// Places `sprite` stretched to `size` as a nine-slice, following sprat-raylib's recipe:
+/// the borders keep their size, shrinking proportionally when they don't fit, and the
+/// edges and the middle stretch. Slices are cut in the original image, then clipped to
+/// the trimmed content. The pivot stays at the same fraction of the box as of the image,
+/// so at its natural size it covers what placeSprite() does. A sprite without insets is
+/// simply stretched.
+NineSlicePlacement placeNineSlice(const Sprite& sprite, double drawScale, QSizeF size, bool flipX,
+                                  bool flipY);
 
 }  // namespace shoal::assets

@@ -1,11 +1,13 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QCompleter>
+#include <QDoubleSpinBox>
 #include <QDropEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMimeData>
+#include <QScrollBar>
 #include <QStatusBar>
 #include <QStringListModel>
 #include <QTabWidget>
@@ -208,6 +210,25 @@ private slots:
         QCOMPARE(f.canvas().item({1})->pos(), QPointF(320, 640));
     }
 
+    void aClickNeverMovesAnEntity()
+    {
+        Fixture f;
+        const QPoint player = f.at(QPointF(320, 630));
+        // A wobble shorter than the drag distance.
+        QTest::mousePress(f.view->viewport(), Qt::LeftButton, {}, player);
+        QTest::mouseMove(f.view->viewport(), player + QPoint(2, 1));
+        QTest::mouseRelease(f.view->viewport(), Qt::LeftButton, {}, player + QPoint(2, 1));
+        // The view scrolling under the pressed button, as when selecting changes the
+        // inspector's layout and so the view's size.
+        f.canvas().clearSelection();
+        QTest::mousePress(f.view->viewport(), Qt::LeftButton, {}, player);
+        f.view->horizontalScrollBar()->setValue(f.view->horizontalScrollBar()->value() + 60);
+        QApplication::processEvents();
+        QTest::mouseRelease(f.view->viewport(), Qt::LeftButton, {}, player);
+        QCOMPARE(f.document().commands().count(), 0);
+        QCOMPARE(f.canvas().item({1})->pos(), QPointF(320, 640));
+    }
+
     void snapsToTheGrid()
     {
         Fixture f;
@@ -295,6 +316,51 @@ private slots:
         QVERIFY(
             QLineF(f.canvas().scaleHandle()->scenePos(), origin + 2 * (corner - origin)).length() <
             2);
+    }
+
+    void nineSlicesResizeInsteadOfScaling()
+    {
+        Fixture f;
+        // A sprite with insets is placed as a nine-slice, at its own size.
+        const SheetItem panelItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+                                  QStringLiteral("ui/panel.9.png")};
+        QVERIFY(f.dropOnView(panelItem, f.at(QPointF(320, 600))));
+        const EntityPath path{int(f.scene().entities.size()) - 1};
+        const Entity* panel = entityAt(f.scene(), path);
+        QCOMPARE(panel->type, EntityType::NineSlice);
+        QCOMPARE(entitySize(*panel), QSizeF(12, 12));
+        EntityItem* item = f.canvas().item(path);
+        QCOMPARE(item->visualRect(), QRectF(0, 0, 12, 12));  // its pivot is its top-left
+
+        // The scale handle resizes it on each axis, and leaves its scale alone.
+        const QPointF origin = item->scenePos();
+        const QPointF corner = f.canvas().scaleHandle()->scenePos();
+        f.drag(f.at(corner), f.at(origin + QPointF(60, 24)));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Resize nineslice"));
+        panel = entityAt(f.scene(), path);
+        const QSizeF size = *entitySize(*panel);
+        QVERIFY2(std::abs(size.width() - 60) <= 1 && std::abs(size.height() - 24) <= 1,
+                 qPrintable(QStringLiteral("%1 x %2").arg(size.width()).arg(size.height())));
+        QCOMPARE(panel->transform.scale, (Point{1, 1}));
+        QCOMPARE(f.canvas().item(path)->visualRect(), QRectF(QPointF(), size));
+
+        // The inspector shows its size instead of its scale.
+        InspectorPanel* inspector = f.window.inspector();
+        QVERIFY(inspector->showsSize());
+        QVERIFY(!inspector->showsScale());
+        QCOMPARE(inspector->widthBox()->value(), size.width());
+        inspector->widthBox()->setFocus();
+        inspector->widthBox()->selectAll();
+        QTest::keyClicks(inspector->widthBox(), QStringLiteral("100"));
+        QTest::keyClick(inspector->widthBox(), Qt::Key_Return);
+        QCOMPARE(entitySize(*entityAt(f.scene(), path)), QSizeF(100, size.height()));
+        f.document().commands().undo();
+        QCOMPARE(inspector->widthBox()->value(), size.width());
+
+        // A sprite shows its scale.
+        f.canvas().select({{1}});
+        QVERIFY(inspector->showsScale());
+        QVERIFY(!inspector->showsSize());
     }
 
     void aClickOnAHandleChangesNothing()
@@ -774,6 +840,50 @@ private slots:
         QVERIFY(!entityAt(f.scene(), {1})->visible);
         f.document().commands().undo();
         QVERIFY(inspector->visibleBox()->isChecked());
+    }
+
+    void editsTheTransform()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        f.canvas().select({{1}});
+        const auto typeNumber = [](QDoubleSpinBox* box, const QString& text) {
+            box->setFocus();
+            box->selectAll();
+            QTest::keyClicks(box, text);
+            QTest::keyClick(box, Qt::Key_Return);
+        };
+
+        typeNumber(inspector->angleBox(), QStringLiteral("45"));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Rotate player"));
+        QCOMPARE(entityAt(f.scene(), {1})->transform.rot, 45.0);
+        QVERIFY(inspector->angleBox()->text().endsWith(QStringLiteral("°")));
+
+        typeNumber(inspector->scaleXBox(), QStringLiteral("2"));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Scale player"));
+        QCOMPARE(entityAt(f.scene(), {1})->transform.scale, (Point{2, 1}));
+        const int count = f.document().commands().count();
+        typeNumber(inspector->scaleYBox(), QStringLiteral("0"));
+        QCOMPARE(inspector->message(), QStringLiteral("A scale can't be zero."));
+        QCOMPARE(f.document().commands().count(), count);
+        QCOMPARE(inspector->scaleYBox()->value(), 1.0);
+
+        QVERIFY(inspector->flipXBox()->isChecked());  // the player faces left
+        inspector->flipXBox()->click();
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Unflip player horizontally"));
+        QVERIFY(!entityAt(f.scene(), {1})->transform.flipX);
+        inspector->flipYBox()->click();
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Flip player vertically"));
+        QVERIFY(entityAt(f.scene(), {1})->transform.flipY);
+
+        // Undo shows the model again, as do edits from the canvas.
+        f.document().commands().undo();
+        QVERIFY(!inspector->flipYBox()->isChecked());
+        f.document().commands().undo();
+        f.document().commands().undo();
+        QCOMPARE(inspector->scaleXBox()->value(), 1.0);
+        f.canvas().commitTransform({1}, 90, Point{1, 1}, QStringLiteral("Rotate"));
+        QCOMPARE(inspector->angleBox()->value(), 90.0);
     }
 
     void theClassesPanelListsTheRegistry()

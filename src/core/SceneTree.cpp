@@ -67,6 +67,11 @@ bool isAncestor(const EntityPath& ancestor, const EntityPath& path)
     return ancestor.size() < path.size() && path.first(ancestor.size()) == ancestor;
 }
 
+QString describe(const Entity& entity)
+{
+    return entity.id.isEmpty() ? enumName(entity.type) : entity.id;
+}
+
 void forEachEntity(const Scene& scene,
                    const std::function<void(const Entity&, const EntityPath&)>& visit)
 {

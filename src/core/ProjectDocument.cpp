@@ -253,6 +253,15 @@ void ProjectDocument::setStartScene(const QString& id)
     emit changed();
 }
 
+void ProjectDocument::setSceneSettings(const QString& id, Size size, std::optional<Fit> fit)
+{
+    Scene& scene = sceneForEdit(id);
+    scene.size = size;
+    scene.fit = fit;
+    emit sceneSettingsChanged(id);
+    emit changed();
+}
+
 void ProjectDocument::insertTransition(Transition transition)
 {
     Q_ASSERT(!findTransition(transition.id));

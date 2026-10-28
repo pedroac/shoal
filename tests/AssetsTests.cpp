@@ -47,6 +47,23 @@ QImage draw(const Sheet& sheet, const QString& path, bool flipX, bool flipY)
     return image;
 }
 
+/// Draws a sprite as a nine-slice of `size` with its pivot at the middle of a 64x64 image.
+QImage drawNineSlice(const Sheet& sheet, const QString& path, QSizeF size, bool flipX, bool flipY)
+{
+    const Sprite& sprite = *sheet.sprite(path);
+    QImage image(64, 64, QImage::Format_ARGB32);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    for (const SpritePlacement& cell : placeNineSlice(sprite, 1, size, flipX, flipY).cells) {
+        painter.save();
+        painter.translate(32, 32);
+        painter.setTransform(cell.transform, true);
+        painter.drawImage(cell.target, sheet.atlases[size_t(sprite.atlas)], cell.source);
+        painter.restore();
+    }
+    return image;
+}
+
 }  // namespace
 
 class AssetsTests : public QObject {
@@ -124,6 +141,101 @@ private slots:
         // Flipping mirrors about the pivot.
         QCOMPARE(placeSprite(sprite, 1, true, false).bounds, QRectF(-2, -1, 6, 4));
         QCOMPARE(placeSprite(sprite, 1, false, true).bounds, QRectF(-4, -3, 6, 4));
+    }
+
+    void placesNineSlicesLikeSpratRaylib()
+    {
+        // A 12x12 panel with 4-pixel borders, untrimmed, its pivot at its top-left.
+        Sprite panel;
+        panel.rect = QRect(0, 20, 12, 12);
+        panel.hasSlice = true;
+        panel.slice = QMargins(4, 4, 4, 4);
+        panel.contentSize = QSize(12, 12);
+        panel.sourceSize = QSize(12, 12);
+        QCOMPARE(naturalSize(panel, 0.5), QSizeF(6, 6));
+
+        NineSlicePlacement placed = placeNineSlice(panel, 1, QSizeF(30, 20), false, false);
+        QCOMPARE(placed.bounds, QRectF(0, 0, 30, 20));
+        QCOMPARE(placed.cells.size(), size_t(9));
+        // The corners keep their size; the edges and the middle stretch.
+        QCOMPARE(placed.cells[0].bounds, QRectF(0, 0, 4, 4));
+        QCOMPARE(placed.cells[0].source, QRectF(0, 20, 4, 4));
+        QCOMPARE(placed.cells[1].bounds, QRectF(4, 0, 22, 4));
+        QCOMPARE(placed.cells[1].source, QRectF(4, 20, 4, 4));
+        QCOMPARE(placed.cells[4].bounds, QRectF(4, 4, 22, 12));
+        QCOMPARE(placed.cells[8].bounds, QRectF(26, 16, 4, 4));
+        // At half scale, the borders are half as wide in the scene.
+        placed = placeNineSlice(panel, 0.5, QSizeF(30, 20), false, false);
+        QCOMPARE(placed.cells[0].bounds, QRectF(0, 0, 2, 2));
+        // Borders that don't fit shrink proportionally, and the middle goes.
+        placed = placeNineSlice(panel, 1, QSizeF(6, 20), false, false);
+        QCOMPARE(placed.cells.size(), size_t(6));
+        QCOMPARE(placed.cells[0].bounds, QRectF(0, 0, 3, 4));
+        // The pivot keeps its fraction of the box, and flips mirror about it.
+        panel.pivot = QPoint(6, 12);
+        placed = placeNineSlice(panel, 1, QSizeF(30, 20), false, false);
+        QCOMPARE(placed.bounds, QRectF(-15, -20, 30, 20));
+        QCOMPARE(placed.cells[0].bounds, QRectF(-15, -20, 4, 4));
+        placed = placeNineSlice(panel, 1, QSizeF(30, 20), true, true);
+        QCOMPARE(placed.bounds, QRectF(-15, 0, 30, 20));
+        QCOMPARE(placed.cells[0].bounds, QRectF(11, 16, 4, 4));
+        QVERIFY(placeNineSlice(panel, 1, QSizeF(0, 20), false, false).cells.empty());
+    }
+
+    void aNineSliceAtItsNaturalSizeDrawsLikeTheSprite()
+    {
+        const SheetLoad loaded = loadSheet(heroSheet());
+        QVERIFY(loaded.sheet);
+        // Trimmed and turned when packed, without insets: one cell, the whole content.
+        for (const char* name : {"props/door.png", "hero/idle.png", "ui/panel.9.png"}) {
+            const QString path = QString::fromLatin1(name);
+            const QSizeF size = naturalSize(*loaded.sheet->sprite(path), 1);
+            for (const bool flip : {false, true}) {
+                QCOMPARE(drawNineSlice(*loaded.sheet, path, size, flip, !flip),
+                         draw(*loaded.sheet, path, flip, !flip));
+            }
+        }
+    }
+
+    void cutsATurnedSpriteIntoCells()
+    {
+        // A 6x4 content of unique colors, trimmed out of a 10x6 image, packed turned.
+        QImage upright(6, 4, QImage::Format_ARGB32);
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 6; ++x) {
+                upright.setPixelColor(x, y, QColor(40 * x, 60 * y, 200));
+            }
+        }
+        for (const int rotation : {0, 90, 270}) {
+            Sprite sprite;
+            sprite.rotation = rotation;
+            sprite.trim = QMargins(1, 2, 3, 0);
+            sprite.pivot = QPoint(5, 3);
+            sprite.contentSize = QSize(6, 4);
+            sprite.sourceSize = QSize(10, 6);
+            sprite.hasSlice = true;
+            sprite.slice = QMargins(2, 3, 4, 1);
+            const QImage atlas = upright.transformed(QTransform().rotate(rotation));
+            sprite.rect = QRect(QPoint(), atlas.size());
+
+            const auto render = [&](const std::vector<SpritePlacement>& placements) {
+                QImage image(32, 32, QImage::Format_ARGB32);
+                image.fill(Qt::transparent);
+                QPainter painter(&image);
+                for (const SpritePlacement& placement : placements) {
+                    painter.save();
+                    painter.translate(16, 16);
+                    painter.setTransform(placement.transform, true);
+                    painter.drawImage(placement.target, atlas, placement.source);
+                    painter.restore();
+                }
+                return image;
+            };
+            const NineSlicePlacement cells =
+                placeNineSlice(sprite, 1, naturalSize(sprite, 1), false, false);
+            QVERIFY(cells.cells.size() > 1);
+            QCOMPARE(render(cells.cells), render({placeSprite(sprite, 1, false, false)}));
+        }
     }
 
     void drawsARotatedSpriteUpright()

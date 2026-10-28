@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QMap>
+#include <QSizeF>
 #include <QString>
 #include <QStringList>
 #include <QStringView>
@@ -165,6 +166,9 @@ struct Layer {
     bool operator==(const Layer&) const = default;
 };
 
+/// The smallest scale the editor sets: a zero scale can't be undone by scaling.
+constexpr double MIN_SCALE = 1e-3;
+
 struct Transform {
     Point pos;
     double rot = 0;
@@ -256,6 +260,12 @@ bool isValidId(QStringView id);
 /// Ids are compared without case where they name files, so a project stays valid on
 /// case-insensitive file systems.
 bool idsCollideAsFileNames(QStringView a, QStringView b);
+
+/// A box's size (`nineslice`, `rect`, `text`): `"size": [w, h]`, kept in the entity's
+/// extras until boxes are modeled. Null when it has none, or one that isn't two positive
+/// numbers.
+std::optional<QSizeF> entitySize(const Entity& entity);
+void setEntitySize(Entity& entity, QSizeF size);
 
 // --- enum names, as written in the files ---
 

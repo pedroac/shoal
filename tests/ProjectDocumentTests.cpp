@@ -158,6 +158,24 @@ private slots:
         QCOMPARE(changed.count(), 2);
     }
 
+    void setsASceneSizeAndFit()
+    {
+        ProjectDocument document(fixtureProject());
+        const Project before = document.project();
+        const QString id = QStringLiteral("level_1");
+        QSignalSpy changed(&document, &ProjectDocument::sceneSettingsChanged);
+        document.commands().push(std::make_unique<SetSceneSettingsCommand>(
+            document, id, Size{1920, 1080}, Fit::Crop, QStringLiteral("Resize")));
+        QCOMPARE(document.project().scenes.value(id).size, (Size{1920, 1080}));
+        QCOMPARE(document.project().scenes.value(id).fit, std::optional(Fit::Crop));
+        QCOMPARE(changed.count(), 1);
+        QCOMPARE(changed.first().first().toString(), id);
+
+        document.commands().undo();
+        QCOMPARE(document.project(), before);
+        QCOMPARE(changed.count(), 2);
+    }
+
     void savingMarksTheHistoryClean()
     {
         QTemporaryDir dir;

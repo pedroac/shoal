@@ -3,16 +3,20 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QCompleter>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QRegularExpression>
 #include <QStringListModel>
 #include <QVBoxLayout>
+#include <cmath>
 
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
+#include "editor/FormFields.h"
 #include "editor/SceneCanvas.h"
 
 namespace shoal::editor {
@@ -23,12 +27,6 @@ using core::EntityPath;
 namespace {
 
 const QRegularExpression SEPARATORS(QStringLiteral("[\\s,]+"));
-
-/// An entity's name in a command's text: its id, or its type.
-QString describe(const Entity& entity)
-{
-    return entity.id.isEmpty() ? core::enumName(entity.type) : entity.id;
-}
 
 /// Where the class being typed starts: after the last separator before the cursor, and
 /// after its dot.
@@ -53,7 +51,17 @@ InspectorPanel::InspectorPanel(QWidget* parent)
       m_classesField(new QLineEdit(this)),
       m_activeBox(new QCheckBox(tr("Active"), this)),
       m_visibleBox(new QCheckBox(tr("Visible"), this)),
-      m_message(new QLabel(this)),
+      m_angleBox(numberBox(this, QStringLiteral("angleBox"), 360, 2, 15)),
+      m_scaleXBox(numberBox(this, QStringLiteral("scaleXBox"), 1000, 3, 0.1)),
+      m_scaleYBox(numberBox(this, QStringLiteral("scaleYBox"), 1000, 3, 0.1)),
+      m_widthBox(numberBox(this, QStringLiteral("widthBox"), MAX_SIZE, 2, 1)),
+      m_heightBox(numberBox(this, QStringLiteral("heightBox"), MAX_SIZE, 2, 1)),
+      m_flipXBox(new QCheckBox(tr("Horizontal"), this)),
+      m_flipYBox(new QCheckBox(tr("Vertical"), this)),
+      m_message(messageLabel(this, QStringLiteral("inspectorMessage"))),
+      m_form(new QFormLayout),
+      m_scaleRow(new QWidget(this)),
+      m_sizeRow(new QWidget(this)),
       m_completer(new QCompleter(this)),
       m_classNames(new QStringListModel(this))
 {
@@ -64,24 +72,50 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     m_idField->setPlaceholderText(tr("none: nothing refers to it"));
     m_classesField->setObjectName(QStringLiteral("classesField"));
     m_classesField->setPlaceholderText(tr("e.g. enemy flying"));
-    m_message->setObjectName(QStringLiteral("inspectorMessage"));
-    m_message->setWordWrap(true);
-    m_message->setStyleSheet(QStringLiteral("color: #c83c28"));
-    m_message->hide();
+    m_angleBox->setSuffix(QStringLiteral("°"));
+    m_angleBox->setToolTip(tr("Clockwise, in degrees, about the entity's position"));
+    m_scaleXBox->setPrefix(QStringLiteral("x "));
+    m_scaleYBox->setPrefix(QStringLiteral("y "));
+    m_widthBox->setMinimum(1);
+    m_heightBox->setMinimum(1);
+    m_widthBox->setPrefix(QStringLiteral("w "));
+    m_heightBox->setPrefix(QStringLiteral("h "));
+    m_sizeRow->setToolTip(
+        tr("The nine-slice's borders keep their size; the edges and the "
+           "middle stretch"));
+    m_flipXBox->setObjectName(QStringLiteral("flipXBox"));
+    m_flipYBox->setObjectName(QStringLiteral("flipYBox"));
+    m_flipXBox->setToolTip(tr("Mirrors the entity's own drawing, not its children"));
+    m_flipYBox->setToolTip(m_flipXBox->toolTip());
 
     m_completer->setModel(m_classNames);
     m_completer->setWidget(m_classesField);
     m_completer->setCaseSensitivity(Qt::CaseInsensitive);
     m_completer->setCompletionMode(QCompleter::PopupCompletion);
 
-    auto* form = new QFormLayout;
-    form->addRow(tr("Id"), m_idField);
-    form->addRow(tr("Classes"), m_classesField);
-    form->addRow(QString(), m_activeBox);
-    form->addRow(QString(), m_visibleBox);
+    m_form->addRow(tr("Id"), m_idField);
+    m_form->addRow(tr("Classes"), m_classesField);
+    m_form->addRow(QString(), m_activeBox);
+    m_form->addRow(QString(), m_visibleBox);
+    m_form->addRow(tr("Angle"), m_angleBox);
+    auto* size = new QHBoxLayout(m_sizeRow);
+    size->setContentsMargins({});
+    size->addWidget(m_widthBox);
+    size->addWidget(m_heightBox);
+    m_form->addRow(tr("Size"), m_sizeRow);
+    auto* scale = new QHBoxLayout(m_scaleRow);
+    scale->setContentsMargins({});
+    scale->addWidget(m_scaleXBox);
+    scale->addWidget(m_scaleYBox);
+    m_form->addRow(tr("Scale"), m_scaleRow);
+    auto* flip = new QHBoxLayout;
+    flip->addWidget(m_flipXBox);
+    flip->addWidget(m_flipYBox);
+    flip->addStretch();
+    m_form->addRow(tr("Flip"), flip);
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(m_summary);
-    layout->addLayout(form);
+    layout->addLayout(m_form);
     layout->addWidget(m_message);
     layout->addStretch();
 
@@ -99,6 +133,13 @@ InspectorPanel::InspectorPanel(QWidget* parent)
             &InspectorPanel::insertClass);
     connect(m_activeBox, &QCheckBox::clicked, this, &InspectorPanel::setActive);
     connect(m_visibleBox, &QCheckBox::clicked, this, &InspectorPanel::setVisibleFlag);
+    connect(m_angleBox, &QDoubleSpinBox::valueChanged, this, &InspectorPanel::applyAngle);
+    connect(m_scaleXBox, &QDoubleSpinBox::valueChanged, this, &InspectorPanel::applyScale);
+    connect(m_scaleYBox, &QDoubleSpinBox::valueChanged, this, &InspectorPanel::applyScale);
+    connect(m_widthBox, &QDoubleSpinBox::valueChanged, this, &InspectorPanel::applySize);
+    connect(m_heightBox, &QDoubleSpinBox::valueChanged, this, &InspectorPanel::applySize);
+    connect(m_flipXBox, &QCheckBox::clicked, this, &InspectorPanel::setFlipX);
+    connect(m_flipYBox, &QCheckBox::clicked, this, &InspectorPanel::setFlipY);
     setCanvas(nullptr);
 }
 
@@ -216,8 +257,62 @@ bool InspectorPanel::applyClasses()
     }
     Entity changed = *entity;
     changed.classes = *classes;
-    push(path, std::move(changed), tr("Set the classes of %1").arg(describe(*entity)));
+    push(path, std::move(changed), tr("Set the classes of %1").arg(core::describe(*entity)));
     return true;
+}
+
+void InspectorPanel::applyAngle()
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity || m_angleBox->value() == entity->transform.rot) {
+        return;
+    }
+    Entity changed = *entity;
+    changed.transform.rot = m_angleBox->value();
+    push(path, std::move(changed), tr("Rotate %1").arg(core::describe(*entity)));
+}
+
+bool InspectorPanel::applyScale()
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity) {
+        return false;
+    }
+    const core::Point scale{m_scaleXBox->value(), m_scaleYBox->value()};
+    if (std::abs(scale.x) < core::MIN_SCALE || std::abs(scale.y) < core::MIN_SCALE) {
+        showMessage(tr("A scale can't be zero."));
+        refresh();
+        return false;
+    }
+    if (scale == entity->transform.scale) {
+        showMessage({});
+        return true;
+    }
+    Entity changed = *entity;
+    changed.transform.scale = scale;
+    push(path, std::move(changed), tr("Scale %1").arg(core::describe(*entity)));
+    return true;
+}
+
+void InspectorPanel::applySize()
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (entity && entity->type == core::EntityType::NineSlice) {
+        m_canvas->commitSize(path, QSizeF(m_widthBox->value(), m_heightBox->value()));
+    }
+}
+
+bool InspectorPanel::showsScale() const
+{
+    return m_form->isRowVisible(m_scaleRow);
+}
+
+bool InspectorPanel::showsSize() const
+{
+    return m_form->isRowVisible(m_sizeRow);
 }
 
 bool InspectorPanel::eventFilter(QObject* watched, QEvent* event)
@@ -238,9 +333,9 @@ void InspectorPanel::refresh()
 {
     const QList<EntityPath> paths = m_canvas ? m_canvas->selectedPaths() : QList<EntityPath>();
     const Entity* entity = selected();
-    for (QWidget* field :
-         {static_cast<QWidget*>(m_idField), static_cast<QWidget*>(m_classesField),
-          static_cast<QWidget*>(m_activeBox), static_cast<QWidget*>(m_visibleBox)}) {
+    for (QWidget* field : std::initializer_list<QWidget*>{
+             m_idField, m_classesField, m_activeBox, m_visibleBox, m_angleBox, m_scaleXBox,
+             m_scaleYBox, m_widthBox, m_heightBox, m_flipXBox, m_flipYBox}) {
         field->setEnabled(entity != nullptr);
     }
     if (!entity) {
@@ -253,6 +348,13 @@ void InspectorPanel::refresh()
         m_classesField->setToolTip({});
         m_activeBox->setChecked(false);
         m_visibleBox->setChecked(false);
+        showValue(m_angleBox, 0);
+        showValue(m_scaleXBox, 1);
+        showValue(m_scaleYBox, 1);
+        m_flipXBox->setChecked(false);
+        m_flipYBox->setChecked(false);
+        m_form->setRowVisible(m_sizeRow, false);
+        m_form->setRowVisible(m_scaleRow, true);
         return;
     }
 
@@ -276,6 +378,19 @@ void InspectorPanel::refresh()
     }
     m_activeBox->setChecked(entity->active);
     m_visibleBox->setChecked(entity->visible);
+    showValue(m_angleBox, entity->transform.rot);
+    showValue(m_scaleXBox, entity->transform.scale.x);
+    showValue(m_scaleYBox, entity->transform.scale.y);
+    m_flipXBox->setChecked(entity->transform.flipX);
+    m_flipYBox->setChecked(entity->transform.flipY);
+    const QSizeF size = m_canvas->nineSliceSize(*entity);
+    m_form->setRowVisible(m_sizeRow, !size.isEmpty());
+    m_form->setRowVisible(m_scaleRow,
+                          size.isEmpty() || entity->transform.scale != core::Point{1, 1});
+    if (!size.isEmpty()) {
+        showValue(m_widthBox, size.width());
+        showValue(m_heightBox, size.height());
+    }
 
     // Each class's declaration, as a tooltip.
     const auto& registry = m_document->project().classes;
@@ -313,8 +428,7 @@ void InspectorPanel::refreshClasses()
 
 void InspectorPanel::showMessage(const QString& message)
 {
-    m_message->setText(message);
-    m_message->setVisible(!message.isEmpty());
+    editor::showMessage(m_message, message);
 }
 
 void InspectorPanel::setActive(bool active)
@@ -324,7 +438,7 @@ void InspectorPanel::setActive(bool active)
         Entity changed = *entity;
         changed.active = active;
         push(path, std::move(changed),
-             (active ? tr("Activate %1") : tr("Deactivate %1")).arg(describe(*entity)));
+             (active ? tr("Activate %1") : tr("Deactivate %1")).arg(core::describe(*entity)));
     }
 }
 
@@ -335,7 +449,31 @@ void InspectorPanel::setVisibleFlag(bool visible)
         Entity changed = *entity;
         changed.visible = visible;
         push(path, std::move(changed),
-             (visible ? tr("Show %1") : tr("Hide %1")).arg(describe(*entity)));
+             (visible ? tr("Show %1") : tr("Hide %1")).arg(core::describe(*entity)));
+    }
+}
+
+void InspectorPanel::setFlipX(bool flip)
+{
+    EntityPath path;
+    if (const Entity* entity = selected(&path); entity && entity->transform.flipX != flip) {
+        Entity changed = *entity;
+        changed.transform.flipX = flip;
+        push(path, std::move(changed),
+             (flip ? tr("Flip %1 horizontally") : tr("Unflip %1 horizontally"))
+                 .arg(core::describe(*entity)));
+    }
+}
+
+void InspectorPanel::setFlipY(bool flip)
+{
+    EntityPath path;
+    if (const Entity* entity = selected(&path); entity && entity->transform.flipY != flip) {
+        Entity changed = *entity;
+        changed.transform.flipY = flip;
+        push(path, std::move(changed),
+             (flip ? tr("Flip %1 vertically") : tr("Unflip %1 vertically"))
+                 .arg(core::describe(*entity)));
     }
 }
 

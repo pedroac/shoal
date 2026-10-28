@@ -28,8 +28,10 @@
 #include "editor/NewProjectDialog.h"
 #include "editor/PresetsPanel.h"
 #include "editor/SceneCanvas.h"
+#include "editor/SceneSettingsPanel.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
+#include "editor/ScenesPanel.h"
 #include "editor/SheetBrowserPanel.h"
 
 namespace shoal::editor {
@@ -62,11 +64,15 @@ QAction* makeAction(QObject* parent, const QString& objectName, const QString& t
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
     resize(DEFAULT_WIDTH, DEFAULT_HEIGHT);
-    // The scene tree, and under it what to place: sheets and presets. The selected entity
-    // and the classes on the right.
+    // On the left, the scenes (flow) or the scene tree (a scene), and under it what to
+    // place: sheets and presets. On the right, the selected scene (flow) or entity (a
+    // scene), and the classes.
+    m_scenes = new ScenesPanel(this);
+    m_scenesDock =
+        addDock(m_scenes, tr("Scenes"), QStringLiteral("scenesDock"), Qt::LeftDockWidgetArea);
     m_sceneTree = new SceneTreePanel(this);
     m_sceneTreeDock =
-        addDock(m_sceneTree, tr("Scene"), QStringLiteral("sceneTreeDock"), Qt::LeftDockWidgetArea);
+        addDock(m_sceneTree, tr("Layers"), QStringLiteral("sceneTreeDock"), Qt::LeftDockWidgetArea);
     m_sheetBrowser = new SheetBrowserPanel(m_sheets, this);
     m_sheetBrowserDock = addDock(m_sheetBrowser, tr("Sheets"), QStringLiteral("sheetBrowserDock"),
                                  Qt::LeftDockWidgetArea);
@@ -75,12 +81,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         addDock(m_presets, tr("Presets"), QStringLiteral("presetsDock"), Qt::LeftDockWidgetArea);
     tabifyDockWidget(m_sheetBrowserDock, m_presetsDock);
     m_sheetBrowserDock->raise();
+    m_sceneSettings = new SceneSettingsPanel(this);
+    m_sceneSettingsDock = addDock(m_sceneSettings, tr("Scene"), QStringLiteral("sceneSettingsDock"),
+                                  Qt::RightDockWidgetArea);
     m_inspector = new InspectorPanel(this);
     m_inspectorDock = addDock(m_inspector, tr("Inspector"), QStringLiteral("inspectorDock"),
                               Qt::RightDockWidgetArea);
     m_classes = new ClassesPanel(this);
     m_classesDock =
         addDock(m_classes, tr("Classes"), QStringLiteral("classesDock"), Qt::RightDockWidgetArea);
+    m_tabDocks = {{m_scenesDock, false},
+                  {m_sceneSettingsDock, false},
+                  {m_sceneTreeDock, true},
+                  {m_presetsDock, true},
+                  {m_inspectorDock, true}};
+    connect(m_scenes, &ScenesPanel::sceneActivated, this, &MainWindow::openScene);
     connect(m_sheetBrowser, &SheetBrowserPanel::placeRequested, this, &MainWindow::placeSheetItem);
     connect(m_presets, &PresetsPanel::placeRequested, this, &MainWindow::placePreset);
     connect(m_sheetBrowser, &SheetBrowserPanel::sheetFilesDropped, this, &MainWindow::addSheets);
@@ -268,6 +283,8 @@ void MainWindow::createMenus()
     viewMenu->addSeparator();
     viewMenu->addAction(m_snapAction);
     viewMenu->addSeparator();
+    viewMenu->addAction(m_scenesDock->toggleViewAction());
+    viewMenu->addAction(m_sceneSettingsDock->toggleViewAction());
     viewMenu->addAction(m_sceneTreeDock->toggleViewAction());
     viewMenu->addAction(m_sheetBrowserDock->toggleViewAction());
     viewMenu->addAction(m_presetsDock->toggleViewAction());
@@ -284,6 +301,8 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     // Tear down the views first: they show the old document. Its scenes emit
     // selectionChanged() as they go, which must no longer reach this window.
     setPanelCanvas(nullptr);
+    m_scenes->setFlowScene(nullptr);
+    m_sceneSettings->setFlowScene(nullptr);
     m_classes->setDocument(nullptr);
     m_presets->setDocument(nullptr);
     if (m_tabs) {
@@ -307,6 +326,8 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
 
     if (m_document) {
         m_flowScene = std::make_unique<FlowScene>(*m_document);
+        m_scenes->setFlowScene(m_flowScene.get());
+        m_sceneSettings->setFlowScene(m_flowScene.get());
         m_tabs = new QTabWidget(this);
         m_tabs->setObjectName(QStringLiteral("workspaceTabs"));
         m_tabs->setDocumentMode(true);
@@ -358,6 +379,7 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     }
     updateTitle();
     updateActions();
+    updateDocks();
 }
 
 SceneView* MainWindow::currentSceneView() const
@@ -410,6 +432,7 @@ void MainWindow::onCurrentTabChanged()
 {
     setPanelCanvas(currentSceneView());
     updateActions();
+    updateDocks();
 }
 
 void MainWindow::setPanelCanvas(SceneView* view)
@@ -417,6 +440,24 @@ void MainWindow::setPanelCanvas(SceneView* view)
     SceneCanvas* canvas = view ? &view->canvas() : nullptr;
     m_sceneTree->setCanvas(canvas);
     m_inspector->setCanvas(canvas);
+}
+
+void MainWindow::updateDocks()
+{
+    const bool forScene = currentSceneView() != nullptr;
+    if (m_docksForScene == forScene) {
+        return;
+    }
+    for (TabDock& tabDock : m_tabDocks) {
+        // Leaving its kind of tab: remember it as the user left it, before hiding it.
+        if (m_docksForScene && tabDock.forScene == *m_docksForScene) {
+            tabDock.wanted = !tabDock.dock->isHidden();
+        }
+        const bool shown = tabDock.forScene == forScene;
+        tabDock.dock->toggleViewAction()->setVisible(shown);
+        tabDock.dock->setVisible(shown && tabDock.wanted);
+    }
+    m_docksForScene = forScene;
 }
 
 QDockWidget* MainWindow::addDock(QWidget* panel, const QString& title, const QString& objectName,

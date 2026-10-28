@@ -176,6 +176,32 @@ void SetStartSceneCommand::undo()
     m_document.setStartScene(m_from);
 }
 
+// --- SetSceneSettingsCommand ---
+
+SetSceneSettingsCommand::SetSceneSettingsCommand(ProjectDocument& document, QString id, Size size,
+                                                 std::optional<Fit> fit, QString text)
+    : m_document(document),
+      m_id(std::move(id)),
+      m_text(std::move(text)),
+      m_sizeAfter(size),
+      m_fitAfter(fit)
+{
+    const auto it = document.project().scenes.constFind(m_id);
+    Q_ASSERT(it != document.project().scenes.constEnd());
+    m_sizeBefore = it->size;
+    m_fitBefore = it->fit;
+}
+
+void SetSceneSettingsCommand::redo()
+{
+    m_document.setSceneSettings(m_id, m_sizeAfter, m_fitAfter);
+}
+
+void SetSceneSettingsCommand::undo()
+{
+    m_document.setSceneSettings(m_id, m_sizeBefore, m_fitBefore);
+}
+
 // --- AddTransitionCommand ---
 
 AddTransitionCommand::AddTransitionCommand(ProjectDocument& document, Transition transition)

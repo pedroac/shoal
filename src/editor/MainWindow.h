@@ -3,6 +3,7 @@
 #include <QList>
 #include <QMainWindow>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "assets/SheetCache.h"
@@ -25,13 +26,18 @@ class InspectorPanel;
 class PresetsPanel;
 class FlowScene;
 class FlowView;
+class SceneSettingsPanel;
+class ScenesPanel;
 class SceneTreePanel;
 class SceneView;
 class SheetBrowserPanel;
 struct SheetItem;
 
 /// The editor's top-level window: one open project, with the flow view in the first tab
-/// and a tab for each open scene. The docks follow the current scene tab.
+/// and a tab for each open scene. The docks follow the current tab, and show only where
+/// they can be used: the scenes and the selected scene's settings on the flow; the layers
+/// and entities, the presets and the entity inspector on a scene; the sheets and the
+/// classes on both. Each keeps, per tab kind, whether the user closed it.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -50,6 +56,8 @@ public:
     InspectorPanel* inspector() const { return m_inspector; }
     ClassesPanel* classesPanel() const { return m_classes; }
     PresetsPanel* presetsPanel() const { return m_presets; }
+    ScenesPanel* scenesPanel() const { return m_scenes; }
+    SceneSettingsPanel* sceneSettingsPanel() const { return m_sceneSettings; }
     assets::SheetCache& sheets() { return m_sheets; }
     /// The current tab's scene view, or null when the flow tab is current.
     SceneView* currentSceneView() const;
@@ -104,6 +112,9 @@ private:
     void setPanelCanvas(SceneView* view);
     QDockWidget* addDock(QWidget* panel, const QString& title, const QString& objectName,
                          Qt::DockWidgetArea area);
+    /// Shows the docks of the current tab's kind, as the user left them, and hides the
+    /// others along with their View menu entries.
+    void updateDocks();
 
     std::unique_ptr<core::ProjectDocument> m_document;
     std::unique_ptr<FlowScene> m_flowScene;
@@ -122,6 +133,18 @@ private:
     InspectorPanel* m_inspector = nullptr;
     QDockWidget* m_classesDock = nullptr;
     ClassesPanel* m_classes = nullptr;
+    QDockWidget* m_scenesDock = nullptr;
+    ScenesPanel* m_scenes = nullptr;
+    QDockWidget* m_sceneSettingsDock = nullptr;
+    SceneSettingsPanel* m_sceneSettings = nullptr;
+    /// A dock for one kind of tab.
+    struct TabDock {
+        QDockWidget* dock;
+        bool forScene;       ///< For scene tabs, or else for the flow.
+        bool wanted = true;  ///< Open when its kind of tab was last left.
+    };
+    QList<TabDock> m_tabDocks;
+    std::optional<bool> m_docksForScene;  ///< The kind of tab the docks show for.
 
     QAction* m_newAction = nullptr;
     QAction* m_openAction = nullptr;

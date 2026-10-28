@@ -78,6 +78,21 @@ bool idsCollideAsFileNames(QStringView a, QStringView b)
     return a.compare(b, Qt::CaseInsensitive) == 0;
 }
 
+std::optional<QSizeF> entitySize(const Entity& entity)
+{
+    const QJsonArray size = entity.extras.value(QStringLiteral("size")).toArray();
+    if (size.size() != 2 || !size[0].isDouble() || !size[1].isDouble()) {
+        return std::nullopt;
+    }
+    const QSizeF result(size[0].toDouble(), size[1].toDouble());
+    return result.isEmpty() ? std::nullopt : std::optional(result);
+}
+
+void setEntitySize(Entity& entity, QSizeF size)
+{
+    entity.extras.insert(QStringLiteral("size"), QJsonArray{size.width(), size.height()});
+}
+
 std::span<const EnumName<Fit>> enumNames(Fit)
 {
     return FIT_NAMES;

@@ -289,13 +289,21 @@ The flow is a **stack** of scenes. Transitions change it in one of four ways:
 | `group` | A container with no visuals of its own |
 | `sprite` | `{ sheet, path }`: a sprat sprite, bound by path |
 | `animation` | `"animation": { sheet, name }`: a sprat animation, by name |
-| `nineslice` | `{ sheet, path }` with a size; stretched with sprat's slice insets |
+| `nineslice` | `{ sheet, path }` with a `size` [w, h]; stretched with sprat's slice insets (see below) |
 | `text` | A box with text, alignment and an overflow hint (see open questions) |
 | `rect` | A plain colored box, mostly for UI |
 | `mark` | A point, optionally with a facing direction |
 | `path` | `{ points, curve: "linear" \| "bezier", closed }` |
 | `region` | `{ rect }`, `{ polygon }` or `{ circle }` |
 | `camera` | Section 10 |
+
+A nine-slice's `size` is in world units; without one it takes its sprite's natural
+size (the original image, trim included). Its pivot stays at the same fraction of the
+box as of the image, so at its natural size it covers what the sprite does. The borders
+keep their size, shrinking proportionally when they don't fit, and the edges and the
+middle stretch, as in sprat-raylib's `DrawSpratFrameNPatch`; slices are cut in the
+original image, then clipped to the trimmed content. Its `scale` scales all of it,
+borders included.
 
 Sprites are referenced by sheet alias plus sprite path (`"sprite": { "sheet": "hero",
 "path": "hero/idle.png" }`), never by name, because sprat names are basenames and
@@ -587,6 +595,16 @@ element's parent is the viewport, or the safe area.
     autosave to the project itself.
   - A scene with no stored position is placed below the others, without changing
     the project, until the user moves it. Opening a project never modifies it.
+  - The scenes panel lists every scene, the start scene marked, and shares the
+    flow's selection; activating one opens it. The scene panel edits the one
+    selected scene: its id (renaming it as the context menu does), whether the game
+    starts there, its size and its fit (the project's, or its own), each one undo
+    step.
+- **Docks follow the current tab**, and show only where they can be used: the
+  scenes and the scene panel on the flow; the layers and entities, the presets and
+  the inspector on a scene; the sheets and the classes on both. The View menu lists
+  only the current tab's, and a dock the user closes stays closed the next time
+  that kind of tab is current.
 - **Files:** a new project starts from a template, in memory; its folder is asked
   on the first save. Opening takes a project folder or its `project.shoal.json`,
   also from the command line. Closing or replacing a modified project asks first.
@@ -612,16 +630,22 @@ element's parent is the viewport, or the safe area.
   - Hiding and locking layers, the current layer (where new entities go) and the
     grid are editor state: they never modify the project. They are kept in memory
     for now and will move to `.shoal/session.json`.
-  - A drag is one undo step. Snapping rounds to the grid (16 units); Alt drags
+  - A drag is one undo step. It starts once the mouse moves past the platform's drag
+    distance, so a click never moves an entity, even when the view scrolls under
+    the pressed button. Snapping rounds to the grid (16 units); Alt drags
     freely. Arrow keys nudge by a unit, or a grid cell when snapping, ten with
     Shift.
   - A single selected entity has a rotate handle above its outline and a scale
     handle at its bottom-right corner, the same size on screen at any zoom. They
     turn and scale it about its position, where a sprite's sprat pivot sits (screen
     elements will use `layout.pivot`); Shift snaps rotation to 15 degrees.
-    Releasing the mouse is one undo step, and a click changes nothing.
-  - The inspector edits the selected entity's id, classes, and active and
-    visible flags, each one undo step. An id must be valid and unique in the
+    Releasing the mouse is one undo step, and a click changes nothing. On a nine-slice
+    the scale handle changes its `size` instead, in whole units, so its borders keep
+    their size: the corner follows the mouse on each axis.
+  - The inspector edits the selected entity's id, classes, active and visible
+    flags, angle (degrees), scale and flips, each one undo step; a scale can't be
+    zero. A nine-slice shows its size instead of its scale, unless its scale isn't
+    1. An id must be valid and unique in the
     scene; renaming it renames it in the transitions, and one a transition names
     can't be removed. Classes are typed separated by spaces or commas, with an
     optional leading dot; they complete from the class registry and show their
@@ -646,8 +670,8 @@ element's parent is the viewport, or the safe area.
     entity with no id, on the current layer, at the drop point (snapped when
     snapping is on), and selects it; double-clicking it in the browser places it in
     the middle of the view. Either is one undo step. A hidden or locked current layer
-    refuses it, since the new entity couldn't be seen or picked. Nine-slice sprites
-    are placed as plain sprites until nine-slice sizes are modeled.
+    refuses it, since the new entity couldn't be seen or picked. A sprite with
+    nine-slice insets is placed as a `nineslice` at its natural size.
   - Screen-space layers are listed but not drawn until the UI layout step.
 - **Transition editor:** trigger and requirements, the effect and its parameters,
   the persisted state, and the mapping of entities to marks.

@@ -63,6 +63,8 @@ add_library(shoal_editor STATIC
     editor/FlowScene.h
     editor/FlowView.cpp
     editor/FlowView.h
+    editor/FormFields.cpp
+    editor/FormFields.h
     editor/InspectorPanel.cpp
     editor/InspectorPanel.h
     editor/MainWindow.cpp
@@ -79,6 +81,10 @@ add_library(shoal_editor STATIC
     editor/SceneView.h
     editor/SceneNodeItem.cpp
     editor/SceneNodeItem.h
+    editor/SceneSettingsPanel.cpp
+    editor/SceneSettingsPanel.h
+    editor/ScenesPanel.cpp
+    editor/ScenesPanel.h
     editor/SheetBrowserPanel.cpp
     editor/SheetBrowserPanel.h
     editor/SheetItem.cpp

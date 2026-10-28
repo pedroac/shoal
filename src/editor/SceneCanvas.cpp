@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "assets/SheetCache.h"
+#include "assets/SpriteSheet.h"
 #include "core/CommandStack.h"
 #include "core/Presets.h"
 #include "core/ProjectDocument.h"
@@ -55,6 +56,13 @@ SceneCanvas::SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sh
             [this](const QString& id) {
                 if (id == m_sceneId) {
                     rebuild();
+                }
+            });
+    // Its size only moves the bounds the views draw behind the items.
+    connect(&m_document, &core::ProjectDocument::sceneSettingsChanged, this,
+            [this](const QString& id) {
+                if (id == m_sceneId) {
+                    update();
                 }
             });
     connect(&m_document, &core::ProjectDocument::sceneRenamed, this,
@@ -380,10 +388,8 @@ void SceneCanvas::commitMoves()
     std::sort(changes.begin(), changes.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
     const Entity& first = changes.first().second;
-    const QString text =
-        changes.size() == 1
-            ? tr("Move %1").arg(first.id.isEmpty() ? core::enumName(first.type) : first.id)
-            : tr("Move %n entities", nullptr, int(changes.size()));
+    const QString text = changes.size() == 1 ? tr("Move %1").arg(core::describe(first))
+                                             : tr("Move %n entities", nullptr, int(changes.size()));
     m_document.commands().push(
         std::make_unique<core::EditEntitiesCommand>(m_document, m_sceneId, changes, text));
 }
@@ -401,10 +407,28 @@ void SceneCanvas::commitTransform(const EntityPath& path, double rotation, core:
     }
     entity.transform.rot = rotation;
     entity.transform.scale = scale;
-    const QString name = entity.id.isEmpty() ? core::enumName(entity.type) : entity.id;
     m_document.commands().push(std::make_unique<core::EditEntitiesCommand>(
         m_document, m_sceneId, QList<std::pair<EntityPath, Entity>>{{path, entity}},
-        QStringLiteral("%1 %2").arg(verb, name)));
+        QStringLiteral("%1 %2").arg(verb, core::describe(entity))));
+}
+
+void SceneCanvas::commitSize(const EntityPath& path, QSizeF size)
+{
+    EntityItem* entityItem = item(path);
+    const Entity* current = scene() ? core::entityAt(*scene(), path) : nullptr;
+    if (!entityItem || !current) {
+        return;
+    }
+    Entity entity = *current;
+    entity.children.clear();
+    if (nineSliceSize(entity) == size) {
+        entityItem->setEntity(entity);  // drops what the handle showed
+        return;
+    }
+    core::setEntitySize(entity, size);
+    m_document.commands().push(std::make_unique<core::EditEntitiesCommand>(
+        m_document, m_sceneId, QList<std::pair<EntityPath, Entity>>{{path, entity}},
+        tr("Resize %1").arg(core::describe(entity))));
 }
 
 void SceneCanvas::clearItems()
@@ -437,6 +461,28 @@ void SceneCanvas::updateHandles()
 }
 
 // --- visuals ---
+
+SceneCanvas::SpriteVisual SceneCanvas::visualOf(const Entity& entity) const
+{
+    if (entity.type == core::EntityType::Animation && entity.animation) {
+        return animationVisual(entity.animation->sheet, entity.animation->name);
+    }
+    if (entity.sprite) {
+        return spriteVisual(entity.sprite->sheet, entity.sprite->path);
+    }
+    return {};
+}
+
+QSizeF SceneCanvas::nineSliceSize(const Entity& entity, const SpriteVisual& visual)
+{
+    if (entity.type != core::EntityType::NineSlice) {
+        return {};
+    }
+    if (const std::optional<QSizeF> size = core::entitySize(entity)) {
+        return *size;
+    }
+    return visual.sprite ? assets::naturalSize(*visual.sprite, visual.drawScale) : QSizeF();
+}
 
 SceneCanvas::SpriteVisual SceneCanvas::spriteVisual(const QString& sheet, const QString& path) const
 {

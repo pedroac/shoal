@@ -4,6 +4,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <array>
 
 namespace shoal::assets {
 
@@ -139,6 +140,101 @@ SpritePlacement placeSprite(const Sprite& sprite, double drawScale, bool flipX, 
         QTransform::fromTranslate(center.x() * drawScale, center.y() * drawScale) *
         QTransform::fromScale(flipX ? -1 : 1, flipY ? -1 : 1);
     placement.bounds = placement.transform.mapRect(placement.target);
+    return placement;
+}
+
+QSizeF naturalSize(const Sprite& sprite, double drawScale)
+{
+    return QSizeF(sprite.sourceSize) * drawScale;
+}
+
+namespace {
+
+/// The edges of the three slices along one axis of the box; the borders shrink
+/// proportionally when they don't fit.
+std::array<double, 4> sliceEdges(double start, double length, double before, double after)
+{
+    if (before + after > length) {
+        const double ratio = length / (before + after);
+        before *= ratio;
+        after *= ratio;
+    }
+    return {start, start + before, start + length - after, start + length};
+}
+
+/// Draws `upright`, a part of the sprite's upright content in content coordinates, into
+/// `part`, in pivot space before `mirror`.
+SpritePlacement placeRegion(const Sprite& sprite, const QRectF& upright, const QRectF& part,
+                            const QTransform& mirror)
+{
+    // Where the part was stored: turned clockwise as the whole content was.
+    const double width = sprite.contentSize.width();
+    const double height = sprite.contentSize.height();
+    QRectF stored = upright;
+    if (sprite.rotation == 90) {
+        stored = QRectF(QPointF(height - upright.bottom(), upright.left()),
+                        QPointF(height - upright.top(), upright.right()));
+    }
+    else if (sprite.rotation == 270) {
+        stored = QRectF(QPointF(upright.top(), width - upright.right()),
+                        QPointF(upright.bottom(), width - upright.left()));
+    }
+    const QSizeF target =
+        sprite.rotation == 90 || sprite.rotation == 270 ? part.size().transposed() : part.size();
+    SpritePlacement placement;
+    placement.source = stored.translated(sprite.rect.topLeft());
+    placement.target = QRectF(QPointF(-target.width() / 2, -target.height() / 2), target);
+    placement.transform = QTransform().rotate(-sprite.rotation) *
+                          QTransform::fromTranslate(part.center().x(), part.center().y()) * mirror;
+    placement.bounds = placement.transform.mapRect(placement.target);
+    return placement;
+}
+
+}  // namespace
+
+NineSlicePlacement placeNineSlice(const Sprite& sprite, double drawScale, QSizeF size, bool flipX,
+                                  bool flipY)
+{
+    NineSlicePlacement placement;
+    const QSizeF source(sprite.sourceSize);
+    if (source.isEmpty() || size.isEmpty()) {
+        return placement;
+    }
+    const QRectF box(-sprite.pivot.x() * size.width() / source.width(),
+                     -sprite.pivot.y() * size.height() / source.height(), size.width(),
+                     size.height());
+    const QTransform mirror = QTransform::fromScale(flipX ? -1 : 1, flipY ? -1 : 1);
+    placement.bounds = mirror.mapRect(box);
+
+    const QMargins slice = sprite.hasSlice ? sprite.slice : QMargins();
+    const std::array<double, 4> sourceX{0.0, double(slice.left()), source.width() - slice.right(),
+                                        source.width()};
+    const std::array<double, 4> sourceY{0.0, double(slice.top()), source.height() - slice.bottom(),
+                                        source.height()};
+    const std::array<double, 4> boxX =
+        sliceEdges(box.left(), box.width(), slice.left() * drawScale, slice.right() * drawScale);
+    const std::array<double, 4> boxY =
+        sliceEdges(box.top(), box.height(), slice.top() * drawScale, slice.bottom() * drawScale);
+    const QRectF content(QPointF(sprite.trim.left(), sprite.trim.top()),
+                         QSizeF(sprite.contentSize));
+    for (size_t row = 0; row < 3; ++row) {
+        for (size_t column = 0; column < 3; ++column) {
+            const QRectF cell(QPointF(sourceX[column], sourceY[row]),
+                              QPointF(sourceX[column + 1], sourceY[row + 1]));
+            const QRectF clipped = cell.intersected(content);
+            if (clipped.isEmpty() || boxX[column + 1] <= boxX[column] ||
+                boxY[row + 1] <= boxY[row]) {
+                continue;
+            }
+            const double scaleX = (boxX[column + 1] - boxX[column]) / cell.width();
+            const double scaleY = (boxY[row + 1] - boxY[row]) / cell.height();
+            const QRectF part(boxX[column] + (clipped.left() - cell.left()) * scaleX,
+                              boxY[row] + (clipped.top() - cell.top()) * scaleY,
+                              clipped.width() * scaleX, clipped.height() * scaleY);
+            placement.cells.push_back(
+                placeRegion(sprite, clipped.translated(-content.topLeft()), part, mirror));
+        }
+    }
     return placement;
 }
 

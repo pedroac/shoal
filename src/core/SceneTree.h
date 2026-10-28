@@ -29,6 +29,9 @@ QString layerOf(const Scene& scene, const EntityPath& path);
 /// Whether `ancestor` is a strict ancestor of `path`.
 bool isAncestor(const EntityPath& ancestor, const EntityPath& path);
 
+/// An entity's name in a command's text: its id, or its type.
+QString describe(const Entity& entity);
+
 /// Visits every entity, parents before children, in draw order.
 void forEachEntity(const Scene& scene,
                    const std::function<void(const Entity&, const EntityPath&)>& visit);

@@ -8,6 +8,7 @@
 #include <QPainter>
 #include <cmath>
 
+#include "assets/SpriteSheet.h"
 #include "editor/EntityItem.h"
 #include "editor/PresetsPanel.h"
 #include "editor/SceneCanvas.h"
@@ -36,7 +37,17 @@ SceneView::~SceneView()
 
 core::EntityPath SceneView::place(const SheetItem& item, QPointF scenePosition)
 {
-    const core::EntityPath path = m_canvas->addEntity(item.toEntity(), scenePosition);
+    core::Entity entity = item.toEntity();
+    // A sprite with nine-slice insets is placed as a nine-slice, at its own size.
+    if (entity.sprite) {
+        const SceneCanvas::SpriteVisual visual =
+            m_canvas->spriteVisual(entity.sprite->sheet, entity.sprite->path);
+        if (visual.sprite && visual.sprite->hasSlice) {
+            entity.type = core::EntityType::NineSlice;
+            core::setEntitySize(entity, assets::naturalSize(*visual.sprite, visual.drawScale));
+        }
+    }
+    const core::EntityPath path = m_canvas->addEntity(std::move(entity), scenePosition);
     if (!path.isEmpty()) {
         setFocus();  // so Delete and the arrow keys reach the new entity
     }
