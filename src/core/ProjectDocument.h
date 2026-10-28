@@ -58,6 +58,12 @@ public:
     bool isEntityIdAvailable(const QString& sceneId, QStringView id,
                              const EntityPath& ignoring = {}) const;
     QString uniqueEntityId(const QString& sceneId, const QString& base) const;
+    /// The ids of the transitions that name the entity `entityId` of the scene: carrying it
+    /// away from there, or landing something on it.
+    QStringList transitionsNamingEntity(QStringView sceneId, QStringView entityId) const;
+    /// How many entities have each class, across every scene: the classes in use, which
+    /// with the declarations in classes.json make up the class registry.
+    QMap<QString, int> classUses() const;
 
     // --- mutators, for commands ---
 
@@ -81,6 +87,8 @@ public:
     Layer removeLayer(const QString& sceneId, int index);
     void setLayer(const QString& sceneId, int index, Layer layer);
     void moveLayer(const QString& sceneId, int from, int to);
+    /// Replaces classes.json; null removes it.
+    void setClassRegistry(std::optional<ClassRegistry> registry);
 
 signals:
     void sceneAdded(const QString& id);
@@ -93,6 +101,8 @@ signals:
     void transitionChanged(const QString& id);
     /// A scene's layers or entities changed.
     void sceneContentChanged(const QString& sceneId);
+    /// A class was declared, or its declaration changed or was removed.
+    void classesChanged();
     void changed();
 
 private:

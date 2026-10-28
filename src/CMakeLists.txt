@@ -1,5 +1,7 @@
 # core: the model, files, validation and export. QtCore only, so it is tested headless.
 add_library(shoal_core STATIC
+    core/ClassCommands.cpp
+    core/ClassCommands.h
     core/CommandStack.cpp
     core/CommandStack.h
     core/FlowCommands.cpp
@@ -16,6 +18,8 @@ add_library(shoal_core STATIC
     core/ProjectDocument.h
     core/ProjectStore.cpp
     core/ProjectStore.h
+    core/Presets.cpp
+    core/Presets.h
     core/ProjectTemplates.cpp
     core/ProjectTemplates.h
     core/SceneCommands.cpp
@@ -49,16 +53,22 @@ shoal_set_warnings(shoal_assets)
 add_library(shoal_editor STATIC
     editor/CanvasView.cpp
     editor/CanvasView.h
+    editor/ClassesPanel.cpp
+    editor/ClassesPanel.h
     editor/EntityItem.cpp
     editor/EntityItem.h
     editor/FlowScene.cpp
     editor/FlowScene.h
     editor/FlowView.cpp
     editor/FlowView.h
+    editor/InspectorPanel.cpp
+    editor/InspectorPanel.h
     editor/MainWindow.cpp
     editor/MainWindow.h
     editor/NewProjectDialog.cpp
     editor/NewProjectDialog.h
+    editor/PresetsPanel.cpp
+    editor/PresetsPanel.h
     editor/SceneCanvas.cpp
     editor/SceneCanvas.h
     editor/SceneTreePanel.cpp

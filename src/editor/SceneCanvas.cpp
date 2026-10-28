@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "assets/SheetCache.h"
+#include "core/Presets.h"
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
 #include "editor/EntityItem.h"
@@ -217,6 +218,41 @@ EntityPath SceneCanvas::addEntity(Entity entity, QPointF scenePosition)
         std::make_unique<core::AddEntityCommand>(m_document, m_sceneId, path, std::move(entity)));
     select({path});
     return path;
+}
+
+QList<EntityPath> SceneCanvas::addPreset(const QString& presetId, QPointF scenePosition,
+                                         QString* error)
+{
+    const core::Scene* current = scene();
+    if (!canAddEntities()) {
+        return {};
+    }
+    const QMap<QString, core::Preset> presets = core::availablePresets(m_document.project());
+    if (!presets.contains(presetId)) {
+        return {};
+    }
+    const core::PresetRead read = core::readPresetDefinition(presetId, presets[presetId]);
+    if (!read.definition) {
+        if (error) {
+            *error = read.error;
+        }
+        return {};
+    }
+    const QPointF at = snap(scenePosition);
+    std::vector<Entity> entities =
+        core::instantiatePreset(*read.definition, *current, m_currentLayer, {at.x(), at.y()});
+    QList<EntityPath> paths;
+    int index = int(current->entities.size());
+    core::CommandStack& commands = m_document.commands();
+    commands.beginMacro(tr("Add %1").arg(read.definition->name));
+    for (Entity& entity : entities) {
+        paths << EntityPath{index++};
+        commands.push(std::make_unique<core::AddEntityCommand>(m_document, m_sceneId, paths.last(),
+                                                               std::move(entity)));
+    }
+    commands.endMacro();
+    select(paths);
+    return paths;
 }
 
 void SceneCanvas::removeSelection()

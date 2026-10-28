@@ -75,6 +75,11 @@ public:
     /// Adds `entity` at the top level of the current layer, at `scenePosition`; selects it.
     /// Empty if canAddEntities() is false.
     core::EntityPath addEntity(core::Entity entity, QPointF scenePosition);
+    /// Adds what a preset creates, on the current layer around `scenePosition`, with fresh
+    /// ids; selects it. Empty, with `error` set when the preset can't be read, if nothing
+    /// was added.
+    QList<core::EntityPath> addPreset(const QString& presetId, QPointF scenePosition,
+                                      QString* error = nullptr);
     void removeSelection();
     /// Moves the selected entities by `delta`, in their parents' units.
     void nudgeSelection(QPointF delta);

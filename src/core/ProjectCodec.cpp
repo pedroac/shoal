@@ -242,7 +242,11 @@ Transform readTransform(ObjectReader& reader)
     return transform;
 }
 
-Entity readEntity(ObjectReader& reader, bool topLevel)
+/// Where an entity is read: top-level entities name their layer, children inherit their
+/// parent's, and a detached entity (a preset's) takes the layer it is placed on.
+enum class EntityPlace { TopLevel, Child, Detached };
+
+Entity readEntity(ObjectReader& reader, EntityPlace place)
 {
     const QString typeKey = QStringLiteral("type");
     const QString layerKey = QStringLiteral("layer");
@@ -254,11 +258,13 @@ Entity readEntity(ObjectReader& reader, bool topLevel)
         reader.failMessage(typeKey, QStringLiteral("missing"));
     }
     entity.type = reader.enumValue(typeKey, EntityType::Empty);
-    if (topLevel) {
+    if (place == EntityPlace::TopLevel) {
         entity.layer = reader.id(layerKey);
     }
     else if (reader.has(layerKey)) {
-        reader.failMessage(layerKey, QStringLiteral("children inherit their parent's layer"));
+        reader.failMessage(layerKey, place == EntityPlace::Child
+                                         ? QStringLiteral("children inherit their parent's layer")
+                                         : QStringLiteral("it goes on the layer it is placed on"));
     }
     entity.classes = reader.stringList(classesKey);
     checkIds(reader, classesKey, entity.classes);
@@ -280,7 +286,7 @@ Entity readEntity(ObjectReader& reader, bool topLevel)
     entity.transform = readTransform(transform);
     entity.props = reader.object(QStringLiteral("props"));
     for (ObjectReader& child : reader.objectArray(QStringLiteral("children"))) {
-        entity.children.push_back(readEntity(child, false));
+        entity.children.push_back(readEntity(child, EntityPlace::Child));
     }
     entity.extras = reader.extras();
     return entity;
@@ -302,7 +308,7 @@ Scene readScene(ObjectReader& reader)
         scene.layers.push_back(std::move(layer));
     }
     for (ObjectReader& item : reader.objectArray(QStringLiteral("entities"))) {
-        scene.entities.push_back(readEntity(item, true));
+        scene.entities.push_back(readEntity(item, EntityPlace::TopLevel));
     }
     scene.extras = reader.extras();
     return scene;
@@ -785,6 +791,11 @@ QString FileError::toString() const
         return QStringLiteral("%1:%2:%3: %4").arg(file).arg(line).arg(column).arg(message);
     }
     return QStringLiteral("%1: %2").arg(file, message);
+}
+
+Entity readDetachedEntity(ObjectReader& reader)
+{
+    return readEntity(reader, EntityPlace::Detached);
 }
 
 namespace paths {

@@ -142,6 +142,36 @@ QString ProjectDocument::uniqueEntityId(const QString& sceneId, const QString& b
     }
 }
 
+QStringList ProjectDocument::transitionsNamingEntity(QStringView sceneId,
+                                                     QStringView entityId) const
+{
+    QStringList ids;
+    for (const Transition& transition : m_project.flow.transitions) {
+        const Persist& persist = transition.persist;
+        const bool carried =
+            transition.from == sceneId && persist.entities.contains(entityId.toString());
+        const bool landed =
+            transition.to == sceneId && !persist.entities.keys(entityId.toString()).isEmpty();
+        if (carried || landed) {
+            ids << transition.id;
+        }
+    }
+    return ids;
+}
+
+QMap<QString, int> ProjectDocument::classUses() const
+{
+    QMap<QString, int> uses;
+    for (const Scene& scene : m_project.scenes) {
+        forEachEntity(scene, [&](const Entity& entity, const EntityPath&) {
+            for (const QString& name : entity.classes) {
+                ++uses[name];
+            }
+        });
+    }
+    return uses;
+}
+
 void ProjectDocument::insertScene(const QString& id, Scene scene)
 {
     Q_ASSERT(!m_project.scenes.contains(id));
@@ -275,6 +305,13 @@ void ProjectDocument::setEntityFields(const QString& sceneId, const EntityPath& 
     *entity = fields;
     entity->children = std::move(children);
     emitSceneContentChanged(sceneId);
+}
+
+void ProjectDocument::setClassRegistry(std::optional<ClassRegistry> registry)
+{
+    m_project.classes = std::move(registry);
+    emit classesChanged();
+    emit changed();
 }
 
 void ProjectDocument::insertLayer(const QString& sceneId, int index, Layer layer)

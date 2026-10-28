@@ -11,6 +11,8 @@
 
 namespace shoal::core {
 
+class ObjectReader;
+
 /// The source files of a project, by path relative to the project folder.
 using ProjectFiles = std::map<QString, QByteArray>;
 
@@ -52,6 +54,11 @@ struct ParseResult {
 /// values, invalid ids, unsupported versions. References that don't resolve, such as a
 /// transition to a missing scene, load fine and are left to validation.
 ParseResult parseProject(const ProjectFiles& files);
+
+/// Reads an entity that is on no layer yet, such as a preset's: as in a scene file, except
+/// that it has no `layer`, since it goes on the layer it is placed on.
+/// @throws FormatError
+Entity readDetachedEntity(ObjectReader& reader);
 
 /// Writes a project in canonical form: the same project always gives the same bytes.
 ProjectFiles serializeProject(const Project& project);

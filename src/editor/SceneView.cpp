@@ -6,6 +6,7 @@
 #include <QPainter>
 #include <cmath>
 
+#include "editor/PresetsPanel.h"
 #include "editor/SceneCanvas.h"
 
 namespace shoal::editor {
@@ -41,7 +42,22 @@ core::EntityPath SceneView::place(const SheetItem& item, QPointF scenePosition)
 
 core::EntityPath SceneView::placeAtCenter(const SheetItem& item)
 {
-    return place(item, mapToScene(viewport()->rect().center()));
+    return place(item, visibleCenter());
+}
+
+QList<core::EntityPath> SceneView::placePreset(const QString& presetId, QPointF scenePosition,
+                                               QString* error)
+{
+    const QList<core::EntityPath> paths = m_canvas->addPreset(presetId, scenePosition, error);
+    if (!paths.isEmpty()) {
+        setFocus();
+    }
+    return paths;
+}
+
+QPointF SceneView::visibleCenter() const
+{
+    return mapToScene(viewport()->rect().center());
 }
 
 QRectF SceneView::contentRect() const
@@ -103,12 +119,18 @@ void SceneView::keyPressEvent(QKeyEvent* event)
     event->accept();
 }
 
-// --- drops from the sheet browser ---
+// --- drops from the sheet browser and the presets ---
 
 void SceneView::dragEnterEvent(QDragEnterEvent* event)
 {
-    if (!SheetItem::fromMimeData(event->mimeData())) {
-        CanvasView::dragEnterEvent(event);
+    dragMoveEvent(event);
+}
+
+void SceneView::dragMoveEvent(QDragMoveEvent* event)
+{
+    const QMimeData* mime = event->mimeData();
+    if (!SheetItem::fromMimeData(mime) && !PresetsPanel::presetFromMimeData(mime)) {
+        CanvasView::dragMoveEvent(event);
         return;
     }
     // Refused on a hidden or locked layer, where the new entity couldn't be seen or picked.
@@ -120,33 +142,28 @@ void SceneView::dragEnterEvent(QDragEnterEvent* event)
     }
 }
 
-void SceneView::dragMoveEvent(QDragMoveEvent* event)
+void SceneView::dropEvent(QDropEvent* event)
 {
-    if (!SheetItem::fromMimeData(event->mimeData())) {
-        CanvasView::dragMoveEvent(event);
+    const QMimeData* mime = event->mimeData();
+    // The drop is in viewport pixels; mapToScene() undoes the zoom and the pan.
+    const QPointF at = mapToScene(event->position().toPoint());
+    bool placed = false;
+    if (const std::optional<SheetItem> item = SheetItem::fromMimeData(mime)) {
+        placed = !place(*item, at).isEmpty();
+    }
+    else if (const std::optional<QString> preset = PresetsPanel::presetFromMimeData(mime)) {
+        placed = !placePreset(*preset, at).isEmpty();
+    }
+    else {
+        CanvasView::dropEvent(event);
         return;
     }
-    if (m_canvas->canAddEntities()) {
+    if (placed) {
         event->acceptProposedAction();
     }
     else {
         event->ignore();
     }
-}
-
-void SceneView::dropEvent(QDropEvent* event)
-{
-    const std::optional<SheetItem> item = SheetItem::fromMimeData(event->mimeData());
-    if (!item) {
-        CanvasView::dropEvent(event);
-        return;
-    }
-    // The drop is in viewport pixels; mapToScene() undoes the zoom and the pan.
-    if (place(*item, mapToScene(event->position().toPoint())).isEmpty()) {
-        event->ignore();
-        return;
-    }
-    event->acceptProposedAction();
 }
 
 }  // namespace shoal::editor

@@ -1,8 +1,13 @@
 #include <QAction>
+#include <QCheckBox>
+#include <QCompleter>
 #include <QDropEvent>
+#include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMimeData>
 #include <QStatusBar>
+#include <QStringListModel>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -13,9 +18,12 @@
 #include "Support.h"
 #include "assets/SpriteSheet.h"
 #include "core/ProjectDocument.h"
+#include "editor/ClassesPanel.h"
 #include "editor/EntityItem.h"
 #include "editor/FlowScene.h"
+#include "editor/InspectorPanel.h"
 #include "editor/MainWindow.h"
+#include "editor/PresetsPanel.h"
 #include "editor/SceneCanvas.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
@@ -32,6 +40,20 @@ const SheetItem IDLE_SPRITE{SheetItem::Kind::Sprite, QStringLiteral("hero"),
                             QStringLiteral("hero/idle.png")};
 const SheetItem IDLE_ANIMATION{SheetItem::Kind::Animation, QStringLiteral("hero"),
                                QStringLiteral("idle")};
+
+/// Replaces what `field` holds by typing, then presses Return, as a user would.
+void type(QLineEdit* field, const QString& text)
+{
+    field->setFocus();
+    field->selectAll();
+    if (text.isEmpty()) {
+        QTest::keyClick(field, Qt::Key_Delete);
+    }
+    else {
+        QTest::keyClicks(field, text);
+    }
+    QTest::keyClick(field, Qt::Key_Return);
+}
 
 QByteArray readFile(const QString& path)
 {
@@ -76,24 +98,30 @@ struct Fixture {
     }
 
     /// Drags `item` from the sheet browser over the view and drops it at `at`; returns
-    /// whether the view accepted the drop. QDrag::exec() runs its own event loop, so the
-    /// events are sent as it would send them.
-    bool dropOnView(const SheetItem& item, QPoint point)
+    /// whether the view accepted the drop.
+    bool dropOnView(const SheetItem& item, QPoint at)
+    {
+        const std::unique_ptr<QMimeData> data(item.toMimeData());
+        return dropOnView(data.get(), at);
+    }
+
+    /// Drags `data` over the view and drops it at `point`. QDrag::exec() runs its own event
+    /// loop, so the events are sent as it would send them.
+    bool dropOnView(const QMimeData* data, QPoint point)
     {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
         const QPointF at(point);  // the QPoint constructors are deprecated
 #else
         const QPoint at = point;
 #endif
-        const std::unique_ptr<QMimeData> data(item.toMimeData());
-        QDragEnterEvent enter(at, Qt::CopyAction, data.get(), Qt::LeftButton, {});
+        QDragEnterEvent enter(at, Qt::CopyAction, data, Qt::LeftButton, {});
         QApplication::sendEvent(view->viewport(), &enter);
         if (!enter.isAccepted()) {
             return false;
         }
-        QDragMoveEvent move(at, Qt::CopyAction, data.get(), Qt::LeftButton, {});
+        QDragMoveEvent move(at, Qt::CopyAction, data, Qt::LeftButton, {});
         QApplication::sendEvent(view->viewport(), &move);
-        QDropEvent drop(at, Qt::CopyAction, data.get(), Qt::LeftButton, {});
+        QDropEvent drop(at, Qt::CopyAction, data, Qt::LeftButton, {});
         QApplication::sendEvent(view->viewport(), &drop);
         return drop.isAccepted();
     }
@@ -505,6 +533,270 @@ private slots:
         QDropEvent drop(f.at(QPointF(320, 600)), Qt::CopyAction, &text, Qt::LeftButton, {});
         QApplication::sendEvent(f.view->viewport(), &drop);
         QCOMPARE(f.document().commands().count(), 0);
+    }
+
+    void theInspectorShowsTheSelection()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        QCOMPARE(inspector->summary()->text(), QStringLiteral("Nothing selected."));
+        QVERIFY(!inspector->idField()->isEnabled());
+
+        f.canvas().select({{1}});
+        QCOMPARE(inspector->summary()->text(), QStringLiteral("sprite · hero · hero/idle.png"));
+        QCOMPARE(inspector->idField()->text(), QStringLiteral("player"));
+        QCOMPARE(inspector->classesField()->text(), QStringLiteral("actor"));
+        QVERIFY(inspector->activeBox()->isChecked());
+        QVERIFY(inspector->classesField()->toolTip().contains(QStringLiteral("not declared")));
+
+        f.canvas().select({{4}});  // the secret door is inactive and hidden
+        QVERIFY(!inspector->activeBox()->isChecked());
+        QVERIFY(!inspector->visibleBox()->isChecked());
+
+        f.canvas().select({{1}, {4}});
+        QCOMPARE(inspector->summary()->text(), QStringLiteral("2 entities selected."));
+        QVERIFY(!inspector->idField()->isEnabled());
+
+        f.window.tabs()->setCurrentIndex(0);  // the flow
+        QCOMPARE(inspector->summary()->text(),
+                 QStringLiteral("Open a scene to inspect its entities."));
+    }
+
+    void renamingAnIdRenamesItInTheTransitions()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        f.canvas().select({{1}});
+        type(inspector->idField(), QStringLiteral("hero"));
+
+        QCOMPARE(f.document().commands().count(), 1);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Rename player to hero"));
+        QCOMPARE(entityAt(f.scene(), {1})->id, QStringLiteral("hero"));
+        const Transition* l1ToL2 = f.document().findTransition(u"l1_to_l2");
+        QVERIFY(l1ToL2->persist.entities.contains(QStringLiteral("hero")));
+        QCOMPARE(inspector->idField()->text(), QStringLiteral("hero"));
+        QVERIFY(f.window.sceneTreePanel()->entityRow({1})->text(0).startsWith(u"hero"));
+
+        f.document().commands().undo();
+        QCOMPARE(inspector->idField()->text(), QStringLiteral("player"));
+        QVERIFY(f.document()
+                    .findTransition(u"l1_to_l2")
+                    ->persist.entities.contains(QStringLiteral("player")));
+    }
+
+    void refusesIdsItCantUse()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        f.canvas().select({{1}});
+        type(inspector->idField(), QStringLiteral("two words"));
+        QVERIFY(inspector->message().startsWith(QStringLiteral("“two words” isn't a valid id")));
+        type(inspector->idField(), QStringLiteral("camera"));
+        QCOMPARE(inspector->message(),
+                 QStringLiteral("Another entity of this scene is already “camera”."));
+        // A transition carries the player away: it can't lose its id.
+        type(inspector->idField(), QString());
+        QCOMPARE(inspector->message(),
+                 QStringLiteral("The transitions l1_to_l2 refer to “player”; it needs an id."));
+        QCOMPARE(f.document().commands().count(), 0);
+
+        // Escape puts the id back.
+        QTest::keyClick(inspector->idField(), Qt::Key_Escape);
+        QCOMPARE(inspector->idField()->text(), QStringLiteral("player"));
+        QVERIFY(inspector->message().isEmpty());
+
+        // An entity nothing refers to can be named and unnamed.
+        f.canvas().select({{2}});
+        type(inspector->idField(), QStringLiteral("bush"));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Name sprite bush"));
+        type(inspector->idField(), QString());
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Remove the id of bush"));
+        QCOMPARE(entityAt(f.scene(), {2})->id, QString());
+    }
+
+    void editsClasses()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        f.canvas().select({{1}});
+        type(inspector->classesField(), QStringLiteral(".actor, enemy actor"));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Set the classes of player"));
+        QCOMPARE(entityAt(f.scene(), {1})->classes,
+                 (QStringList{QStringLiteral("actor"), QStringLiteral("enemy")}));
+        QCOMPARE(inspector->classesField()->text(), QStringLiteral("actor enemy"));
+        QVERIFY(inspector->classesField()->toolTip().contains(QStringLiteral("<b>.enemy</b>")));
+
+        type(inspector->classesField(), QStringLiteral("9lives"));
+        QVERIFY(inspector->message().startsWith(QStringLiteral("“9lives” isn't a valid class")));
+        QCOMPARE(f.document().commands().count(), 1);
+    }
+
+    void completesClassesFromTheRegistry()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        QCompleter* completer = inspector->classCompleter();
+        // Declared (trigger, enemy) and used (button, actor) alike.
+        const QStringList known = qobject_cast<QStringListModel*>(completer->model())->stringList();
+        for (const char* name : {"actor", "button", "camera_bounds", "enemy", "trigger"}) {
+            QVERIFY2(known.contains(QLatin1StringView(name)), name);
+        }
+
+        f.canvas().select({{1}});
+        QLineEdit* field = inspector->classesField();
+        field->setFocus();
+        field->end(false);
+        QTest::keyClicks(field, QStringLiteral(" .cam"));
+        QCOMPARE(completer->completionPrefix(), QStringLiteral("cam"));
+        QCOMPARE(completer->currentCompletion(), QStringLiteral("camera_bounds"));
+        emit completer->activated(QStringLiteral("camera_bounds"));
+        QCOMPARE(field->text(), QStringLiteral("actor .camera_bounds "));
+        QVERIFY(inspector->applyClasses());
+        QCOMPARE(entityAt(f.scene(), {1})->classes,
+                 (QStringList{QStringLiteral("actor"), QStringLiteral("camera_bounds")}));
+    }
+
+    void togglesActiveAndVisible()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        f.canvas().select({{1}});
+        inspector->activeBox()->click();
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Deactivate player"));
+        QVERIFY(!entityAt(f.scene(), {1})->active);
+        inspector->visibleBox()->click();
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Hide player"));
+        QVERIFY(!entityAt(f.scene(), {1})->visible);
+        f.document().commands().undo();
+        QVERIFY(inspector->visibleBox()->isChecked());
+    }
+
+    void theClassesPanelListsTheRegistry()
+    {
+        Fixture f;
+        ClassesPanel* panel = f.window.classesPanel();
+        QTreeWidgetItem* main = panel->classRow(QStringLiteral("main"));
+        QVERIFY(main);
+        QCOMPARE(main->text(ClassesPanel::USES), QStringLiteral("2"));
+        QTreeWidgetItem* trigger = panel->classRow(QStringLiteral("trigger"));
+        QCOMPARE(trigger->text(ClassesPanel::USES), QStringLiteral("0"));  // declared, unused
+        QCOMPARE(trigger->text(ClassesPanel::DOC),
+                 QStringLiteral("Region; the engine fires an event on enter/exit"));
+        QVERIFY(panel->classRow(QStringLiteral("button"))->font(ClassesPanel::NAME).italic());
+        QVERIFY(!trigger->font(ClassesPanel::NAME).italic());
+
+        // The uses follow the scenes.
+        f.canvas().select({{1}});
+        type(f.window.inspector()->classesField(), QStringLiteral("actor trigger"));
+        QCOMPARE(panel->classRow(QStringLiteral("trigger"))->text(ClassesPanel::USES),
+                 QStringLiteral("1"));
+    }
+
+    void theClassesPanelEditsDeclarations()
+    {
+        Fixture f;
+        ClassesPanel* panel = f.window.classesPanel();
+        // Editing a doc in place declares the class.
+        panel->classRow(QStringLiteral("button"))
+            ->setText(ClassesPanel::DOC, QStringLiteral("Clickable "));
+        QTRY_COMPARE(f.document().commands().count(), 1);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Declare class button"));
+        QCOMPARE(f.document().project().classes->classes[QStringLiteral("button")].doc,
+                 QStringLiteral("Clickable"));
+        QVERIFY(!panel->classRow(QStringLiteral("button"))->font(ClassesPanel::NAME).italic());
+
+        // A new color shows on the canvas: the room bounds are a camera_bounds region.
+        QVERIFY(
+            panel->setColor(QStringLiteral("camera_bounds"), QColor(QStringLiteral("#112233"))));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Edit class camera_bounds"));
+        QCOMPARE(f.canvas().classColor({QStringLiteral("camera_bounds")}, Qt::black),
+                 QColor(QStringLiteral("#112233")));
+        QVERIFY(
+            !panel->setColor(QStringLiteral("camera_bounds"), QColor(QStringLiteral("#112233"))));
+
+        QVERIFY(panel->declare(QStringLiteral("hazard")));
+        QVERIFY(panel->classRow(QStringLiteral("hazard")));
+        QVERIFY(!panel->declare(QStringLiteral("hazard")));
+        QVERIFY(panel->undeclare(QStringLiteral("hazard")));
+        QVERIFY(!panel->classRow(QStringLiteral("hazard")));  // neither declared nor used
+        QVERIFY(panel->undeclare(QStringLiteral("enemy")));
+        QVERIFY(!panel->classRow(QStringLiteral("enemy")));
+        f.document().commands().undo();
+        QVERIFY(panel->classRow(QStringLiteral("enemy")));
+    }
+
+    void thePresetsPanelListsBuiltInAndProjectPresets()
+    {
+        Fixture f;
+        PresetsPanel* panel = f.window.presetsPanel();
+        QStringList names;
+        for (int i = 0; i < panel->list()->count(); ++i) {
+            names << panel->list()->item(i)->text();
+        }
+        QCOMPARE(names, (QStringList{QStringLiteral("Camera"), QStringLiteral("Camera Bounds"),
+                                     QStringLiteral("enemy_grunt"), QStringLiteral("Spawn Mark"),
+                                     QStringLiteral("Trigger Region")}));
+        QVERIFY(panel->presetRow(QStringLiteral("enemy_grunt"))
+                    ->toolTip()
+                    .contains(QStringLiteral("presets/enemy_grunt.json")));
+
+        // A preset the editor can't read still lets the project open, and says why.
+        QFile broken(f.dir.filePath(QStringLiteral("presets/broken.json")));
+        QVERIFY(broken.open(QIODevice::WriteOnly));
+        broken.write(R"({ "format": "shoal-preset", "version": 1, "entities": [] })");
+        broken.close();
+        QVERIFY(f.window.openProject(f.dir.path()).isEmpty());
+        QListWidgetItem* row = panel->presetRow(QStringLiteral("broken"));
+        QVERIFY(row);
+        QCOMPARE(row->text(), QStringLiteral("broken (can't read)"));
+        QVERIFY(row->toolTip().contains(QStringLiteral("a preset creates at least one entity")));
+        QVERIFY(!(row->flags() & Qt::ItemIsDragEnabled));
+    }
+
+    void droppingAPresetCreatesFreshCopies()
+    {
+        Fixture f;
+        const std::unique_ptr<QMimeData> camera(PresetsPanel::mimeData(QStringLiteral("camera")));
+        QVERIFY(f.dropOnView(camera.get(), f.at(QPointF(500, 600))));
+        QCOMPARE(f.document().commands().count(), 1);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Add Camera"));
+        const EntityPath path{int(f.scene().entities.size()) - 1};
+        const Entity* added = entityAt(f.scene(), path);
+        QCOMPARE(added->id, QStringLiteral("camera_2"));  // level_1 has a camera already
+        QCOMPARE(added->type, EntityType::Camera);
+        QCOMPARE(added->classes, QStringList{QStringLiteral("main")});
+        QCOMPARE(added->layer, f.canvas().currentLayer());
+        QVERIFY(std::abs(added->transform.pos.x - 500) <= 0.5);
+        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{path});
+        QCOMPARE(f.window.inspector()->idField()->text(), QStringLiteral("camera_2"));
+
+        // The project's own: a sprite tagged .enemy.
+        const std::unique_ptr<QMimeData> grunt(
+            PresetsPanel::mimeData(QStringLiteral("enemy_grunt")));
+        QVERIFY(f.dropOnView(grunt.get(), f.at(QPointF(520, 600))));
+        QCOMPARE(f.scene().entities.back().classes, QStringList{QStringLiteral("enemy")});
+
+        f.document().commands().undo();
+        f.document().commands().undo();
+        QCOMPARE(f.document().commands().index(), 0);
+        QCOMPARE(int(f.scene().entities.size()), path.first());
+
+        // Not on a locked layer.
+        f.canvas().setLayerLocked(f.canvas().currentLayer(), true);
+        QVERIFY(!f.dropOnView(camera.get(), f.at(QPointF(500, 600))));
+    }
+
+    void activatingAPresetPlacesItInTheMiddleOfTheView()
+    {
+        Fixture f;
+        PresetsPanel* panel = f.window.presetsPanel();
+        emit panel->list()->itemActivated(panel->presetRow(QStringLiteral("trigger_region")));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Add Trigger Region"));
+        const Entity& added = f.scene().entities.back();
+        QCOMPARE(added.type, EntityType::Region);
+        QCOMPARE(added.id, QStringLiteral("trigger"));
+        const QPointF middle = f.view->visibleCenter();
+        QCOMPARE(added.transform.pos, (Point{middle.x(), middle.y()}));
     }
 
     void activatingARowPlacesItInTheMiddleOfTheView()

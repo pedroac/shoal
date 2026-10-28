@@ -18,6 +18,9 @@ class ProjectDocument;
 namespace shoal::editor {
 
 class CanvasView;
+class ClassesPanel;
+class InspectorPanel;
+class PresetsPanel;
 class FlowScene;
 class FlowView;
 class SceneTreePanel;
@@ -42,6 +45,9 @@ public:
     QTabWidget* tabs() const { return m_tabs; }
     SceneTreePanel* sceneTreePanel() const { return m_sceneTree; }
     SheetBrowserPanel* sheetBrowser() const { return m_sheetBrowser; }
+    InspectorPanel* inspector() const { return m_inspector; }
+    ClassesPanel* classesPanel() const { return m_classes; }
+    PresetsPanel* presetsPanel() const { return m_presets; }
     assets::SheetCache& sheets() { return m_sheets; }
     /// The current tab's scene view, or null when the flow tab is current.
     SceneView* currentSceneView() const;
@@ -85,6 +91,12 @@ private:
     void updateSheets();
     /// Places a sprite or animation from the sheet browser in the current scene's view.
     void placeSheetItem(const SheetItem& item);
+    /// Places what a preset creates in the current scene's view.
+    void placePreset(const QString& presetId);
+    /// Points the panels that follow the current scene at `view`'s canvas, or nothing.
+    void setPanelCanvas(SceneView* view);
+    QDockWidget* addDock(QWidget* panel, const QString& title, const QString& objectName,
+                         Qt::DockWidgetArea area);
 
     std::unique_ptr<core::ProjectDocument> m_document;
     std::unique_ptr<FlowScene> m_flowScene;
@@ -97,6 +109,12 @@ private:
     SceneTreePanel* m_sceneTree = nullptr;
     QDockWidget* m_sheetBrowserDock = nullptr;
     SheetBrowserPanel* m_sheetBrowser = nullptr;
+    QDockWidget* m_presetsDock = nullptr;
+    PresetsPanel* m_presets = nullptr;
+    QDockWidget* m_inspectorDock = nullptr;
+    InspectorPanel* m_inspector = nullptr;
+    QDockWidget* m_classesDock = nullptr;
+    ClassesPanel* m_classes = nullptr;
 
     QAction* m_newAction = nullptr;
     QAction* m_openAction = nullptr;

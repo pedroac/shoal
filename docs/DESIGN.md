@@ -543,8 +543,30 @@ element's parent is the viewport, or the safe area.
   (world space), a `hud` layer (screen space), and `#camera` tagged `.main` at its
   center.
 - **Preset files** start with `"format": "shoal-preset"` and a `version`, like
-  every source file; the rest is kept as written until the preset editor defines
-  it.
+  every source file:
+
+  ```jsonc
+  // presets/enemy_grunt.json
+  { "format": "shoal-preset", "version": 1,
+    "name": "Enemy Grunt",              // shown in the editor; the file name if absent
+    "doc": "A basic walker",            // a tooltip
+    "tint": "#c04040",                  // the editor's swatch
+    "classes": ["enemy"],               // given to each top-level entity it creates
+    "entities": [                       // one or more, as in a scene, without `layer`
+      { "type": "sprite", "sprite": { "sheet": "hero", "path": "hero/idle.png" },
+        "props": { "hp": 3 } } ] }
+  ```
+
+  - Positions are relative to where the preset is placed. The entities go on the
+    current layer; ids are made unique in the scene (`camera`, then `camera_2`),
+    and entities without one stay without one.
+  - A preset file is kept as written, and read only when it is used: one the
+    editor can't read is listed with the reason and can't be placed, but never
+    stops the project from opening.
+  - The built-in presets ship with the editor, not in the project: Trigger Region
+    (`#trigger`, `.trigger`, a 128×128 rect), Camera Bounds (`.camera_bounds`, a
+    1920×1080 rect), Spawn Mark (`#spawn`, `.spawn`) and Camera (`#camera`,
+    `.main`). A project preset with the same id replaces one.
 
 ## 13. The editor
 
@@ -592,6 +614,19 @@ element's parent is the viewport, or the safe area.
     turn and scale it about its position, where a sprite's sprat pivot sits (screen
     elements will use `layout.pivot`); Shift snaps rotation to 15 degrees.
     Releasing the mouse is one undo step, and a click changes nothing.
+  - The inspector edits the selected entity's id, classes, and active and
+    visible flags, each one undo step. An id must be valid and unique in the
+    scene; renaming it renames it in the transitions, and one a transition names
+    can't be removed. Classes are typed separated by spaces or commas, with an
+    optional leading dot; they complete from the class registry and show their
+    declarations' docs as a tooltip.
+  - The classes panel is the class registry: every class declared or in use, with
+    its color, its number of uses across the scenes and its doc. Classes in use
+    but not declared are in italics. Editing a doc or a color declares the class,
+    creating `classes.json` if needed; undeclaring keeps the entities' classes.
+  - The presets panel lists the built-in and project presets; dropping one on the
+    canvas, or double-clicking it, places it as a sprite is placed, in one undo
+    step.
   - The sheet browser lists each declared sheet with its sprites (by path, in the
     sheet's order) and animations, as thumbnails, and filters them by name. A sheet
     that didn't load says why. It follows the sheet cache, so a sheet written again

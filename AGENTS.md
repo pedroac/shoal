@@ -38,7 +38,9 @@ changes.
     `FlowCommands`: the commands that change scenes and transitions.
     `SceneCommands`: the commands that change layers and entities, which
     `SceneTree` addresses by `EntityPath`.
-  - `ProjectTemplates`: new projects and scenes.
+  - `ProjectTemplates`: new projects and scenes. `Presets`: the built-in presets, and
+    reading a preset into entities with fresh ids (presets stay as written in the
+    model). `ClassCommands`: declaring classes in classes.json.
 - `src/assets/`: sprat sheets and atlases, through sprat-lib. The only place that
   includes `<sprat/sprat.h>`.
   - `SpriteSheet`: `loadSheet()` copies a sheet into Qt types, and `placeSprite()`
@@ -59,6 +61,8 @@ changes.
     `CanvasView` holds the zoom and pan both views share.
   - `SheetBrowserPanel`: the project's sheets, sprites and animations as thumbnails.
     A drag or a double-click hands a `SheetItem` to `SceneView`, which places it.
+    `PresetsPanel` does the same with presets. `InspectorPanel` edits the selected
+    entity, `ClassesPanel` the class registry.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the

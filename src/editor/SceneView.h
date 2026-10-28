@@ -19,7 +19,7 @@ class SceneCanvas;
 
 /// A scene's tab: its canvas, with the scene's rectangle and the grid behind the entities.
 /// Arrow keys nudge the selection by a unit, or a grid cell when snapping (ten with Shift).
-/// Sprites and animations dragged from the sheet browser drop where the cursor is.
+/// Sprites, animations and presets dragged from their panels drop where the cursor is.
 class SceneView : public CanvasView {
     Q_OBJECT
 public:
@@ -34,6 +34,12 @@ public:
     core::EntityPath place(const SheetItem& item, QPointF scenePosition);
     /// Adds it in the middle of what the view shows.
     core::EntityPath placeAtCenter(const SheetItem& item);
+    /// Adds what a preset creates, as a drop does; one undo step. Empty, with `error` set
+    /// when the preset can't be read, if nothing was added.
+    QList<core::EntityPath> placePreset(const QString& presetId, QPointF scenePosition,
+                                        QString* error = nullptr);
+    /// The middle of what the view shows, in scene coordinates.
+    QPointF visibleCenter() const;
 
 protected:
     QRectF contentRect() const override;

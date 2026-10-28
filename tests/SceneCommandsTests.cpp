@@ -71,6 +71,13 @@ private slots:
         QVERIFY(!document.isEntityIdAvailable(LEVEL_1, u"not valid"));
         QCOMPARE(document.uniqueEntityId(LEVEL_1, QStringLiteral("player")),
                  QStringLiteral("player_2"));
+
+        // l1_to_l2 carries the player away from level 1 onto spawn_west_door in level 2.
+        const QStringList l1ToL2{QStringLiteral("l1_to_l2")};
+        QCOMPARE(document.transitionsNamingEntity(LEVEL_1, u"player"), l1ToL2);
+        QCOMPARE(document.transitionsNamingEntity(LEVEL_2, u"spawn_west_door"), l1ToL2);
+        QVERIFY(document.transitionsNamingEntity(LEVEL_2, u"player").isEmpty());
+        QVERIFY(document.transitionsNamingEntity(LEVEL_1, u"spawn_west_door").isEmpty());
     }
 
     void addsEntitiesAnywhereInTheTree()
