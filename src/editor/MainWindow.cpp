@@ -1,34 +1,67 @@
 #include "editor/MainWindow.h"
 
 #include <QApplication>
+#include <QCloseEvent>
+#include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QGraphicsItem>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QStatusBar>
+#include <QTimer>
 
 #include "assets/SpratLibrary.h"
+#include "core/ProjectDocument.h"
+#include "core/ProjectTemplates.h"
 #include "core/Version.h"
+#include "editor/FlowScene.h"
+#include "editor/FlowView.h"
+#include "editor/NewProjectDialog.h"
 
 namespace shoal::editor {
 
 namespace {
 constexpr int DEFAULT_WIDTH = 1280;
 constexpr int DEFAULT_HEIGHT = 800;
+constexpr int STATUS_TIMEOUT_MS = 4000;
+
+QString describeErrors(const QList<core::FileError>& errors)
+{
+    QStringList lines;
+    for (const core::FileError& error : errors) {
+        lines << error.toString();
+    }
+    return lines.join(u'\n');
+}
+
+QAction* makeAction(QObject* parent, const QString& objectName, const QString& text,
+                    const QList<QKeySequence>& shortcuts = {})
+{
+    auto* action = new QAction(text, parent);
+    action->setObjectName(objectName);
+    action->setShortcuts(shortcuts);
+    return action;
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
-    setWindowTitle(QStringLiteral("Shoal"));
     resize(DEFAULT_WIDTH, DEFAULT_HEIGHT);
-
-    auto* placeholder = new QLabel(tr("No project open"), this);
-    placeholder->setAlignment(Qt::AlignCenter);
-    placeholder->setObjectName(QStringLiteral("workspacePlaceholder"));
-    setCentralWidget(placeholder);
-
+    createActions();
     createMenus();
+    setDocument(nullptr);
     statusBar()->showMessage(tr("Ready"));
+}
+
+MainWindow::~MainWindow()
+{
+    // Close the project while the window is whole: QWidget deletes the view, a child, only
+    // after the scene and document it shows are gone.
+    setDocument(nullptr);
 }
 
 QString MainWindow::aboutText()
@@ -40,15 +73,360 @@ QString MainWindow::aboutText()
         .arg(core::version(), assets::spratLibraryVersion());
 }
 
+void MainWindow::createActions()
+{
+    m_newAction =
+        makeAction(this, QStringLiteral("newAction"), tr("&New Project…"), {QKeySequence::New});
+    connect(m_newAction, &QAction::triggered, this, &MainWindow::newProject);
+    m_openAction =
+        makeAction(this, QStringLiteral("openAction"), tr("&Open Project…"), {QKeySequence::Open});
+    connect(m_openAction, &QAction::triggered, this, &MainWindow::openProjectDialog);
+    m_saveAction =
+        makeAction(this, QStringLiteral("saveAction"), tr("&Save"), {QKeySequence::Save});
+    connect(m_saveAction, &QAction::triggered, this, &MainWindow::save);
+    m_saveAsAction =
+        makeAction(this, QStringLiteral("saveAsAction"), tr("Save &As…"), {QKeySequence::SaveAs});
+    connect(m_saveAsAction, &QAction::triggered, this, &MainWindow::saveAs);
+    m_quitAction =
+        makeAction(this, QStringLiteral("quitAction"), tr("&Quit"), {QKeySequence::Quit});
+    connect(m_quitAction, &QAction::triggered, this, &QWidget::close);
+
+    m_undoAction =
+        makeAction(this, QStringLiteral("undoAction"), tr("&Undo"), {QKeySequence::Undo});
+    connect(m_undoAction, &QAction::triggered, this, [this] {
+        if (m_document) {
+            m_document->commands().undo();
+        }
+    });
+    m_redoAction =
+        makeAction(this, QStringLiteral("redoAction"), tr("&Redo"), {QKeySequence::Redo});
+    connect(m_redoAction, &QAction::triggered, this, [this] {
+        if (m_document) {
+            m_document->commands().redo();
+        }
+    });
+    // Backspace too, as on macOS, where it is already among Delete's bindings.
+    QList<QKeySequence> deleteKeys = QKeySequence::keyBindings(QKeySequence::Delete);
+    if (!deleteKeys.contains(QKeySequence(Qt::Key_Backspace))) {
+        deleteKeys << QKeySequence(Qt::Key_Backspace);
+    }
+    m_deleteAction = makeAction(this, QStringLiteral("deleteAction"), tr("&Delete"), deleteKeys);
+    connect(m_deleteAction, &QAction::triggered, this, [this] {
+        if (m_flowScene) {
+            m_flowScene->removeSelection();
+        }
+    });
+    m_selectAllAction = makeAction(this, QStringLiteral("selectAllAction"), tr("Select &All"),
+                                   {QKeySequence::SelectAll});
+    connect(m_selectAllAction, &QAction::triggered, this, [this] {
+        if (m_flowScene) {
+            for (QGraphicsItem* item : m_flowScene->items()) {
+                item->setSelected(item->flags() & QGraphicsItem::ItemIsSelectable);
+            }
+        }
+    });
+
+    m_addSceneAction = makeAction(this, QStringLiteral("addSceneAction"), tr("&Add Scene"));
+    connect(m_addSceneAction, &QAction::triggered, this, [this] {
+        if (m_flowView) {
+            m_flowView->addScene();
+        }
+    });
+    m_renameSceneAction = makeAction(this, QStringLiteral("renameSceneAction"),
+                                     tr("&Rename Scene…"), {QKeySequence(Qt::Key_F2)});
+    connect(m_renameSceneAction, &QAction::triggered, this, [this] {
+        if (m_flowView) {
+            m_flowView->renameSelectedScene();
+        }
+    });
+    m_startSceneAction =
+        makeAction(this, QStringLiteral("startSceneAction"), tr("Set as &Start Scene"));
+    connect(m_startSceneAction, &QAction::triggered, this, [this] {
+        if (m_flowView) {
+            m_flowView->setSelectedSceneAsStart();
+        }
+    });
+
+    m_zoomInAction =
+        makeAction(this, QStringLiteral("zoomInAction"), tr("Zoom &In"), {QKeySequence::ZoomIn});
+    m_zoomOutAction =
+        makeAction(this, QStringLiteral("zoomOutAction"), tr("Zoom &Out"), {QKeySequence::ZoomOut});
+    m_actualSizeAction = makeAction(this, QStringLiteral("actualSizeAction"), tr("&Actual Size"),
+                                    {QKeySequence(Qt::CTRL | Qt::Key_1)});
+    m_fitAction = makeAction(this, QStringLiteral("fitAction"), tr("&Fit to Window"),
+                             {QKeySequence(Qt::CTRL | Qt::Key_0)});
+    const std::pair<QAction*, void (FlowView::*)()> viewActions[] = {
+        {m_zoomInAction, &FlowView::zoomIn},
+        {m_zoomOutAction, &FlowView::zoomOut},
+        {m_actualSizeAction, &FlowView::resetZoom},
+        {m_fitAction, &FlowView::fitAll},
+    };
+    for (const auto& [action, slot] : viewActions) {
+        connect(action, &QAction::triggered, this, [this, slot = slot] {
+            if (m_flowView) {
+                (m_flowView->*slot)();
+            }
+        });
+    }
+}
+
 void MainWindow::createMenus()
 {
     QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
-    QAction* quitAction = fileMenu->addAction(tr("&Quit"), this, &QWidget::close);
-    quitAction->setShortcut(QKeySequence::Quit);
+    fileMenu->addAction(m_newAction);
+    fileMenu->addAction(m_openAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(m_saveAction);
+    fileMenu->addAction(m_saveAsAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(m_quitAction);
+
+    QMenu* editMenu = menuBar()->addMenu(tr("&Edit"));
+    editMenu->addAction(m_undoAction);
+    editMenu->addAction(m_redoAction);
+    editMenu->addSeparator();
+    editMenu->addAction(m_deleteAction);
+    editMenu->addAction(m_selectAllAction);
+
+    QMenu* flowMenu = menuBar()->addMenu(tr("F&low"));
+    flowMenu->addAction(m_addSceneAction);
+    flowMenu->addAction(m_renameSceneAction);
+    flowMenu->addAction(m_startSceneAction);
+
+    QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
+    viewMenu->addAction(m_zoomInAction);
+    viewMenu->addAction(m_zoomOutAction);
+    viewMenu->addAction(m_actualSizeAction);
+    viewMenu->addAction(m_fitAction);
 
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
     helpMenu->addAction(tr("&About Shoal"), this, &MainWindow::showAbout);
     helpMenu->addAction(tr("About &Qt"), qApp, &QApplication::aboutQt);
+}
+
+void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
+{
+    // Tear down the old view first: it shows the old scene, which follows the old document.
+    // The scene emits selectionChanged() as it goes, which must no longer reach this window.
+    delete takeCentralWidget();
+    m_flowView = nullptr;
+    if (m_flowScene) {
+        disconnect(m_flowScene.get(), nullptr, this, nullptr);
+    }
+    m_flowScene.reset();
+    m_document = std::move(document);
+
+    if (m_document) {
+        m_flowScene = std::make_unique<FlowScene>(*m_document);
+        m_flowView = new FlowView(*m_flowScene, this);
+        m_flowView->setObjectName(QStringLiteral("flowView"));
+        setCentralWidget(m_flowView);
+
+        core::CommandStack& commands = m_document->commands();
+        connect(&commands, &core::CommandStack::indexChanged, this, &MainWindow::updateActions);
+        connect(&commands, &core::CommandStack::cleanChanged, this, &MainWindow::updateTitle);
+        connect(m_flowScene.get(), &QGraphicsScene::selectionChanged, this,
+                &MainWindow::updateActions);
+        connect(m_document.get(), &core::ProjectDocument::startSceneChanged, this,
+                &MainWindow::updateActions);
+        connect(m_flowScene.get(), &FlowScene::sceneActivated, this, [this] {
+            statusBar()->showMessage(tr("The scene editor isn't available yet."),
+                                     STATUS_TIMEOUT_MS);
+        });
+        // Once the window has its final size.
+        QTimer::singleShot(0, m_flowView, &FlowView::fitAll);
+    }
+    else {
+        auto* placeholder = new QLabel(tr("No project open"), this);
+        placeholder->setAlignment(Qt::AlignCenter);
+        placeholder->setObjectName(QStringLiteral("workspacePlaceholder"));
+        setCentralWidget(placeholder);
+    }
+    updateTitle();
+    updateActions();
+}
+
+QList<core::FileError> MainWindow::openProject(const QString& directory)
+{
+    core::ProjectDocument::OpenResult opened = core::ProjectDocument::open(directory);
+    if (!opened.document) {
+        return opened.errors;
+    }
+    setDocument(std::move(opened.document));
+    return {};
+}
+
+void MainWindow::openProjectAt(const QString& path)
+{
+    const QFileInfo info(path);
+    const QString directory = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    const QList<core::FileError> errors = openProject(directory);
+    if (!errors.isEmpty()) {
+        QMessageBox box(
+            QMessageBox::Critical, tr("Open Project"),
+            tr("The project in %1 can't be opened.").arg(QDir::toNativeSeparators(directory)),
+            QMessageBox::Ok, this);
+        box.setInformativeText(tr("Fix the files below and open it again. Nothing was changed."));
+        box.setDetailedText(describeErrors(errors));
+        box.exec();
+        return;
+    }
+    statusBar()->showMessage(tr("Opened %1").arg(QDir::toNativeSeparators(directory)),
+                             STATUS_TIMEOUT_MS);
+}
+
+core::SaveResult MainWindow::saveProjectAs(const QString& directory)
+{
+    Q_ASSERT(m_document);
+    core::SaveResult result = m_document->saveAs(directory);
+    updateTitle();
+    return result;
+}
+
+void MainWindow::newProject()
+{
+    if (!maybeSave()) {
+        return;
+    }
+    NewProjectDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    setDocument(std::make_unique<core::ProjectDocument>(
+        core::newProject(dialog.projectName(), dialog.projectTemplate())));
+}
+
+void MainWindow::openProjectDialog()
+{
+    if (!maybeSave()) {
+        return;
+    }
+    const QString file = QFileDialog::getOpenFileName(
+        this, tr("Open Project"), m_document ? m_document->directory() : QString(),
+        tr("Shoal projects (project.shoal.json);;All files (*)"));
+    if (!file.isEmpty()) {
+        openProjectAt(file);
+    }
+}
+
+bool MainWindow::save()
+{
+    if (!m_document) {
+        return false;
+    }
+    if (m_document->directory().isEmpty()) {
+        return saveAs();
+    }
+    const core::SaveResult result = m_document->save();
+    updateTitle();
+    return reportSave(result);
+}
+
+bool MainWindow::saveAs()
+{
+    if (!m_document) {
+        return false;
+    }
+    const QString directory =
+        QFileDialog::getExistingDirectory(this, tr("Save Project In"), m_document->directory());
+    if (directory.isEmpty()) {
+        return false;
+    }
+    const bool elsewhere = QDir(directory) != QDir(m_document->directory());
+    if (elsewhere && QFileInfo::exists(QDir(directory).filePath(core::paths::MANIFEST))) {
+        const auto answer = QMessageBox::warning(
+            this, tr("Save Project"),
+            tr("%1 already holds a project. Replace it?").arg(QDir::toNativeSeparators(directory)),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Yes) {
+            return false;
+        }
+    }
+    return reportSave(saveProjectAs(directory));
+}
+
+bool MainWindow::reportSave(const core::SaveResult& result)
+{
+    if (!result.ok()) {
+        QMessageBox box(QMessageBox::Critical, tr("Save Project"),
+                        tr("Some files couldn't be saved."), QMessageBox::Ok, this);
+        box.setInformativeText(
+            tr("The files that did save are complete, and the others are as they were."));
+        box.setDetailedText(describeErrors(result.errors));
+        box.exec();
+        return false;
+    }
+    statusBar()->showMessage(
+        result.written.isEmpty() && result.removed.isEmpty()
+            ? tr("Saved; nothing had changed")
+            : tr("Saved %1").arg(QDir::toNativeSeparators(m_document->directory())),
+        STATUS_TIMEOUT_MS);
+    return true;
+}
+
+bool MainWindow::maybeSave()
+{
+    if (!m_document || m_document->commands().isClean()) {
+        return true;
+    }
+    const auto answer = QMessageBox::warning(
+        this, tr("Unsaved Changes"),
+        tr("Save the changes to %1?").arg(m_document->project().manifest.name),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Save) {
+        return save();
+    }
+    return answer == QMessageBox::Discard;
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (maybeSave()) {
+        event->accept();
+    }
+    else {
+        event->ignore();
+    }
+}
+
+void MainWindow::updateTitle()
+{
+    if (!m_document) {
+        setWindowTitle(QStringLiteral("Shoal"));
+        setWindowModified(false);
+        return;
+    }
+    QString name = m_document->project().manifest.name;
+    if (name.isEmpty()) {
+        name = QFileInfo(m_document->directory()).fileName();
+    }
+    setWindowTitle(tr("%1[*] — Shoal").arg(name));
+    setWindowModified(!m_document->commands().isClean());
+}
+
+void MainWindow::updateActions()
+{
+    const bool open = m_document != nullptr;
+    for (QAction* action : {m_saveAction, m_saveAsAction, m_selectAllAction, m_addSceneAction,
+                            m_zoomInAction, m_zoomOutAction, m_actualSizeAction, m_fitAction}) {
+        action->setEnabled(open);
+    }
+
+    const core::CommandStack* commands = open ? &m_document->commands() : nullptr;
+    const bool canUndo = commands && commands->canUndo();
+    const bool canRedo = commands && commands->canRedo();
+    m_undoAction->setEnabled(canUndo);
+    m_undoAction->setText(canUndo ? tr("&Undo %1").arg(commands->undoText()) : tr("&Undo"));
+    m_redoAction->setEnabled(canRedo);
+    m_redoAction->setText(canRedo ? tr("&Redo %1").arg(commands->redoText()) : tr("&Redo"));
+
+    const QStringList scenes = open ? m_flowScene->selectedSceneIds() : QStringList();
+    const QStringList transitions = open ? m_flowScene->selectedTransitionIds() : QStringList();
+    m_deleteAction->setEnabled(!scenes.isEmpty() || !transitions.isEmpty());
+    const bool oneScene = scenes.size() == 1 && transitions.isEmpty();
+    m_renameSceneAction->setEnabled(oneScene);
+    m_startSceneAction->setEnabled(oneScene &&
+                                   m_document->project().manifest.start != scenes.first());
 }
 
 void MainWindow::showAbout()

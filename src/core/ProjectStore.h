@@ -28,6 +28,9 @@ struct SaveResult {
     bool ok() const { return errors.isEmpty(); }
 };
 
+/// The project files present in `directory`, relative to it, whether or not they parse.
+QStringList findProjectFiles(const QString& directory);
+
 /// Writes `project` into `directory`.
 ///
 /// - A file whose bytes are already on disk is left untouched, so saving an unchanged

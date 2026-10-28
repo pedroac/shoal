@@ -8,11 +8,9 @@ namespace shoal::core {
 
 namespace {
 
-enum MergeId { MOVE_SCENE_NODE = 1 };
-
-QString tr(const char* text)
+QString tr(const char* text, const char* disambiguation = nullptr, int n = -1)
 {
-    return QCoreApplication::translate("shoal::core::FlowCommands", text);
+    return QCoreApplication::translate("shoal::core::FlowCommands", text, disambiguation, n);
 }
 
 std::optional<Point> nodePosition(const ProjectDocument& document, const QString& id)
@@ -125,41 +123,35 @@ void RenameSceneCommand::undo()
     m_document.renameScene(m_to, m_from);
 }
 
-// --- MoveSceneNodeCommand ---
+// --- MoveSceneNodesCommand ---
 
-MoveSceneNodeCommand::MoveSceneNodeCommand(ProjectDocument& document, QString id, Point to)
-    : m_document(document), m_id(std::move(id)), m_from(nodePosition(document, m_id)), m_to(to)
+MoveSceneNodesCommand::MoveSceneNodesCommand(ProjectDocument& document, QMap<QString, Point> to)
+    : m_document(document), m_to(std::move(to))
 {
-}
-
-QString MoveSceneNodeCommand::text() const
-{
-    return tr("Move scene %1").arg(m_id);
-}
-
-void MoveSceneNodeCommand::redo()
-{
-    m_document.setSceneNodePosition(m_id, m_to);
-}
-
-void MoveSceneNodeCommand::undo()
-{
-    m_document.setSceneNodePosition(m_id, m_from);
-}
-
-int MoveSceneNodeCommand::mergeId() const
-{
-    return MOVE_SCENE_NODE;
-}
-
-bool MoveSceneNodeCommand::mergeWith(const Command& next)
-{
-    const auto& move = static_cast<const MoveSceneNodeCommand&>(next);
-    if (move.m_id != m_id) {
-        return false;
+    Q_ASSERT(!m_to.isEmpty());
+    for (auto it = m_to.cbegin(); it != m_to.cend(); ++it) {
+        m_from.insert(it.key(), nodePosition(m_document, it.key()));
     }
-    m_to = move.m_to;
-    return true;
+}
+
+QString MoveSceneNodesCommand::text() const
+{
+    return m_to.size() == 1 ? tr("Move scene %1").arg(m_to.firstKey())
+                            : tr("Move %n scenes", nullptr, int(m_to.size()));
+}
+
+void MoveSceneNodesCommand::redo()
+{
+    for (auto it = m_to.cbegin(); it != m_to.cend(); ++it) {
+        m_document.setSceneNodePosition(it.key(), *it);
+    }
+}
+
+void MoveSceneNodesCommand::undo()
+{
+    for (auto it = m_from.cbegin(); it != m_from.cend(); ++it) {
+        m_document.setSceneNodePosition(it.key(), *it);
+    }
 }
 
 // --- SetStartSceneCommand ---

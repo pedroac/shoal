@@ -100,6 +100,29 @@ private slots:
         QCOMPARE(*reloaded.project, *loaded.project);
     }
 
+    void renamesFoldersWhoseCaseChanged()
+    {
+        QTemporaryDir dir;
+        QVERIFY(makeProject(dir));
+        LoadResult loaded = loadProject(dir.path());
+        auto& scenes = loaded.project->scenes;
+        scenes.insert(QStringLiteral("Level_1"), scenes.take(QStringLiteral("level_1")));
+
+        const SaveResult saved = saveProject(*loaded.project, dir.path(), loaded.files);
+        QVERIFY(saved.ok());
+        // Nothing is removed: the folder, modifiers and all, is renamed instead, which on a
+        // case-insensitive filesystem is the only way to keep the files.
+        QCOMPARE(saved.removed, QStringList());
+        const QStringList folders = QDir(dir.filePath(QStringLiteral("scenes")))
+                                        .entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        QVERIFY2(folders.contains(QStringLiteral("Level_1")), qPrintable(folders.join(u' ')));
+        QVERIFY2(!folders.contains(QStringLiteral("level_1")), qPrintable(folders.join(u' ')));
+
+        const LoadResult reloaded = loadProject(dir.path());
+        QVERIFY(reloaded.project);
+        QCOMPARE(*reloaded.project, *loaded.project);
+    }
+
     void savesANewProjectIntoAnEmptyFolder()
     {
         QTemporaryDir dir;

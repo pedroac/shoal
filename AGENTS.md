@@ -41,11 +41,20 @@ changes.
   includes `<sprat/sprat.h>`.
 - `src/editor/`: the Qt Widgets application, built as a library (`shoal_editor`)
   so tests can create its windows. `main.cpp` is the executable's only source.
+  - `MainWindow`: one open `ProjectDocument`, the menus, New/Open/Save. Methods
+    that take a path and don't show dialogs (`openProject`, `saveProjectAs`) are
+    what tests call; the slots wrap them with dialogs.
+  - `FlowScene`: the flow graph's items, kept in line with the document by its
+    signals, and the edits as commands. `FlowView` shows it (zoom, pan, context
+    menus). `SceneNodeItem` and `TransitionEdgeItem` are its items.
+  - Views never change the model directly: they push commands, and redraw from
+    the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the
   offscreen platform. `tests/fixtures/basic/` is a project in canonical form: loading
   and saving it must reproduce every byte, so a change to the writer or the format
   shows up there. A new or changed error message goes in `ProjectCodecTests`' table,
-  exactly.
+  exactly. Editor tests drive views with real mouse events (`QTest::mousePress`
+  and friends on the viewport) where the behavior is about the mouse.
 - `docs/`: the design specification, and the file format specifications as they
   are written.
 

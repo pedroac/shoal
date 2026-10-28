@@ -11,8 +11,7 @@ namespace {
 
 const QString JSON_FILTER = QStringLiteral("*.json");
 
-/// The project files present in `directory`, relative to it.
-QStringList findProjectFiles(const QDir& directory)
+QStringList findProjectFilesIn(const QDir& directory)
 {
     QStringList found;
     for (const QString& name : {paths::MANIFEST, paths::FLOW, paths::CLASSES}) {
@@ -50,14 +49,67 @@ void removeEmptyParents(const QDir& directory, const QString& path)
     }
 }
 
+/// Renames, on disk, the files and folders of `previous` that a path in `files` spells with
+/// different case, such as a scene renamed from `Boss` to `boss`, and returns `previous` with
+/// the new spelling. On a case-insensitive filesystem both spellings are the same file, so
+/// without this the save would overwrite the old file in place, under its old name, and then
+/// remove it as stale.
+QStringList matchCase(QDir root, const ProjectFiles& files, QStringList previous,
+                      QList<FileError>& errors)
+{
+    for (const auto& entry : files) {
+        const QStringList segments = entry.first.split(u'/');
+        for (qsizetype n = 1; n <= segments.size(); ++n) {
+            const QString wanted = segments.first(n).join(u'/');
+            QString found;
+            for (const QString& old : previous) {
+                const QString prefix = old.section(u'/', 0, int(n - 1));
+                if (prefix.count(u'/') == n - 1 && prefix != wanted &&
+                    prefix.compare(wanted, Qt::CaseInsensitive) == 0) {
+                    found = prefix;
+                    break;
+                }
+            }
+            if (found.isEmpty()) {
+                continue;
+            }
+            if (QFileInfo::exists(root.filePath(found))) {
+                // Through a temporary name, since some filesystems ignore a rename that
+                // only changes case.
+                const QString temporary = found + QStringLiteral(".shoal-renaming");
+                if (!root.rename(found, temporary)) {
+                    errors << FileError{found, QStringLiteral("cannot rename to %1").arg(wanted)};
+                    return previous;
+                }
+                if (!root.rename(temporary, wanted)) {
+                    root.rename(temporary, found);
+                    errors << FileError{found, QStringLiteral("cannot rename to %1").arg(wanted)};
+                    return previous;
+                }
+            }
+            for (QString& old : previous) {
+                if (old == found || old.startsWith(found + u'/')) {
+                    old = wanted + old.mid(found.size());
+                }
+            }
+        }
+    }
+    return previous;
+}
+
 }  // namespace
+
+QStringList findProjectFiles(const QString& directory)
+{
+    return findProjectFilesIn(QDir(directory));
+}
 
 LoadResult loadProject(const QString& directory)
 {
     LoadResult result;
     const QDir root(directory);
     ProjectFiles files;
-    for (const QString& path : findProjectFiles(root)) {
+    for (const QString& path : findProjectFilesIn(root)) {
         QFile file(root.filePath(path));
         if (!file.open(QIODevice::ReadOnly)) {
             result.errors << FileError{path,
@@ -82,6 +134,11 @@ SaveResult saveProject(const Project& project, const QString& directory,
     SaveResult result;
     const QDir root(directory);
     const ProjectFiles files = serializeProject(project);
+    const QStringList previous = matchCase(root, files, previousFiles, result.errors);
+    if (!result.errors.isEmpty()) {
+        result.files = previousFiles;  // nothing was written
+        return result;
+    }
 
     for (const auto& [path, bytes] : files) {
         result.files << path;
@@ -105,7 +162,7 @@ SaveResult saveProject(const Project& project, const QString& directory,
         result.written << path;
     }
 
-    for (const QString& path : previousFiles) {
+    for (const QString& path : previous) {
         if (files.contains(path) || !isProjectFile(path)) {
             continue;
         }

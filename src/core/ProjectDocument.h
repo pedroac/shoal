@@ -35,7 +35,9 @@ public:
 
     /// Saves into directory(); on success the current state becomes clean.
     SaveResult save();
-    /// Saves into `directory`, which becomes directory() on success.
+    /// Saves into `directory`, which becomes directory() on success. A project already in
+    /// `directory` is replaced: its project files this project doesn't have are removed, so
+    /// none of its scenes linger. Other files there are kept.
     SaveResult saveAs(const QString& directory);
 
     // --- queries ---

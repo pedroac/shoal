@@ -107,7 +107,8 @@ my_game/
 - **Modifiers have their own files**, so cutscene work and level layout don't
   collide in merges.
 - **Shared editor state** (flow graph node positions, preset tints) lives under an
-  `editor` key in the file it describes, and the export drops it. **Personal
+  `editor` key in the file it describes, and the export drops it. A flow node's
+  position is its top-left corner; the editor stores whole numbers. **Personal
   editor state** lives in `.shoal/session.json`, which is gitignored.
 - **Folder projects only** in v1. Zipped projects may come in v2.
 
@@ -182,6 +183,13 @@ tooltips and autocompletes from them.
   longer has it (a deleted or renamed scene, for example), along with folders left
   empty. Other files in the project folder, such as art or notes, are never
   touched. Each file is written atomically.
+- **A rename that only changes case** (`Boss` to `boss`) renames the folder or
+  file on disk before writing. On case-insensitive filesystems (Windows, macOS)
+  both spellings are the same file, so writing then removing the old spelling
+  would delete the scene.
+- **Save As into a folder that holds a project replaces it**, after asking: the
+  old project's files that the new one doesn't have are removed, so none of its
+  scenes linger. Other files there are kept.
 
 ## 6. Flow
 
@@ -528,6 +536,23 @@ element's parent is the viewport, or the safe area.
 - **Flow view (macro):** scenes as nodes, transitions as edges, modifiers as
   smaller nodes attached to their host scene. Double-click a scene to open it, an
   edge to edit the transition, a modifier to edit its action list.
+  - The start scene has a colored strip. `push` edges are dashed, since the scene
+    underneath stays. Edges between the same two scenes bend apart; an edge from a
+    scene to itself loops above it.
+  - Transitions that lead to no scene (`pop`, `push_modifier`, a missing scene)
+    are listed on the node they leave from.
+  - Dragging from a node's port to another node adds a `replace` transition with
+    no trigger yet, named `<from>_to_<to>`. The context menu adds one to any
+    scene, including the same one.
+  - **A drag is one undo step**, however many nodes it moves, pushed when the
+    mouse is released; a click that moves nothing changes nothing. The document is
+    then modified, and nothing is written until the user saves: there is no
+    autosave to the project itself.
+  - A scene with no stored position is placed below the others, without changing
+    the project, until the user moves it. Opening a project never modifies it.
+- **Files:** a new project starts from a template, in memory; its folder is asked
+  on the first save. Opening takes a project folder or its `project.shoal.json`,
+  also from the command line. Closing or replacing a modified project asks first.
 - **Scene view (micro):** the canvas, with layers, a hierarchy tree, an inspector,
   a sprat sheet browser (drag sprites onto the canvas), selection and
   move/rotate/scale gizmos, a grid and snapping.

@@ -39,8 +39,18 @@ shoal_set_warnings(shoal_assets)
 
 # editor: the Qt Widgets application, as a library so tests can create its windows.
 add_library(shoal_editor STATIC
+    editor/FlowScene.cpp
+    editor/FlowScene.h
+    editor/FlowView.cpp
+    editor/FlowView.h
     editor/MainWindow.cpp
     editor/MainWindow.h
+    editor/NewProjectDialog.cpp
+    editor/NewProjectDialog.h
+    editor/SceneNodeItem.cpp
+    editor/SceneNodeItem.h
+    editor/TransitionEdgeItem.cpp
+    editor/TransitionEdgeItem.h
 )
 add_library(shoal::editor ALIAS shoal_editor)
 target_include_directories(shoal_editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

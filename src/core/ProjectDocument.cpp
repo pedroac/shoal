@@ -49,7 +49,7 @@ SaveResult ProjectDocument::save()
 
 SaveResult ProjectDocument::saveAs(const QString& directory)
 {
-    SaveResult result = saveProject(m_project, directory, {});
+    SaveResult result = saveProject(m_project, directory, findProjectFiles(directory));
     if (result.ok()) {
         m_directory = directory;
         m_files = result.files;

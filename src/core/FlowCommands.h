@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QMap>
 #include <QString>
 #include <QStringList>
 #include <optional>
@@ -60,22 +61,19 @@ private:
     QString m_to;
 };
 
-/// Moves a scene's node in the flow view. Consecutive moves of the same node merge, so a
-/// drag undoes in one step.
-class MoveSceneNodeCommand : public Command {
+/// Moves scene nodes in the flow view. The view pushes one when a drag ends, so each drag
+/// is one step however many nodes it moved.
+class MoveSceneNodesCommand : public Command {
 public:
-    MoveSceneNodeCommand(ProjectDocument& document, QString id, Point to);
+    MoveSceneNodesCommand(ProjectDocument& document, QMap<QString, Point> to);
     QString text() const override;
     void redo() override;
     void undo() override;
-    int mergeId() const override;
-    bool mergeWith(const Command& next) override;
 
 private:
     ProjectDocument& m_document;
-    QString m_id;
-    std::optional<Point> m_from;
-    Point m_to;
+    QMap<QString, std::optional<Point>> m_from;
+    QMap<QString, Point> m_to;
 };
 
 class SetStartSceneCommand : public Command {

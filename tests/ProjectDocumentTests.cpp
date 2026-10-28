@@ -98,18 +98,24 @@ private slots:
         QCOMPARE(document.uniqueSceneId(QStringLiteral("level_1")), QStringLiteral("level_1_2"));
     }
 
-    void aDragUndoesInOneStep()
+    void movesSeveralNodesInOneStep()
     {
         ProjectDocument document(fixtureProject());
+        const Project before = document.project();
         const QString pause = QStringLiteral("pause");
-        for (double x : {500.0, 520.0, 540.0}) {
-            document.commands().push(
-                std::make_unique<MoveSceneNodeCommand>(document, pause, Point{x, 300}));
-        }
+        const QString level1 = QStringLiteral("level_1");
+        const QString fresh = QStringLiteral("unplaced");
+        document.commands().push(std::make_unique<MoveSceneNodesCommand>(
+            document,
+            QMap<QString, Point>{
+                {pause, Point{500, 320}}, {level1, Point{10, 20}}, {fresh, Point{0, 0}}}));
         QCOMPARE(document.commands().count(), 1);
-        QCOMPARE(document.project().flow.nodePositions.value(pause), (Point{540, 300}));
+        QCOMPARE(document.commands().undoText(), QStringLiteral("Move 3 scenes"));
+        QCOMPARE(document.project().flow.nodePositions.value(pause), (Point{500, 320}));
+        QCOMPARE(document.project().flow.nodePositions.value(level1), (Point{10, 20}));
+
         document.commands().undo();
-        QCOMPARE(document.project().flow.nodePositions.value(pause), (Point{480, 300.5}));
+        QCOMPARE(document.project(), before);  // also forgets the node that had no position
     }
 
     void addsAndRemovesTransitionsInIdOrder()
@@ -172,6 +178,26 @@ private slots:
         QVERIFY(reopened.document);
         QCOMPARE(reopened.document->project(), document.project());
         QCOMPARE(reopened.document->project().manifest.start, QStringLiteral("intro"));
+    }
+
+    void saveAsReplacesAProjectAlreadyThere()
+    {
+        QTemporaryDir dir;
+        const QString notes = QStringLiteral("notes.txt");
+        ProjectFiles existing = support::readTree(support::fixturePath(QStringLiteral("basic")));
+        existing[notes] = "not a project file";
+        QVERIFY(support::writeTree(dir.path(), existing));
+
+        ProjectDocument document(newProject(QStringLiteral("Game"), ProjectTemplate::Default));
+        const SaveResult saved = document.saveAs(dir.path());
+        QVERIFY(saved.ok());
+        QVERIFY(saved.removed.contains(paths::scene(QStringLiteral("level_1"))));
+
+        // None of the old scenes come back, and the unrelated file is still there.
+        ProjectDocument::OpenResult reopened = ProjectDocument::open(dir.path());
+        QVERIFY(reopened.document);
+        QCOMPARE(reopened.document->project(), document.project());
+        QVERIFY(QFile::exists(QDir(dir.path()).filePath(notes)));
     }
 
     void openingReportsErrors()
