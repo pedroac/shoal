@@ -23,6 +23,7 @@ class ProjectDocument;
 namespace shoal::editor {
 
 class EntityItem;
+class TransformHandle;
 
 /// One scene's world-space layers and entities, drawn with their sprites. It follows the
 /// document, so undo and redo show up here, and turns what the user does into commands.
@@ -78,6 +79,14 @@ public:
 
     /// Pushes one command for the entities the user dragged; nothing if none moved.
     void commitMoves();
+    /// Pushes one command setting an entity's rotation and scale, as a handle leaves them;
+    /// nothing if they didn't change.
+    void commitTransform(const core::EntityPath& path, double rotation, core::Point scale,
+                         const QString& verb);
+    /// Puts the rotate and scale handles on the one selected entity, or hides them.
+    void updateHandles();
+    TransformHandle* rotateHandle() const { return m_rotateHandle; }
+    TransformHandle* scaleHandle() const { return m_scaleHandle; }
     bool isDragging() const { return m_dragging; }
     void setDragging(bool dragging) { m_dragging = dragging; }
 
@@ -104,6 +113,8 @@ signals:
 
 private:
     void rebuild();
+    void clearItems();
+    void createHandles();
     void addItems(const std::vector<core::Entity>& entities, core::EntityPath& path,
                   QGraphicsItem* parent, bool locked);
     void onSheetChanged(const QString& alias);
@@ -120,6 +131,8 @@ private:
     bool m_snapping = false;
     double m_gridSize = 16;
     bool m_dragging = false;
+    TransformHandle* m_rotateHandle = nullptr;
+    TransformHandle* m_scaleHandle = nullptr;
     mutable QHash<QString, std::vector<QPixmap>> m_atlases;  ///< By sheet alias.
 };
 

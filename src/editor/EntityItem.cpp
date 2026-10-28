@@ -292,6 +292,9 @@ void EntityItem::paintShape(QPainter* painter)
 
 QVariant EntityItem::itemChange(GraphicsItemChange change, const QVariant& value)
 {
+    if (change == ItemPositionHasChanged && isSelected()) {
+        m_canvas.updateHandles();  // they follow a drag
+    }
     if (change == ItemPositionChange && m_canvas.isDragging() &&
         !(QGuiApplication::keyboardModifiers() & Qt::AltModifier)) {
         return m_canvas.snap(value.toPointF());  // Alt drags freely

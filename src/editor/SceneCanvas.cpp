@@ -8,6 +8,7 @@
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
 #include "editor/EntityItem.h"
+#include "editor/TransformHandle.h"
 
 namespace shoal::editor {
 
@@ -67,6 +68,7 @@ SceneCanvas::SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sh
         }
     });
     connect(&m_sheets, &assets::SheetCache::sheetChanged, this, &SceneCanvas::onSheetChanged);
+    connect(this, &QGraphicsScene::selectionChanged, this, &SceneCanvas::updateHandles);
 
     if (const core::Scene* current = scene()) {
         for (auto it = current->layers.rbegin(); it != current->layers.rend(); ++it) {
@@ -83,8 +85,7 @@ SceneCanvas::~SceneCanvas()
 {
     // Delete the items while this is still a SceneCanvas: deleting selected items emits
     // selectionChanged(), and its receivers query this canvas.
-    clear();
-    m_items.clear();
+    clearItems();
 }
 
 const core::Scene* SceneCanvas::scene() const
@@ -264,6 +265,54 @@ void SceneCanvas::commitMoves()
         std::make_unique<core::EditEntitiesCommand>(m_document, m_sceneId, changes, text));
 }
 
+void SceneCanvas::commitTransform(const EntityPath& path, double rotation, core::Point scale,
+                                  const QString& verb)
+{
+    const EntityItem* entityItem = item(path);
+    if (!entityItem) {
+        return;
+    }
+    Entity entity = entityItem->entity();
+    if (entity.transform.rot == rotation && entity.transform.scale == scale) {
+        return;
+    }
+    entity.transform.rot = rotation;
+    entity.transform.scale = scale;
+    const QString name = entity.id.isEmpty() ? core::enumName(entity.type) : entity.id;
+    m_document.commands().push(std::make_unique<core::EditEntitiesCommand>(
+        m_document, m_sceneId, QList<std::pair<EntityPath, Entity>>{{path, entity}},
+        QStringLiteral("%1 %2").arg(verb, name)));
+}
+
+void SceneCanvas::clearItems()
+{
+    // Removing selected items emits selectionChanged(), which places the handles.
+    m_rotateHandle = nullptr;
+    m_scaleHandle = nullptr;
+    clear();
+    m_items.clear();
+    m_layerItems.clear();
+}
+
+void SceneCanvas::createHandles()
+{
+    m_rotateHandle = new TransformHandle(*this, TransformHandle::Kind::Rotate);
+    m_scaleHandle = new TransformHandle(*this, TransformHandle::Kind::Scale);
+    addItem(m_rotateHandle);
+    addItem(m_scaleHandle);
+}
+
+void SceneCanvas::updateHandles()
+{
+    if (!m_rotateHandle) {
+        return;
+    }
+    const QList<EntityPath> selected = selectedPaths();
+    const EntityPath target = selected.size() == 1 ? selected.first() : EntityPath();
+    m_rotateHandle->attach(target);
+    m_scaleHandle->attach(target);
+}
+
 // --- visuals ---
 
 SceneCanvas::SpriteVisual SceneCanvas::spriteVisual(const QString& sheet, const QString& path) const
@@ -333,6 +382,7 @@ void SceneCanvas::onSheetChanged(const QString& alias)
     for (EntityItem* entityItem : std::as_const(m_items)) {
         entityItem->refreshVisual();
     }
+    updateHandles();
 }
 
 // --- items ---
@@ -342,9 +392,8 @@ void SceneCanvas::rebuild()
     const core::Scene* current = scene();
     if (!current) {
         m_treeShape.clear();
-        clear();
-        m_items.clear();
-        m_layerItems.clear();
+        clearItems();
+        createHandles();
         emit contentChanged();
         return;
     }
@@ -358,15 +407,15 @@ void SceneCanvas::rebuild()
                 entityItem->setEntity(entity);
             }
         });
+        updateHandles();
         emit contentChanged();
         return;
     }
     m_treeShape = shape;
 
     const QList<EntityPath> selected = selectedPaths();
-    clear();
-    m_items.clear();
-    m_layerItems.clear();
+    clearItems();
+    createHandles();
     for (size_t i = 0; i < current->layers.size(); ++i) {
         const core::Layer& layer = current->layers[i];
         auto* layerItem = new QGraphicsRectItem();  // an empty rect draws nothing

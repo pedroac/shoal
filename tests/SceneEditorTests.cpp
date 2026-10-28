@@ -15,6 +15,7 @@
 #include "editor/SceneCanvas.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
+#include "editor/TransformHandle.h"
 
 using namespace shoal::core;
 using namespace shoal::editor;
@@ -165,6 +166,85 @@ private slots:
         QTest::keyClick(f.view, Qt::Key_Up, Qt::ShiftModifier);
         QCOMPARE(entityAt(f.scene(), {1})->transform.pos, (Point{321, 630}));
         QCOMPARE(f.document().commands().count(), 2);
+    }
+
+    void handlesFollowASingleSelection()
+    {
+        Fixture f;
+        TransformHandle* rotate = f.canvas().rotateHandle();
+        TransformHandle* scale = f.canvas().scaleHandle();
+        QVERIFY(rotate && scale);
+        QVERIFY(!rotate->isVisible() && !scale->isVisible());
+
+        f.canvas().select({{1}});
+        QVERIFY(rotate->isVisible() && scale->isVisible());
+        const EntityItem* player = f.canvas().item({1});
+        const QRectF rect = player->visualRect();
+        QCOMPARE(rotate->scenePos(), player->mapToScene(QPointF(rect.center().x(), rect.top())));
+        QCOMPARE(scale->scenePos(), player->mapToScene(rect.bottomRight()));
+
+        // They follow a drag of the entity.
+        const QPointF before = scale->scenePos();
+        const QPoint at = f.at(QPointF(320, 630));
+        f.drag(at, at + QPoint(40, 10));
+        QCOMPARE(scale->scenePos(), before + QPointF(40, 10));
+
+        f.canvas().select({{1}, {2}});
+        QVERIFY(!rotate->isVisible() && !scale->isVisible());
+        f.canvas().select({});
+        QVERIFY(!rotate->isVisible());
+    }
+
+    void theRotateHandleTurnsTheEntityInOneStep()
+    {
+        Fixture f;
+        f.canvas().select({{1}});
+        const QPointF origin = f.canvas().item({1})->scenePos();
+        // The handle's knob sits above its position, at a fixed distance on screen.
+        const QPoint knob = f.at(f.canvas().rotateHandle()->scenePos()) - QPoint(0, 24);
+        // A quarter turn clockwise (y points down) about the origin, Shift snapping it.
+        const QPointF arm = f.view->mapToScene(knob) - origin;
+        const QPoint target = f.at(origin + QPointF(-arm.y(), arm.x()));
+        QTest::mousePress(f.view->viewport(), Qt::LeftButton, {}, knob);
+        QTest::mouseEvent(QTest::MouseMove, f.view->viewport(), Qt::NoButton, Qt::ShiftModifier,
+                          target);
+        QTest::mouseRelease(f.view->viewport(), Qt::LeftButton, Qt::ShiftModifier, target);
+
+        QCOMPARE(f.document().commands().count(), 1);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Rotate player"));
+        QCOMPARE(entityAt(f.scene(), {1})->transform.rot, 90.0);
+        QCOMPARE(entityAt(f.scene(), {1})->transform.pos, (Point{320, 640}));  // not moved
+        f.document().commands().undo();
+        QCOMPARE(entityAt(f.scene(), {1})->transform.rot, 0.0);
+        QCOMPARE(f.canvas().item({1})->transform(), QTransform());
+    }
+
+    void theScaleHandleScalesTheEntity()
+    {
+        Fixture f;
+        f.canvas().select({{1}});
+        const QPointF origin = f.canvas().item({1})->scenePos();
+        const QPointF corner = f.canvas().scaleHandle()->scenePos();
+        f.drag(f.at(corner), f.at(origin + 2 * (corner - origin)));
+
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Scale player"));
+        const Point scale = entityAt(f.scene(), {1})->transform.scale;
+        QVERIFY2(std::abs(scale.x - 2) < 0.05 && std::abs(scale.y - 2) < 0.05,
+                 qPrintable(QStringLiteral("%1, %2").arg(scale.x).arg(scale.y)));
+        // The handle stays on the outline, which has grown.
+        QVERIFY(
+            QLineF(f.canvas().scaleHandle()->scenePos(), origin + 2 * (corner - origin)).length() <
+            2);
+    }
+
+    void aClickOnAHandleChangesNothing()
+    {
+        Fixture f;
+        f.canvas().select({{1}});
+        const QPoint corner = f.at(f.canvas().scaleHandle()->scenePos());
+        QTest::mouseClick(f.view->viewport(), Qt::LeftButton, {}, corner);
+        QCOMPARE(f.document().commands().count(), 0);
+        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{{1}});
     }
 
     void deletesTheSelection()

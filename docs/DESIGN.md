@@ -587,6 +587,11 @@ element's parent is the viewport, or the safe area.
   - A drag is one undo step. Snapping rounds to the grid (16 units); Alt drags
     freely. Arrow keys nudge by a unit, or a grid cell when snapping, ten with
     Shift.
+  - A single selected entity has a rotate handle above its outline and a scale
+    handle at its bottom-right corner, the same size on screen at any zoom. They
+    turn and scale it about its position, where a sprite's sprat pivot sits (screen
+    elements will use `layout.pivot`); Shift snaps rotation to 15 degrees.
+    Releasing the mouse is one undo step, and a click changes nothing.
   - Screen-space layers are listed but not drawn until the UI layout step.
 - **Transition editor:** trigger and requirements, the effect and its parameters,
   the persisted state, and the mapping of entities to marks.

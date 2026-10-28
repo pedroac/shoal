@@ -67,6 +67,8 @@ add_library(shoal_editor STATIC
     editor/SceneView.h
     editor/SceneNodeItem.cpp
     editor/SceneNodeItem.h
+    editor/TransformHandle.cpp
+    editor/TransformHandle.h
     editor/TransitionEdgeItem.cpp
     editor/TransitionEdgeItem.h
 )
