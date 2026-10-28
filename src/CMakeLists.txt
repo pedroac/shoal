@@ -29,8 +29,12 @@ shoal_set_warnings(shoal_core)
 
 # assets: sprat sheets and their atlases, through sprat-lib.
 add_library(shoal_assets STATIC
+    assets/SheetCache.cpp
+    assets/SheetCache.h
     assets/SpratLibrary.cpp
     assets/SpratLibrary.h
+    assets/SpriteSheet.cpp
+    assets/SpriteSheet.h
 )
 add_library(shoal::assets ALIAS shoal_assets)
 target_include_directories(shoal_assets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

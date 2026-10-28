@@ -39,6 +39,9 @@ changes.
   - `ProjectTemplates`: new projects and scenes.
 - `src/assets/`: sprat sheets and atlases, through sprat-lib. The only place that
   includes `<sprat/sprat.h>`.
+  - `SpriteSheet`: `loadSheet()` copies a sheet into Qt types, and `placeSprite()`
+    is sprat-lib's drawing recipe. `SheetCache`: a project's sheets by alias, with
+    hot reload.
 - `src/editor/`: the Qt Widgets application, built as a library (`shoal_editor`)
   so tests can create its windows. `main.cpp` is the executable's only source.
   - `MainWindow`: one open `ProjectDocument`, the menus, New/Open/Save. Methods
@@ -53,7 +56,8 @@ changes.
   offscreen platform. `tests/fixtures/basic/` is a project in canonical form: loading
   and saving it must reproduce every byte, so a change to the writer or the format
   shows up there. A new or changed error message goes in `ProjectCodecTests`' table,
-  exactly. Editor tests drive views with real mouse events (`QTest::mousePress`
+  exactly. `tests/fixtures/sheets/` is a hand-written sprat sheet and atlas, described
+  in its README. Editor tests drive views with real mouse events (`QTest::mousePress`
   and friends on the viewport) where the behavior is about the mouse.
 - `docs/`: the design specification, and the file format specifications as they
   are written.

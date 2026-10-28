@@ -586,10 +586,19 @@ element's parent is the viewport, or the safe area.
 
 A `SheetCache` follows sprat-lib's "load, bind, convert, free" pattern: it loads
 each `.sprat` with `sprat_sheet_load_file`, copies sprites and animations into Qt
-structures in the sheet's order, loads each atlas as a `QPixmap` relative to the
-sheet's folder, and frees the sheet. A `QFileSystemWatcher` reloads a sheet when
-sprat-gui or sprat-cli exports it again. The canvas draws sprites with sprat-lib's
-drawing recipe (trim, pivot, packing rotation, flips).
+structures in the sheet's order, loads each atlas image relative to the sheet's
+folder, and frees the sheet. The canvas draws sprites with sprat-lib's drawing
+recipe (trim, pivot, packing rotation, flips).
+
+- **Hot reload.** A `QFileSystemWatcher` reloads a sheet when sprat-gui or
+  sprat-cli writes it or one of its atlases again, after a short pause so a burst of
+  writes reloads once. A sheet declared before it exists loads when it appears.
+- **A failed reload keeps the last good sheet**, such as one that caught a file half
+  written, and the error is shown until a later write loads.
+- **World units are the art's original pixels:** sprites are drawn at
+  `1 / sheet.scale`, so packing a sheet at half scale doesn't halve the scene.
+- An atlas that can't be read, or whose size differs from what the sheet says, is
+  a warning; its sprites draw as placeholders.
 
 ## 14. Export
 
