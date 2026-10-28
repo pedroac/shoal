@@ -631,6 +631,11 @@ element's parent is the viewport, or the safe area.
     sheet's order) and animations, as thumbnails, and filters them by name. A sheet
     that didn't load says why. It follows the sheet cache, so a sheet written again
     by sprat shows up at once.
+  - Dropping `.sprat` files on the sheet browser declares them in the manifest, in
+    one undo step, each under an alias made from its file name (characters an id
+    can't have become `_`, and `_2`, `_3`, ... avoids a clash). The path is relative
+    to the project folder, or absolute while the project has never been saved. A
+    file already declared is skipped. With no sheets, the browser says to drop some.
   - Dropping a sprite or an animation on the canvas adds a `sprite` or `animation`
     entity with no id, on the current layer, at the drop point (snapped when
     snapping is on), and selects it; double-clicking it in the browser places it in

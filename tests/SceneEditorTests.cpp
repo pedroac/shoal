@@ -437,6 +437,67 @@ private slots:
         QCOMPARE(SheetItem::fromMimeData(data.get()), IDLE_SPRITE);
     }
 
+    void droppingSpratFilesOnTheSheetBrowserDeclaresThem()
+    {
+        Fixture f;
+        // A sheet outside the project folder, as sprat-gui would write it anywhere.
+        QTemporaryDir elsewhere;
+        const QString sheetFile = elsewhere.filePath(QStringLiteral("sheet.sprat"));
+        QVERIFY(QFile::copy(support::fixturePath(QStringLiteral("sheets/hero.sprat")), sheetFile));
+        QVERIFY(QFile::copy(support::fixturePath(QStringLiteral("sheets/hero.png")),
+                            elsewhere.filePath(QStringLiteral("hero.png"))));
+        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        QWidget* viewport = browser->tree()->viewport();
+        const auto drop = [&](const QList<QUrl>& urls) {
+            QMimeData data;
+            data.setUrls(urls);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+            const QPointF at(viewport->rect().center());
+#else
+            const QPoint at = viewport->rect().center();
+#endif
+            QDragEnterEvent enter(at, Qt::CopyAction, &data, Qt::LeftButton, {});
+            QApplication::sendEvent(viewport, &enter);
+            if (!enter.isAccepted()) {
+                return false;
+            }
+            QDropEvent dropEvent(at, Qt::CopyAction, &data, Qt::LeftButton, {});
+            QApplication::sendEvent(viewport, &dropEvent);
+            return dropEvent.isAccepted();
+        };
+
+        // Anything but .sprat files is refused.
+        QVERIFY(!drop({QUrl::fromLocalFile(elsewhere.filePath(QStringLiteral("hero.png")))}));
+        QVERIFY(!drop({QUrl(QStringLiteral("https://example.com/sheet.sprat"))}));
+
+        QVERIFY(drop({QUrl::fromLocalFile(sheetFile)}));
+        // Named after the file, relative to the project, with its sprites listed.
+        const QString alias = QStringLiteral("sheet");
+        QCOMPARE(f.window.document()->project().manifest.sheets.value(alias),
+                 QDir(f.dir.path()).relativeFilePath(sheetFile));
+        QTreeWidgetItem* row = browser->sheetRow(alias);
+        QVERIFY(row);
+        QCOMPARE(row->text(0), alias);
+        QCOMPARE(row->child(0)->text(0), QStringLiteral("Sprites (4)"));
+        QVERIFY(
+            browser->itemRow({SheetItem::Kind::Sprite, alias, QStringLiteral("hero/idle.png")}));
+
+        // Dropping it again adds nothing; it's one undo step either way.
+        QVERIFY(drop({QUrl::fromLocalFile(sheetFile)}));
+        QCOMPARE(f.window.document()->project().manifest.sheets.size(), 3);
+        QCOMPARE(f.window.document()->commands().undoText(), QStringLiteral("Add sheet"));
+        f.window.document()->commands().undo();
+        QVERIFY(!browser->sheetRow(alias));
+        QCOMPARE(f.window.document()->project().manifest.sheets.size(), 2);
+
+        // A second file with the same name gets its own alias.
+        QTemporaryDir other;
+        QVERIFY(QFile::copy(sheetFile, other.filePath(QStringLiteral("sheet.sprat"))));
+        QCOMPARE(f.window.addSheets({sheetFile, other.filePath(QStringLiteral("sheet.sprat"))}),
+                 QStringList({alias, QStringLiteral("sheet_2")}));
+        QCOMPARE(f.window.document()->commands().undoText(), QStringLiteral("Add sheets"));
+    }
+
     void theSheetBrowserFilters()
     {
         Fixture f;

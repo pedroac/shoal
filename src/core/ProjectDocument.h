@@ -61,6 +61,10 @@ public:
     /// The ids of the transitions that name the entity `entityId` of the scene: carrying it
     /// away from there, or landing something on it.
     QStringList transitionsNamingEntity(QStringView sceneId, QStringView entityId) const;
+    /// `base` made into a sheet alias no declared sheet has: characters an id can't have
+    /// become `_`, then `_2`, `_3`, ... is added if needed.
+    QString uniqueSheetAlias(const QString& base) const;
+
     /// How many entities have each class, across every scene: the classes in use, which
     /// with the declarations in classes.json make up the class registry.
     QMap<QString, int> classUses() const;
@@ -87,6 +91,8 @@ public:
     Layer removeLayer(const QString& sceneId, int index);
     void setLayer(const QString& sceneId, int index, Layer layer);
     void moveLayer(const QString& sceneId, int from, int to);
+    /// Declares a sprat sheet in the manifest, or changes its file; a null `file` removes it.
+    void setSheet(const QString& alias, std::optional<QString> file);
     /// Replaces classes.json; null removes it.
     void setClassRegistry(std::optional<ClassRegistry> registry);
 
@@ -101,6 +107,8 @@ signals:
     void transitionChanged(const QString& id);
     /// A scene's layers or entities changed.
     void sceneContentChanged(const QString& sceneId);
+    /// A sheet was declared in the manifest, or its file changed, or it was removed.
+    void sheetsChanged();
     /// A class was declared, or its declaration changed or was removed.
     void classesChanged();
     void changed();

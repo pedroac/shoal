@@ -26,6 +26,8 @@ add_library(shoal_core STATIC
     core/SceneCommands.h
     core/SceneTree.cpp
     core/SceneTree.h
+    core/SheetCommands.cpp
+    core/SheetCommands.h
     core/Version.cpp
     core/Version.h
 )

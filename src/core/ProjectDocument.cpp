@@ -159,6 +159,28 @@ QStringList ProjectDocument::transitionsNamingEntity(QStringView sceneId,
     return ids;
 }
 
+QString ProjectDocument::uniqueSheetAlias(const QString& base) const
+{
+    QString alias;
+    for (const QChar c : base) {
+        const bool allowed = c.isLetterOrNumber() || c == u'_' || c == u'-';
+        alias += allowed && c.unicode() < 128 ? c : QChar(u'_');
+    }
+    if (alias.isEmpty() || !isValidId(alias)) {
+        alias.prepend(u'_');  // ids start with a letter or _
+    }
+    const QMap<QString, QString>& sheets = m_project.manifest.sheets;
+    if (!sheets.contains(alias)) {
+        return alias;
+    }
+    for (int n = 2;; ++n) {
+        const QString candidate = QStringLiteral("%1_%2").arg(alias).arg(n);
+        if (!sheets.contains(candidate)) {
+            return candidate;
+        }
+    }
+}
+
 QMap<QString, int> ProjectDocument::classUses() const
 {
     QMap<QString, int> uses;
@@ -305,6 +327,18 @@ void ProjectDocument::setEntityFields(const QString& sceneId, const EntityPath& 
     *entity = fields;
     entity->children = std::move(children);
     emitSceneContentChanged(sceneId);
+}
+
+void ProjectDocument::setSheet(const QString& alias, std::optional<QString> file)
+{
+    if (file) {
+        m_project.manifest.sheets.insert(alias, *file);
+    }
+    else {
+        m_project.manifest.sheets.remove(alias);
+    }
+    emit sheetsChanged();
+    emit changed();
 }
 
 void ProjectDocument::setClassRegistry(std::optional<ClassRegistry> registry)

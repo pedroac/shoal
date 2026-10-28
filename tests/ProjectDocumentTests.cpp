@@ -6,6 +6,7 @@
 #include "core/FlowCommands.h"
 #include "core/ProjectDocument.h"
 #include "core/ProjectTemplates.h"
+#include "core/SheetCommands.h"
 
 using namespace shoal::core;
 
@@ -198,6 +199,47 @@ private slots:
         QVERIFY(reopened.document);
         QCOMPARE(reopened.document->project(), document.project());
         QVERIFY(QFile::exists(QDir(dir.path()).filePath(notes)));
+    }
+
+    void makesUniqueSheetAliases()
+    {
+        ProjectDocument document(fixtureProject());  // declares hero and ui
+        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("sheet")), QStringLiteral("sheet"));
+        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("hero")), QStringLiteral("hero_2"));
+        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("my sheet.v2")),
+                 QStringLiteral("my_sheet_v2"));
+        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("2d")), QStringLiteral("_2d"));
+        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("héros")), QStringLiteral("h_ros"));
+        QCOMPARE(document.uniqueSheetAlias({}), QStringLiteral("_"));
+    }
+
+    void addsChangesAndRemovesSheets()
+    {
+        ProjectDocument document(fixtureProject());
+        const QMap<QString, QString> before = document.project().manifest.sheets;
+        QSignalSpy changed(&document, &ProjectDocument::sheetsChanged);
+        CommandStack& commands = document.commands();
+        const QString items = QStringLiteral("items");
+
+        commands.push(
+            std::make_unique<SetSheetCommand>(document, items, QStringLiteral("art/items.sprat")));
+        QCOMPARE(commands.undoText(), QStringLiteral("Add sheet items"));
+        QCOMPARE(document.project().manifest.sheets.value(items),
+                 QStringLiteral("art/items.sprat"));
+        commands.push(
+            std::make_unique<SetSheetCommand>(document, items, QStringLiteral("art/items2.sprat")));
+        QCOMPARE(commands.undoText(), QStringLiteral("Change sheet items"));
+        commands.push(std::make_unique<SetSheetCommand>(document, items, std::nullopt));
+        QCOMPARE(commands.undoText(), QStringLiteral("Remove sheet items"));
+        QVERIFY(!document.project().manifest.sheets.contains(items));
+        QCOMPARE(changed.count(), 3);
+
+        commands.undo();
+        QCOMPARE(document.project().manifest.sheets.value(items),
+                 QStringLiteral("art/items2.sprat"));
+        commands.undo();
+        commands.undo();
+        QCOMPARE(document.project().manifest.sheets, before);
     }
 
     void openingReportsErrors()

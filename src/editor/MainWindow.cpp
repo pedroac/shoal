@@ -19,6 +19,7 @@
 #include "assets/SpratLibrary.h"
 #include "core/ProjectDocument.h"
 #include "core/ProjectTemplates.h"
+#include "core/SheetCommands.h"
 #include "core/Version.h"
 #include "editor/ClassesPanel.h"
 #include "editor/FlowScene.h"
@@ -82,6 +83,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
         addDock(m_classes, tr("Classes"), QStringLiteral("classesDock"), Qt::RightDockWidgetArea);
     connect(m_sheetBrowser, &SheetBrowserPanel::placeRequested, this, &MainWindow::placeSheetItem);
     connect(m_presets, &PresetsPanel::placeRequested, this, &MainWindow::placePreset);
+    connect(m_sheetBrowser, &SheetBrowserPanel::sheetFilesDropped, this, &MainWindow::addSheets);
     createActions();
     createMenus();
     setDocument(nullptr);
@@ -417,6 +419,42 @@ void MainWindow::updateSheets()
         m_sheetsBase = base;
         m_sheets.setSheets(declared, base);
     }
+}
+
+QStringList MainWindow::addSheets(const QStringList& files)
+{
+    QStringList added;
+    if (!m_document) {
+        statusBar()->showMessage(tr("Open a project to add sheets to it."), STATUS_TIMEOUT_MS);
+        return added;
+    }
+    const QString directory = m_document->directory();
+    const QDir base(m_sheetsBase);  // what the sheet cache resolves paths against
+    QStringList declared;
+    for (const QString& file : m_document->project().manifest.sheets) {
+        declared << QFileInfo(base.filePath(file)).absoluteFilePath();
+    }
+
+    core::CommandStack& commands = m_document->commands();
+    commands.beginMacro(files.size() == 1 ? tr("Add sheet") : tr("Add sheets"));
+    for (const QString& file : files) {
+        const QFileInfo info(file);
+        const QString absolute = info.absoluteFilePath();
+        if (declared.contains(absolute)) {
+            continue;
+        }
+        declared << absolute;
+        const QString path = directory.isEmpty() ? absolute : base.relativeFilePath(absolute);
+        const QString alias = m_document->uniqueSheetAlias(info.completeBaseName());
+        commands.push(std::make_unique<core::SetSheetCommand>(*m_document, alias, path));
+        added << alias;
+    }
+    commands.endMacro();
+
+    statusBar()->showMessage(added.isEmpty() ? tr("These sheets are already in the project.")
+                                             : tr("Added %1").arg(added.join(QStringLiteral(", "))),
+                             STATUS_TIMEOUT_MS);
+    return added;
 }
 
 void MainWindow::placeSheetItem(const SheetItem& item)

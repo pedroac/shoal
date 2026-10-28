@@ -1,8 +1,11 @@
 #include "editor/SheetBrowserPanel.h"
 
 #include <QDir>
+#include <QDropEvent>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QLineEdit>
+#include <QMimeData>
 #include <QPainter>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -55,12 +58,50 @@ QTreeWidgetItem* groupRow(QTreeWidgetItem* sheetRow, const QString& text)
 
 }  // namespace
 
-/// Drags the selected sprite or animation, never a sheet or a group.
+/// Drags the selected sprite or animation, never a sheet or a group, and takes drops of
+/// .sprat files only.
 class SheetBrowserPanel::Tree : public QTreeWidget {
 public:
-    using QTreeWidget::QTreeWidget;
+    explicit Tree(SheetBrowserPanel* panel) : QTreeWidget(panel), m_panel(panel) {}
 
 protected:
+    void dragEnterEvent(QDragEnterEvent* event) override { dragMoveEvent(event); }
+
+    void dragMoveEvent(QDragMoveEvent* event) override
+    {
+        if (sheetFiles(event->mimeData()).isEmpty()) {
+            event->ignore();
+            return;
+        }
+        event->setDropAction(Qt::CopyAction);
+        event->accept();
+    }
+
+    void dropEvent(QDropEvent* event) override
+    {
+        const QStringList files = sheetFiles(event->mimeData());
+        if (files.isEmpty()) {
+            event->ignore();
+            return;
+        }
+        event->setDropAction(Qt::CopyAction);
+        event->accept();
+        emit m_panel->sheetFilesDropped(files);
+    }
+
+    void paintEvent(QPaintEvent* event) override
+    {
+        QTreeWidget::paintEvent(event);
+        if (topLevelItemCount() > 0) {
+            return;
+        }
+        QPainter painter(viewport());
+        painter.setPen(palette().color(QPalette::PlaceholderText));
+        painter.drawText(viewport()->rect().adjusted(8, 8, -8, -8),
+                         Qt::AlignCenter | Qt::TextWordWrap,
+                         tr("Drop .sprat files here to add them to the project."));
+    }
+
     QStringList mimeTypes() const override { return {QLatin1StringView(SheetItem::MIME_TYPE)}; }
 
     QMimeData* mimeData(const QList<QTreeWidgetItem*>& rows) const override
@@ -72,6 +113,9 @@ protected:
         }
         return nullptr;
     }
+
+private:
+    SheetBrowserPanel* m_panel;
 };
 
 SheetBrowserPanel::SheetBrowserPanel(assets::SheetCache& sheets, QWidget* parent)
@@ -87,6 +131,8 @@ SheetBrowserPanel::SheetBrowserPanel(assets::SheetCache& sheets, QWidget* parent
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
     m_tree->setDragEnabled(true);
     m_tree->setDragDropMode(QAbstractItemView::DragOnly);
+    m_tree->setAcceptDrops(true);  // .sprat files; Tree refuses everything else
+    m_tree->viewport()->setAcceptDrops(true);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -150,11 +196,27 @@ void SheetBrowserPanel::setFilter(const QString& text)
     m_filter->setText(text);  // applies it
 }
 
+QStringList SheetBrowserPanel::sheetFiles(const QMimeData* data)
+{
+    QStringList files;
+    if (!data) {
+        return files;
+    }
+    for (const QUrl& url : data->urls()) {
+        const QFileInfo info(url.toLocalFile());
+        if (url.isLocalFile() && info.suffix().compare(u"sprat", Qt::CaseInsensitive) == 0) {
+            files << info.absoluteFilePath();
+        }
+    }
+    return files;
+}
+
 void SheetBrowserPanel::onSheetChanged(const QString& alias)
 {
     QTreeWidgetItem* row = sheetRow(alias);
     if (!m_sheets.aliases().contains(alias)) {
-        delete row;  // no longer declared
+        delete row;                    // no longer declared
+        m_tree->viewport()->update();  // the hint, once the last sheet is gone
         return;
     }
     if (!row) {

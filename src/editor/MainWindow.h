@@ -64,6 +64,11 @@ public:
     void openProjectAt(const QString& path);
     /// Saves into `directory` without asking or reporting.
     core::SaveResult saveProjectAs(const QString& directory);
+    /// Declares the .sprat `files` in the manifest, in one undo step, each under an alias
+    /// made from its file name; files already declared are skipped. Paths are written
+    /// relative to the project folder, or absolute while the project has none. Returns the
+    /// new aliases.
+    QStringList addSheets(const QStringList& files);
 
 public slots:
     void newProject();
