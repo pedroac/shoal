@@ -33,29 +33,29 @@
       "type": "sprite",
       "layer": "world",
       "classes": ["actor"],
+      "sprite": {
+        "sheet": "hero",
+        "path": "hero/idle.png"
+      },
       "transform": {
         "pos": [320, 640],
         "flip": [true, false]
       },
       "props": {
         "speed": 4.5
-      },
-      "sprite": {
-        "path": "hero/idle.png",
-        "sheet": "hero"
       }
     },
     {
       "type": "sprite",
       "layer": "bg",
+      "sprite": {
+        "sheet": "hero",
+        "path": "props/bush.png"
+      },
       "transform": {
         "pos": [700.25, 650],
         "rot": -12.5,
         "scale": [2, 2]
-      },
-      "sprite": {
-        "path": "props/bush.png",
-        "sheet": "hero"
       }
     },
     {
@@ -85,12 +85,12 @@
       "layer": "world",
       "active": false,
       "visible": false,
+      "sprite": {
+        "sheet": "hero",
+        "path": "props/door.png"
+      },
       "transform": {
         "pos": [2600, 640]
-      },
-      "sprite": {
-        "path": "props/door.png",
-        "sheet": "hero"
       }
     },
     {
@@ -100,6 +100,19 @@
       "classes": ["camera_bounds"],
       "shape": {
         "rect": [0, 0, 1920, 1080]
+      }
+    },
+    {
+      "id": "torch",
+      "type": "animation",
+      "layer": "world",
+      "animation": {
+        "sheet": "hero",
+        "name": "idle",
+        "x_speed": 2
+      },
+      "transform": {
+        "pos": [1200, 600]
       }
     }
   ]

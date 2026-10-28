@@ -175,6 +175,23 @@ struct Transform {
     bool operator==(const Transform&) const = default;
 };
 
+/// A sprat sprite, by the sheet's alias and the sprite's path (unique in a sheet, unlike
+/// its name). `sprite` and `nineslice` entities draw one.
+struct SpriteRef {
+    QString sheet;
+    QString path;
+    QJsonObject extras;
+    bool operator==(const SpriteRef&) const = default;
+};
+
+/// A sprat animation, by the sheet's alias and the animation's name.
+struct AnimationRef {
+    QString sheet;
+    QString name;
+    QJsonObject extras;
+    bool operator==(const AnimationRef&) const = default;
+};
+
 struct Entity {
     QString id;  ///< Optional: only entities something refers to need one.
     EntityType type = EntityType::Empty;
@@ -182,6 +199,8 @@ struct Entity {
     QStringList classes;
     bool active = true;
     bool visible = true;
+    std::optional<SpriteRef> sprite;
+    std::optional<AnimationRef> animation;
     Transform transform;
     QJsonObject props;  ///< Kept as written until typed props are modeled.
     QJsonObject extras;

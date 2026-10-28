@@ -118,6 +118,30 @@ QStringList ProjectDocument::transitionsTouching(QStringView sceneId) const
     return ids;
 }
 
+bool ProjectDocument::isEntityIdAvailable(const QString& sceneId, QStringView id,
+                                          const EntityPath& ignoring) const
+{
+    const auto scene = m_project.scenes.find(sceneId);
+    if (!isValidId(id) || scene == m_project.scenes.end()) {
+        return false;
+    }
+    const EntityPath found = findEntity(*scene, id);
+    return found.isEmpty() || found == ignoring;
+}
+
+QString ProjectDocument::uniqueEntityId(const QString& sceneId, const QString& base) const
+{
+    if (isEntityIdAvailable(sceneId, base)) {
+        return base;
+    }
+    for (int n = 2;; ++n) {
+        const QString candidate = QStringLiteral("%1_%2").arg(base).arg(n);
+        if (isEntityIdAvailable(sceneId, candidate)) {
+            return candidate;
+        }
+    }
+}
+
 void ProjectDocument::insertScene(const QString& id, Scene scene)
 {
     Q_ASSERT(!m_project.scenes.contains(id));
@@ -198,6 +222,95 @@ Transition ProjectDocument::removeTransition(const QString& id)
     emit transitionRemoved(id);
     emit changed();
     return removed;
+}
+
+void ProjectDocument::setTransition(Transition transition)
+{
+    const auto it = transitionPosition(m_project.flow.transitions, transition.id);
+    Q_ASSERT(it != m_project.flow.transitions.end() && it->id == transition.id);
+    const QString id = transition.id;
+    *it = std::move(transition);
+    emit transitionChanged(id);
+    emit changed();
+}
+
+Scene& ProjectDocument::sceneForEdit(const QString& sceneId)
+{
+    const auto it = m_project.scenes.find(sceneId);
+    Q_ASSERT(it != m_project.scenes.end());
+    return *it;
+}
+
+void ProjectDocument::emitSceneContentChanged(const QString& sceneId)
+{
+    emit sceneContentChanged(sceneId);
+    emit changed();
+}
+
+void ProjectDocument::insertEntity(const QString& sceneId, const EntityPath& path, Entity entity)
+{
+    std::vector<Entity>* siblings = siblingsOf(sceneForEdit(sceneId), path);
+    Q_ASSERT(siblings && !path.isEmpty() && size_t(path.back()) <= siblings->size());
+    siblings->insert(siblings->begin() + path.back(), std::move(entity));
+    emitSceneContentChanged(sceneId);
+}
+
+Entity ProjectDocument::removeEntity(const QString& sceneId, const EntityPath& path)
+{
+    std::vector<Entity>* siblings = siblingsOf(sceneForEdit(sceneId), path);
+    Q_ASSERT(siblings && !path.isEmpty() && size_t(path.back()) < siblings->size());
+    const auto it = siblings->begin() + path.back();
+    Entity removed = std::move(*it);
+    siblings->erase(it);
+    emitSceneContentChanged(sceneId);
+    return removed;
+}
+
+void ProjectDocument::setEntityFields(const QString& sceneId, const EntityPath& path,
+                                      const Entity& fields)
+{
+    Entity* entity = entityAt(sceneForEdit(sceneId), path);
+    Q_ASSERT(entity);
+    std::vector<Entity> children = std::move(entity->children);
+    *entity = fields;
+    entity->children = std::move(children);
+    emitSceneContentChanged(sceneId);
+}
+
+void ProjectDocument::insertLayer(const QString& sceneId, int index, Layer layer)
+{
+    std::vector<Layer>& layers = sceneForEdit(sceneId).layers;
+    Q_ASSERT(index >= 0 && size_t(index) <= layers.size());
+    layers.insert(layers.begin() + index, std::move(layer));
+    emitSceneContentChanged(sceneId);
+}
+
+Layer ProjectDocument::removeLayer(const QString& sceneId, int index)
+{
+    std::vector<Layer>& layers = sceneForEdit(sceneId).layers;
+    Q_ASSERT(index >= 0 && size_t(index) < layers.size());
+    Layer removed = std::move(layers[size_t(index)]);
+    layers.erase(layers.begin() + index);
+    emitSceneContentChanged(sceneId);
+    return removed;
+}
+
+void ProjectDocument::setLayer(const QString& sceneId, int index, Layer layer)
+{
+    std::vector<Layer>& layers = sceneForEdit(sceneId).layers;
+    Q_ASSERT(index >= 0 && size_t(index) < layers.size());
+    layers[size_t(index)] = std::move(layer);
+    emitSceneContentChanged(sceneId);
+}
+
+void ProjectDocument::moveLayer(const QString& sceneId, int from, int to)
+{
+    std::vector<Layer>& layers = sceneForEdit(sceneId).layers;
+    Q_ASSERT(from >= 0 && size_t(from) < layers.size() && to >= 0 && size_t(to) < layers.size());
+    Layer layer = std::move(layers[size_t(from)]);
+    layers.erase(layers.begin() + from);
+    layers.insert(layers.begin() + to, std::move(layer));
+    emitSceneContentChanged(sceneId);
 }
 
 }  // namespace shoal::core

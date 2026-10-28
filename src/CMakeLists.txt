@@ -18,6 +18,10 @@ add_library(shoal_core STATIC
     core/ProjectStore.h
     core/ProjectTemplates.cpp
     core/ProjectTemplates.h
+    core/SceneCommands.cpp
+    core/SceneCommands.h
+    core/SceneTree.cpp
+    core/SceneTree.h
     core/Version.cpp
     core/Version.h
 )

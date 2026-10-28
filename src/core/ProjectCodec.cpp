@@ -264,6 +264,18 @@ Entity readEntity(ObjectReader& reader, bool topLevel)
     checkIds(reader, classesKey, entity.classes);
     entity.active = reader.boolean(QStringLiteral("active"), true);
     entity.visible = reader.boolean(QStringLiteral("visible"), true);
+    if (reader.has(QStringLiteral("sprite"))) {
+        ObjectReader sprite = reader.child(QStringLiteral("sprite"));
+        entity.sprite = SpriteRef{
+            sprite.id(QStringLiteral("sheet")), sprite.string(QStringLiteral("path")), {}};
+        entity.sprite->extras = sprite.extras();
+    }
+    if (reader.has(QStringLiteral("animation"))) {
+        ObjectReader animation = reader.child(QStringLiteral("animation"));
+        entity.animation = AnimationRef{
+            animation.id(QStringLiteral("sheet")), animation.string(QStringLiteral("name")), {}};
+        entity.animation->extras = animation.extras();
+    }
     ObjectReader transform = reader.child(QStringLiteral("transform"));
     entity.transform = readTransform(transform);
     entity.props = reader.object(QStringLiteral("props"));
@@ -644,6 +656,26 @@ void writeEntity(JsonWriter& writer, const Entity& entity)
     if (!entity.visible) {
         writer.key(u"visible");
         writer.boolean(false);
+    }
+    if (entity.sprite) {
+        writer.key(u"sprite");
+        writer.beginObject();
+        writer.key(u"sheet");
+        writer.string(entity.sprite->sheet);
+        writer.key(u"path");
+        writer.string(entity.sprite->path);
+        writeExtras(writer, entity.sprite->extras);
+        writer.endObject();
+    }
+    if (entity.animation) {
+        writer.key(u"animation");
+        writer.beginObject();
+        writer.key(u"sheet");
+        writer.string(entity.animation->sheet);
+        writer.key(u"name");
+        writer.string(entity.animation->name);
+        writeExtras(writer, entity.animation->extras);
+        writer.endObject();
     }
     if (entity.transform != Transform{}) {
         writer.key(u"transform");

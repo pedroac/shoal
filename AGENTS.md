@@ -36,6 +36,8 @@ changes.
   - `CommandStack`: undo history, like `QUndoStack` (which is in QtGui).
     `ProjectDocument`: the open project, its mutators and change signals.
     `FlowCommands`: the commands that change scenes and transitions.
+    `SceneCommands`: the commands that change layers and entities, which
+    `SceneTree` addresses by `EntityPath`.
   - `ProjectTemplates`: new projects and scenes.
 - `src/assets/`: sprat sheets and atlases, through sprat-lib. The only place that
   includes `<sprat/sprat.h>`.

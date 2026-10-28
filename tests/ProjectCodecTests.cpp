@@ -105,8 +105,11 @@ private slots:
         QCOMPARE(player.type, EntityType::Sprite);
         QVERIFY(player.transform.flipX);
         QCOMPARE(player.props.value(QStringLiteral("speed")).toDouble(), 4.5);
-        QCOMPARE(player.extras.value(QStringLiteral("sprite"))[QStringLiteral("sheet")].toString(),
-                 QStringLiteral("hero"));
+        QCOMPARE(player.sprite,
+                 (SpriteRef{QStringLiteral("hero"), QStringLiteral("hero/idle.png"), {}}));
+        const Entity& torch = level1.entities.back();
+        QCOMPARE(torch.animation->name, QStringLiteral("idle"));
+        QCOMPARE(torch.animation->extras.value(QStringLiteral("x_speed")).toInt(), 2);
 
         const Entity& group = level1.entities[3];
         QCOMPARE(group.children.size(), size_t{2});
@@ -253,6 +256,20 @@ private slots:
             << scene +
                    ": entities[0].transform.flip: expected [horizontal, vertical], each true or "
                    "false, found an array";
+        QTest::newRow("sprite sheet")
+            << scene
+            << sceneWithEntity(R"({"type": "sprite", "layer": "w", "sprite": {"path": "a.png"}})")
+            << scene + ": entities[0].sprite.sheet: missing";
+        QTest::newRow("sprite path")
+            << scene
+            << sceneWithEntity(
+                   R"({"type": "sprite", "layer": "w", "sprite": {"sheet": "hero", "path": 3}})")
+            << scene + ": entities[0].sprite.path: expected a string, found 3";
+        QTest::newRow("animation name")
+            << scene
+            << sceneWithEntity(
+                   R"({"type": "animation", "layer": "w", "animation": {"sheet": "hero"}})")
+            << scene + ": entities[0].animation.name: missing";
         QTest::newRow("entity not an object")
             << scene << sceneWithEntity(R"("player")")
             << scene + R"(: entities[0]: expected an object, found "player")";

@@ -9,6 +9,7 @@
 #include "core/CommandStack.h"
 #include "core/Model.h"
 #include "core/ProjectStore.h"
+#include "core/SceneTree.h"
 
 namespace shoal::core {
 
@@ -52,6 +53,12 @@ public:
     /// The ids of the transitions that start or end at `sceneId`.
     QStringList transitionsTouching(QStringView sceneId) const;
 
+    /// Whether `id` can name an entity of the scene: a valid id no other entity there has.
+    /// `ignoring` is the entity being renamed, if any.
+    bool isEntityIdAvailable(const QString& sceneId, QStringView id,
+                             const EntityPath& ignoring = {}) const;
+    QString uniqueEntityId(const QString& sceneId, const QString& base) const;
+
     // --- mutators, for commands ---
 
     void insertScene(const QString& id, Scene scene);
@@ -62,6 +69,18 @@ public:
     void setStartScene(const QString& id);
     void insertTransition(Transition transition);
     Transition removeTransition(const QString& id);
+    /// Replaces the transition with the same id.
+    void setTransition(Transition transition);
+
+    /// Inserts `entity` so that it ends up at `path`.
+    void insertEntity(const QString& sceneId, const EntityPath& path, Entity entity);
+    Entity removeEntity(const QString& sceneId, const EntityPath& path);
+    /// Replaces an entity's own fields; its children stay.
+    void setEntityFields(const QString& sceneId, const EntityPath& path, const Entity& fields);
+    void insertLayer(const QString& sceneId, int index, Layer layer);
+    Layer removeLayer(const QString& sceneId, int index);
+    void setLayer(const QString& sceneId, int index, Layer layer);
+    void moveLayer(const QString& sceneId, int from, int to);
 
 signals:
     void sceneAdded(const QString& id);
@@ -71,10 +90,15 @@ signals:
     void startSceneChanged(const QString& id);
     void transitionAdded(const QString& id);
     void transitionRemoved(const QString& id);
+    void transitionChanged(const QString& id);
+    /// A scene's layers or entities changed.
+    void sceneContentChanged(const QString& sceneId);
     void changed();
 
 private:
     ProjectDocument(Project project, QString directory, QStringList files);
+    Scene& sceneForEdit(const QString& sceneId);
+    void emitSceneContentChanged(const QString& sceneId);
 
     Project m_project;
     QString m_directory;

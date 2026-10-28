@@ -288,7 +288,7 @@ The flow is a **stack** of scenes. Transitions change it in one of four ways:
 | `empty` | Nothing but a transform; a pivot for children |
 | `group` | A container with no visuals of its own |
 | `sprite` | `{ sheet, path }`: a sprat sprite, bound by path |
-| `animation` | `{ sheet, animation }`: a sprat animation, by name |
+| `animation` | `"animation": { sheet, name }`: a sprat animation, by name |
 | `nineslice` | `{ sheet, path }` with a size; stretched with sprat's slice insets |
 | `text` | A box with text, alignment and an overflow hint (see open questions) |
 | `rect` | A plain colored box, mostly for UI |
@@ -297,9 +297,24 @@ The flow is a **stack** of scenes. Transitions change it in one of four ways:
 | `region` | `{ rect }`, `{ polygon }` or `{ circle }` |
 | `camera` | Section 10 |
 
-Sprites are referenced by sheet alias plus sprite path, never by name, because sprat
-names are basenames and repeat across folders. In the engine, the reference maps
+Sprites are referenced by sheet alias plus sprite path (`"sprite": { "sheet": "hero",
+"path": "hero/idle.png" }`), never by name, because sprat names are basenames and
+repeat across folders. In the engine, the reference maps
 directly onto `sprat_sheet_bind(SPRAT_BIND_SPRITE_PATH, …)`.
+
+### Editing scenes
+
+- **Entities are addressed by their path in the tree** (indexes from the top level
+  down), since ids are optional. Commands record paths; the undo history is linear,
+  so they stay valid.
+- **Renaming an entity's id renames it in the transitions** that carry it out of the
+  scene (`persist.entities` keys) or land something on it (`persist.entities`
+  values). Selectors in modifiers and camera settings are not rewritten yet; the
+  Problems panel will report what they no longer match.
+- **Renaming a layer** moves its entities with it. **Removing a layer** removes
+  the entities on it, in one undo step.
+- **Moving an entity under a parent** drops its `layer` (children inherit it);
+  moving one to the top level gives it the layer it was drawn on.
 
 ### Spatial primitives
 
