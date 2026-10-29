@@ -71,8 +71,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_scenesDock =
         addDock(m_scenes, tr("Scenes"), QStringLiteral("scenesDock"), Qt::LeftDockWidgetArea);
     m_sceneTree = new SceneTreePanel(this);
-    m_sceneTreeDock =
-        addDock(m_sceneTree, tr("Layers"), QStringLiteral("sceneTreeDock"), Qt::LeftDockWidgetArea);
+    m_sceneTreeDock = addDock(m_sceneTree, tr("Entities"), QStringLiteral("sceneTreeDock"),
+                              Qt::LeftDockWidgetArea);
     m_sheetBrowser = new SheetBrowserPanel(m_sheets, this);
     m_sheetBrowserDock = addDock(m_sheetBrowser, tr("Sheets"), QStringLiteral("sheetBrowserDock"),
                                  Qt::LeftDockWidgetArea);
@@ -303,6 +303,7 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     setPanelCanvas(nullptr);
     m_scenes->setFlowScene(nullptr);
     m_sceneSettings->setFlowScene(nullptr);
+    m_inspector->setFlowScene(nullptr);
     m_classes->setDocument(nullptr);
     m_presets->setDocument(nullptr);
     if (m_tabs) {
@@ -328,6 +329,7 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         m_flowScene = std::make_unique<FlowScene>(*m_document);
         m_scenes->setFlowScene(m_flowScene.get());
         m_sceneSettings->setFlowScene(m_flowScene.get());
+        m_inspector->setFlowScene(m_flowScene.get());
         m_tabs = new QTabWidget(this);
         m_tabs->setObjectName(QStringLiteral("workspaceTabs"));
         m_tabs->setDocumentMode(true);
@@ -530,7 +532,8 @@ void MainWindow::placeSheetItem(const SheetItem& item)
         return;
     }
     if (view->placeAtCenter(item).isEmpty()) {
-        statusBar()->showMessage(tr("The current layer is hidden or locked."), STATUS_TIMEOUT_MS);
+        statusBar()->showMessage(tr("The current parent is hidden, locked or in screen space."),
+                                 STATUS_TIMEOUT_MS);
     }
 }
 
@@ -544,10 +547,10 @@ void MainWindow::placePreset(const QString& presetId)
     }
     QString error;
     if (view->placePreset(presetId, view->visibleCenter(), &error).isEmpty()) {
-        statusBar()->showMessage(error.isEmpty()
-                                     ? tr("The current layer is hidden or locked.")
-                                     : tr("Can't read the preset %1: %2").arg(presetId, error),
-                                 STATUS_TIMEOUT_MS);
+        statusBar()->showMessage(
+            error.isEmpty() ? tr("The current parent is hidden, locked or in screen space.")
+                            : tr("Can't read the preset %1: %2").arg(presetId, error),
+            STATUS_TIMEOUT_MS);
     }
 }
 

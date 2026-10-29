@@ -1,0 +1,16 @@
+{
+  "format": "shoal-modifier",
+  "version": 1,
+  "blocking": false,
+  "skippable": false,
+  "priority": 5,
+  "actions": {
+    "seq": [
+      {
+        "do": "set_visible",
+        "target": "layer(bg)",
+        "visible": false
+      }
+    ]
+  }
+}

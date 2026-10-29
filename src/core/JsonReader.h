@@ -48,7 +48,20 @@ public:
     int integer(const QString& key, int fallback, int min, int max);
     QStringList stringList(const QString& key);
     Point point(const QString& key, Point fallback);
+    std::optional<Point> optionalPoint(const QString& key);
+    /// [column, row], whole numbers 0 or more.
+    Cell cell(const QString& key, Cell fallback);
     Size size(const QString& key);
+    /// An entity's size: [width, height], each 0 or more pixels, a percentage such as
+    /// "50%" or a number of tiles such as "2□" (see parseLength()); null when absent.
+    std::optional<Extent> optionalExtent(const QString& key);
+    /// Where a position is measured from: [x, y], each 0 (the parent's origin), a
+    /// percentage such as "50%" or a tile such as "3□", a whole number from 0. Absent, the
+    /// parent's origin on both axes.
+    Anchor anchor(const QString& key);
+    /// `#rrggbb` or `#rrggbbaa`.
+    std::optional<Color> optionalColor(const QString& key);
+    Color color(const QString& key, Color fallback);
     QJsonObject object(const QString& key);
     QJsonArray array(const QString& key);
     ObjectReader child(const QString& key);
@@ -130,7 +143,15 @@ std::optional<E> ObjectReader::optionalEnum(const QString& key)
     return parseEnum<E>(key, take(key));
 }
 
-/// Reads `format` and `version`, refusing other formats and versions this Shoal can't read.
-void readHeader(ObjectReader& reader, const QString& format);
+/// A length: a number of pixels, or a string of a number and its unit, "50%" or "3□".
+/// Null for anything else.
+std::optional<Length> parseLength(const QJsonValue& value);
+
+/// Writes a length as parseLength() reads it.
+QJsonValue lengthToJson(const Length& length);
+
+/// Reads `format` and `version`, refusing other formats, and versions newer than `current`
+/// or older than 1. Returns the version, for the caller to migrate an older one.
+int readHeader(ObjectReader& reader, const QString& format, int current = FORMAT_VERSION);
 
 }  // namespace shoal::core

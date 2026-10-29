@@ -57,6 +57,8 @@ add_library(shoal_editor STATIC
     editor/CanvasView.h
     editor/ClassesPanel.cpp
     editor/ClassesPanel.h
+    editor/ColorButton.cpp
+    editor/ColorButton.h
     editor/EntityItem.cpp
     editor/EntityItem.h
     editor/FlowScene.cpp
@@ -71,6 +73,8 @@ add_library(shoal_editor STATIC
     editor/MainWindow.h
     editor/NewProjectDialog.cpp
     editor/NewProjectDialog.h
+    editor/PointGrid.cpp
+    editor/PointGrid.h
     editor/PresetsPanel.cpp
     editor/PresetsPanel.h
     editor/SceneCanvas.cpp
@@ -89,6 +93,8 @@ add_library(shoal_editor STATIC
     editor/SheetBrowserPanel.h
     editor/SheetItem.cpp
     editor/SheetItem.h
+    editor/TileGridOverlay.cpp
+    editor/TileGridOverlay.h
     editor/TransformHandle.cpp
     editor/TransformHandle.h
     editor/TransitionEdgeItem.cpp

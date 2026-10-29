@@ -1,8 +1,12 @@
 #include "core/ProjectCodec.h"
 
 #include <QRegularExpression>
+#include <QSet>
 #include <algorithm>
+#include <cmath>
+#include <functional>
 #include <limits>
+#include <numbers>
 
 #include "core/JsonReader.h"
 #include "core/JsonWriter.h"
@@ -215,11 +219,10 @@ ClassRegistry readClasses(ObjectReader& reader)
     return registry;
 }
 
-Preset readPreset(ObjectReader& reader)
-{
-    readHeader(reader, FORMAT_PRESET);
-    return Preset{reader.extras()};
-}
+/// What reading a format 1 file needs from the rest of the project.
+struct Format1 {
+    Size designResolution;
+};
 
 Transform readTransform(ObjectReader& reader)
 {
@@ -242,73 +245,504 @@ Transform readTransform(ObjectReader& reader)
     return transform;
 }
 
-/// Where an entity is read: top-level entities name their layer, children inherit their
-/// parent's, and a detached entity (a preset's) takes the layer it is placed on.
-enum class EntityPlace { TopLevel, Child, Detached };
+Image readImage(ObjectReader& reader)
+{
+    const QString spriteKey = QStringLiteral("sprite");
+    const QString animationKey = QStringLiteral("animation");
+    Image image;
+    image.sheet = reader.id(QStringLiteral("sheet"));
+    if (reader.has(spriteKey) && reader.has(animationKey)) {
+        reader.failMessage(animationKey,
+                           QStringLiteral("an image is a sprite or an animation, not both"));
+    }
+    if (!reader.has(spriteKey) && !reader.has(animationKey)) {
+        reader.failMessage(spriteKey,
+                           QStringLiteral("missing (an image names a sprite or an animation)"));
+    }
+    image.sprite = reader.optionalString(spriteKey);
+    image.animation = reader.optionalString(animationKey);
+    if (reader.has(spriteKey) ? image.sprite.isEmpty() : image.animation.isEmpty()) {
+        reader.failMessage(reader.has(spriteKey) ? spriteKey : animationKey,
+                           QStringLiteral("must not be empty"));
+    }
+    image.mode = reader.enumValue(QStringLiteral("mode"), ImageMode::Stretch);
+    image.extras = reader.extras();
+    return image;
+}
 
-Entity readEntity(ObjectReader& reader, EntityPlace place)
+Container readContainer(ObjectReader& reader)
 {
     const QString typeKey = QStringLiteral("type");
-    const QString layerKey = QStringLiteral("layer");
-    const QString classesKey = QStringLiteral("classes");
-
-    Entity entity;
-    entity.id = reader.optionalId(QStringLiteral("id"));
+    const QString tileSizeKey = QStringLiteral("tile_size");
     if (!reader.has(typeKey)) {
         reader.failMessage(typeKey, QStringLiteral("missing"));
     }
-    entity.type = reader.enumValue(typeKey, EntityType::Empty);
-    if (place == EntityPlace::TopLevel) {
-        entity.layer = reader.id(layerKey);
+    Container container;
+    container.type = reader.enumValue(typeKey, ContainerType::Tiled);
+    if (!reader.has(tileSizeKey)) {
+        reader.failMessage(tileSizeKey, QStringLiteral("missing"));
     }
-    else if (reader.has(layerKey)) {
-        reader.failMessage(layerKey, place == EntityPlace::Child
-                                         ? QStringLiteral("children inherit their parent's layer")
-                                         : QStringLiteral("it goes on the layer it is placed on"));
+    const QJsonValue tileSize = reader.value(tileSizeKey);
+    const QJsonArray sides = tileSize.toArray();
+    const auto isSide = [](const QJsonValue& side) {
+        return side.isDouble() && side.toDouble() > 0;
+    };
+    if (!tileSize.isArray() || sides.size() != 2 || !isSide(sides[0]) || !isSide(sides[1])) {
+        reader.fail(tileSizeKey, QStringLiteral("[width, height], each more than 0"), tileSize);
     }
+    container.tileSize = SizeF{sides[0].toDouble(), sides[1].toDouble()};
+    container.tilePivot = reader.point(QStringLiteral("tile_pivot"), Container{}.tilePivot);
+    container.extras = reader.extras();
+    return container;
+}
+
+/// The fields every entity has, in both formats.
+void readCommonFields(ObjectReader& reader, Entity& entity)
+{
+    const QString classesKey = QStringLiteral("classes");
+    entity.id = reader.optionalId(QStringLiteral("id"));
     entity.classes = reader.stringList(classesKey);
     checkIds(reader, classesKey, entity.classes);
     entity.active = reader.boolean(QStringLiteral("active"), true);
     entity.visible = reader.boolean(QStringLiteral("visible"), true);
-    if (reader.has(QStringLiteral("sprite"))) {
-        ObjectReader sprite = reader.child(QStringLiteral("sprite"));
-        entity.sprite = SpriteRef{
-            sprite.id(QStringLiteral("sheet")), sprite.string(QStringLiteral("path")), {}};
-        entity.sprite->extras = sprite.extras();
-    }
-    if (reader.has(QStringLiteral("animation"))) {
-        ObjectReader animation = reader.child(QStringLiteral("animation"));
-        entity.animation = AnimationRef{
-            animation.id(QStringLiteral("sheet")), animation.string(QStringLiteral("name")), {}};
-        entity.animation->extras = animation.extras();
-    }
+}
+
+/// Where an entity is in scene format 2, which placed children by `align` and, in a tiled
+/// container, by `cell`.
+enum class Format2Place { TopLevel, Child, InTiles };
+
+/// An entity in scene format 3, or in format 2 (`version`), whose `align` becomes a
+/// percentage of its parent's rect, and whose `cell` becomes tiles in a tiled container.
+/// At the top level, or in a tiled container, an `align` did nothing, and is dropped.
+Entity readEntityFields(ObjectReader& reader, int version = SCENE_FORMAT_VERSION,
+                        Format2Place place = Format2Place::Child)
+{
+    Entity entity;
+    readCommonFields(reader, entity);
+    entity.space = reader.optionalEnum<Space>(QStringLiteral("space"));
+    entity.parallax = reader.optionalPoint(QStringLiteral("parallax"));
+    entity.fit = reader.optionalEnum<Fit>(QStringLiteral("fit"));
     ObjectReader transform = reader.child(QStringLiteral("transform"));
     entity.transform = readTransform(transform);
+    entity.size = reader.optionalExtent(QStringLiteral("size"));
+    entity.pivot = reader.optionalPoint(QStringLiteral("pivot"));
+    if (version >= 3) {
+        entity.at = reader.anchor(QStringLiteral("at"));
+    }
+    else {
+        const std::optional<Point> align = reader.optionalPoint(QStringLiteral("align"));
+        const Cell cell = reader.cell(QStringLiteral("cell"), {});
+        if (place == Format2Place::InTiles) {
+            entity.at = {{double(cell.column), Unit::Cell}, {double(cell.row), Unit::Cell}};
+        }
+        else if (align && place == Format2Place::Child) {
+            entity.at = {{align->x * 100, Unit::Percent}, {align->y * 100, Unit::Percent}};
+        }
+    }
+    entity.area = reader.enumValue(QStringLiteral("area"), Area::Viewport);
+    if (reader.has(QStringLiteral("image"))) {
+        ObjectReader image = reader.child(QStringLiteral("image"));
+        entity.image = readImage(image);
+    }
+    entity.fill = reader.optionalColor(QStringLiteral("fill"));
+    entity.tint = reader.color(QStringLiteral("tint"), Color{});
+    entity.tintMode = reader.enumValue(QStringLiteral("tint_mode"), TintMode::Mix);
+    entity.clip = reader.boolean(QStringLiteral("clip"), false);
+    if (reader.has(QStringLiteral("container"))) {
+        ObjectReader container = reader.child(QStringLiteral("container"));
+        entity.container = readContainer(container);
+    }
     entity.props = reader.object(QStringLiteral("props"));
+    const Format2Place childPlace =
+        entity.container && entity.container->type == ContainerType::Tiled ? Format2Place::InTiles
+                                                                           : Format2Place::Child;
     for (ObjectReader& child : reader.objectArray(QStringLiteral("children"))) {
-        entity.children.push_back(readEntity(child, EntityPlace::Child));
+        entity.children.push_back(readEntityFields(child, version, childPlace));
     }
     entity.extras = reader.extras();
     return entity;
 }
 
-Scene readScene(ObjectReader& reader)
+// --- scene format 1 ---
+
+const QRegularExpression LAYER_TERM(QStringLiteral("layer\\(([^)]*)\\)"));
+
+/// `value` with the `layer(x)` terms in its strings rewritten as `group(y)`, where y is the
+/// id the layer x became.
+QJsonValue renameLayerTerms(const QJsonValue& value, const QMap<QString, QString>& layers)
 {
-    readHeader(reader, FORMAT_SCENE);
+    if (value.isString()) {
+        const QString text = value.toString();
+        QString renamed;
+        qsizetype last = 0;
+        for (auto it = LAYER_TERM.globalMatch(text); it.hasNext();) {
+            const QRegularExpressionMatch match = it.next();
+            const QString layer = match.captured(1);
+            renamed += text.mid(last, match.capturedStart() - last);
+            renamed += QStringLiteral("group(%1)").arg(layers.value(layer, layer));
+            last = match.capturedEnd();
+        }
+        return last == 0 ? value : QJsonValue(renamed + text.mid(last));
+    }
+    if (value.isArray()) {
+        QJsonArray array;
+        for (const QJsonValue& item : value.toArray()) {
+            array.append(renameLayerTerms(item, layers));
+        }
+        return array;
+    }
+    if (value.isObject()) {
+        QJsonObject object = value.toObject();
+        for (auto it = object.begin(); it != object.end(); ++it) {
+            *it = renameLayerTerms(*it, layers);
+        }
+        return object;
+    }
+    return value;
+}
+
+std::optional<SizeF> sizeFromJson(const QJsonValue& value)
+{
+    const QJsonArray array = value.toArray();
+    if (array.size() != 2 || !array[0].isDouble() || !array[1].isDouble() ||
+        array[0].toDouble() < 0 || array[1].toDouble() < 0) {
+        return std::nullopt;
+    }
+    return SizeF{array[0].toDouble(), array[1].toDouble()};
+}
+
+/// Moves an entity's origin by `offset`, in its own coordinates, keeping where it and its
+/// children are drawn.
+void moveOrigin(Entity& entity, Point offset)
+{
+    if (offset == Point{}) {
+        return;
+    }
+    const Transform& t = entity.transform;
+    const double radians = t.rot * std::numbers::pi / 180;
+    const double x = offset.x * t.scale.x;
+    const double y = offset.y * t.scale.y;
+    entity.transform.pos.x += x * std::cos(radians) - y * std::sin(radians);
+    entity.transform.pos.y += x * std::sin(radians) + y * std::cos(radians);
+    for (Entity& child : entity.children) {
+        child.transform.pos.x -= offset.x;
+        child.transform.pos.y -= offset.y;
+    }
+}
+
+/// A format 1 region's `shape`: a rect becomes the entity's size and pivot, and a circle's
+/// center its origin.
+void migrateRegion(Entity& entity, QJsonObject& extras)
+{
+    const QString shapeKey = QStringLiteral("shape");
+    QJsonObject shape = extras.value(shapeKey).toObject();
+    const QJsonArray rect = shape.value(QStringLiteral("rect")).toArray();
+    const QJsonArray circle = shape.value(QStringLiteral("circle")).toArray();
+    const auto numbers = [](const QJsonArray& array, qsizetype count) {
+        return array.size() == count &&
+               std::all_of(array.begin(), array.end(),
+                           [](const QJsonValue& item) { return item.isDouble(); });
+    };
+    if (numbers(rect, 4) && rect[2].toDouble() >= 0 && rect[3].toDouble() >= 0) {
+        const double x = rect[0].toDouble();
+        const double y = rect[1].toDouble();
+        const double width = rect[2].toDouble();
+        const double height = rect[3].toDouble();
+        entity.size = Extent::px({width, height});
+        // On an axis with no size, a pivot can't say where the rect is: its origin moves.
+        const Point pivot{width > 0 ? -x / width : 0, height > 0 ? -y / height : 0};
+        moveOrigin(entity, {width > 0 ? 0 : x, height > 0 ? 0 : y});
+        if (pivot != Point{}) {
+            entity.pivot = pivot;
+        }
+        shape.remove(QStringLiteral("rect"));
+    }
+    else if (numbers(circle, 3)) {
+        moveOrigin(entity, {circle[0].toDouble(), circle[1].toDouble()});
+        shape.insert(QStringLiteral("circle"), circle[2]);
+    }
+    if (shape.isEmpty()) {
+        extras.remove(shapeKey);
+    }
+    else {
+        extras.insert(shapeKey, shape);
+    }
+}
+
+/// Moves `keys` of `extras`, those present, into a part of their own.
+void moveIntoPart(QJsonObject& extras, const QString& part, std::initializer_list<const char*> keys)
+{
+    QJsonObject object;
+    for (const char* key : keys) {
+        const QString name = QLatin1StringView(key);
+        if (extras.contains(name)) {
+            object.insert(name, extras.take(name));
+        }
+    }
+    if (!object.isEmpty() || part == u"view") {  // a view marks a camera, even an empty one
+        extras.insert(part, object);
+    }
+}
+
+/// An entity in scene format 1, read into today's model. `layer` receives a top-level
+/// entity's layer; null for a child or a preset's entity, which keep a `layer` as written.
+Entity readEntityFormat1(ObjectReader& reader, const Format1& format1, QString* layer)
+{
+    static const QStringList TYPES{
+        QStringLiteral("empty"),     QStringLiteral("group"),     QStringLiteral("sprite"),
+        QStringLiteral("animation"), QStringLiteral("nineslice"), QStringLiteral("text"),
+        QStringLiteral("rect"),      QStringLiteral("mark"),      QStringLiteral("path"),
+        QStringLiteral("region"),    QStringLiteral("camera")};
+    Entity entity;
+    readCommonFields(reader, entity);
+    const QString type = reader.optionalString(QStringLiteral("type"));
+    if (layer) {
+        *layer = reader.optionalId(QStringLiteral("layer"));
+    }
+    if (reader.has(QStringLiteral("sprite"))) {
+        ObjectReader sprite = reader.child(QStringLiteral("sprite"));
+        Image image;
+        image.sheet = sprite.id(QStringLiteral("sheet"));
+        image.sprite = sprite.string(QStringLiteral("path"));
+        image.extras = sprite.extras();
+        entity.image = image;
+    }
+    else if (reader.has(QStringLiteral("animation"))) {
+        ObjectReader animation = reader.child(QStringLiteral("animation"));
+        Image image;
+        image.sheet = animation.id(QStringLiteral("sheet"));
+        image.animation = animation.string(QStringLiteral("name"));
+        image.extras = animation.extras();
+        entity.image = image;
+    }
+    if (type == u"nineslice" && entity.image) {
+        entity.image->mode = ImageMode::NineSlice;
+    }
+    ObjectReader transform = reader.child(QStringLiteral("transform"));
+    entity.transform = readTransform(transform);
+    entity.props = reader.object(QStringLiteral("props"));
+    for (ObjectReader& child : reader.objectArray(QStringLiteral("children"))) {
+        entity.children.push_back(readEntityFormat1(child, format1, nullptr));
+    }
+
+    QJsonObject extras = reader.extras();
+    if (const auto size = sizeFromJson(extras.value(QStringLiteral("size")))) {
+        entity.size = Extent::px(*size);
+        extras.remove(QStringLiteral("size"));
+    }
+    if (extras.value(QStringLiteral("layout")).isObject()) {
+        QJsonObject layout = extras.value(QStringLiteral("layout")).toObject();
+        const QJsonArray pivot = layout.value(QStringLiteral("pivot")).toArray();
+        if (pivot.size() == 2 && pivot[0].isDouble() && pivot[1].isDouble()) {
+            entity.pivot = Point{pivot[0].toDouble(), pivot[1].toDouble()};
+            layout.remove(QStringLiteral("pivot"));
+        }
+        if (const auto area = enumFromName<Area>(layout.value(QStringLiteral("area")).toString())) {
+            entity.area = *area;
+            layout.remove(QStringLiteral("area"));
+        }
+        extras.insert(QStringLiteral("layout"), layout);
+    }
+    if (type == u"region") {
+        migrateRegion(entity, extras);
+    }
+    else if (type == u"camera") {
+        moveIntoPart(extras, QStringLiteral("view"),
+                     {"zoom", "bounds", "follow", "zoom_min", "zoom_max", "damping"});
+        entity.size = Extent::px(
+            {double(format1.designResolution.width), double(format1.designResolution.height)});
+        entity.pivot = Point{0.5, 0.5};
+    }
+    else if (type == u"path") {
+        moveIntoPart(extras, QStringLiteral("path"), {"points", "curve", "closed"});
+    }
+    else if (type == u"rect") {
+        if (const auto fill = Color::fromName(extras.value(QStringLiteral("color")).toString())) {
+            entity.fill = fill;
+            extras.remove(QStringLiteral("color"));
+        }
+    }
+    else if (!type.isEmpty() && !TYPES.contains(type)) {
+        extras.insert(QStringLiteral("type"), type);  // kept as written
+    }
+    entity.extras = extras;
+    return entity;
+}
+
+/// A scene in format 1: each layer becomes a top-level entity holding the entities on it.
+/// `layerIds` receives the id each layer's entity took.
+Scene readSceneFormat1(ObjectReader& reader, const Format1& format1,
+                       QMap<QString, QString>& layerIds)
+{
     Scene scene;
     scene.size = reader.size(QStringLiteral("size"));
     scene.fit = reader.optionalEnum<Fit>(QStringLiteral("fit"));
+
+    std::vector<std::pair<QString, Entity>> layers;
     for (ObjectReader& item : reader.objectArray(QStringLiteral("layers"))) {
-        Layer layer;
-        layer.id = item.id(QStringLiteral("id"));
-        layer.space = item.enumValue(QStringLiteral("space"), Space::World);
-        layer.parallax = item.point(QStringLiteral("parallax"), {1, 1});
+        Entity layer;
+        const QString id = item.id(QStringLiteral("id"));
+        if (item.enumValue(QStringLiteral("space"), Space::World) == Space::Screen) {
+            layer.space = Space::Screen;
+        }
+        if (const Point parallax = item.point(QStringLiteral("parallax"), {1, 1});
+            parallax != Point{1, 1}) {
+            layer.parallax = parallax;
+        }
         layer.fit = item.optionalEnum<Fit>(QStringLiteral("fit"));
         layer.extras = item.extras();
-        scene.layers.push_back(std::move(layer));
+        layers.emplace_back(id, std::move(layer));
     }
+    std::vector<std::pair<QString, Entity>> entities;
     for (ObjectReader& item : reader.objectArray(QStringLiteral("entities"))) {
-        scene.entities.push_back(readEntity(item, EntityPlace::TopLevel));
+        QString layer;
+        Entity entity = readEntityFormat1(item, format1, &layer);
+        entities.emplace_back(layer, std::move(entity));
+    }
+    scene.extras = reader.extras();
+
+    // A layer's entity takes the layer's id, or the next free one if an entity has it.
+    QSet<QString> taken;
+    const std::function<void(const Entity&)> collect = [&](const Entity& entity) {
+        taken.insert(entity.id);
+        for (const Entity& child : entity.children) {
+            collect(child);
+        }
+    };
+    for (const auto& [layer, entity] : entities) {
+        collect(entity);
+    }
+    std::vector<bool> placed(entities.size(), false);
+    for (auto& [id, layer] : layers) {
+        QString unique = id;
+        for (int n = 2; taken.contains(unique); ++n) {
+            unique = QStringLiteral("%1_%2").arg(id).arg(n);
+        }
+        taken.insert(unique);
+        layer.id = unique;
+        if (layerIds.contains(id)) {
+            continue;  // a second layer with the same id holds nothing
+        }
+        layerIds.insert(id, unique);
+        for (size_t i = 0; i < entities.size(); ++i) {
+            if (!placed[i] && entities[i].first == id) {
+                layer.children.push_back(std::move(entities[i].second));
+                placed[i] = true;
+            }
+        }
+    }
+    for (auto& [id, layer] : layers) {
+        scene.entities.push_back(std::move(layer));
+    }
+    for (size_t i = 0; i < entities.size(); ++i) {
+        if (!placed[i]) {
+            Entity& entity = entities[i].second;
+            if (!entities[i].first.isEmpty()) {
+                entity.extras.insert(QStringLiteral("layer"), entities[i].first);
+            }
+            scene.entities.push_back(std::move(entity));
+        }
+    }
+
+    // Camera bounds are selectors too.
+    const std::function<void(Entity&)> rename = [&](Entity& entity) {
+        const QString viewKey = QStringLiteral("view");
+        if (entity.extras.contains(viewKey)) {
+            entity.extras.insert(viewKey, renameLayerTerms(entity.extras.value(viewKey), layerIds));
+        }
+        for (Entity& child : entity.children) {
+            rename(child);
+        }
+    };
+    for (Entity& entity : scene.entities) {
+        rename(entity);
+    }
+    return scene;
+}
+
+/// A preset in format 1: its entities as scene format 1 wrote them, and `tint` for its
+/// swatch. Left as written when its entities can't be read, for the presets panel to report
+/// when it is used.
+QJsonObject migratePresetFormat1(QJsonObject content, const Format1& format1)
+{
+    const QString tintKey = QStringLiteral("tint");
+    const QString swatchKey = QStringLiteral("swatch");
+    if (content.contains(tintKey) && !content.contains(swatchKey)) {
+        content.insert(swatchKey, content.take(tintKey));
+    }
+    const QString entitiesKey = QStringLiteral("entities");
+    const QJsonArray entities = content.value(entitiesKey).toArray();
+    QJsonArray migrated;
+    try {
+        for (qsizetype i = 0; i < entities.size(); ++i) {
+            if (!entities[i].isObject()) {
+                return content;
+            }
+            ObjectReader item(entities[i].toObject(), QStringLiteral("entities[%1]").arg(i));
+            migrated.append(entityToJson(readEntityFormat1(item, format1, nullptr)));
+        }
+    }
+    catch (const FormatError&) {
+        return content;
+    }
+    if (content.contains(entitiesKey)) {
+        content.insert(entitiesKey, migrated);
+    }
+    return content;
+}
+
+/// A preset in format 2: its entities as scene format 2 wrote them, placed in the parent
+/// they are added to. Left as written when they can't be read.
+QJsonObject migratePresetFormat2(QJsonObject content)
+{
+    const QString entitiesKey = QStringLiteral("entities");
+    const QJsonArray entities = content.value(entitiesKey).toArray();
+    QJsonArray migrated;
+    try {
+        for (qsizetype i = 0; i < entities.size(); ++i) {
+            if (!entities[i].isObject()) {
+                return content;
+            }
+            ObjectReader item(entities[i].toObject(), QStringLiteral("entities[%1]").arg(i));
+            migrated.append(entityToJson(readEntityFields(item, 2)));
+        }
+    }
+    catch (const FormatError&) {
+        return content;
+    }
+    if (content.contains(entitiesKey)) {
+        content.insert(entitiesKey, migrated);
+    }
+    return content;
+}
+
+Preset readPreset(ObjectReader& reader, const Format1& format1)
+{
+    const int version = readHeader(reader, FORMAT_PRESET, PRESET_FORMAT_VERSION);
+    QJsonObject content = reader.extras();
+    if (version == 1) {
+        content = migratePresetFormat1(std::move(content), format1);
+    }
+    else if (version == 2) {
+        content = migratePresetFormat2(std::move(content));
+    }
+    return Preset{content};
+}
+
+/// A scene; `layerIds` receives, for a format 1 scene, the ids its layers' entities took.
+Scene readScene(ObjectReader& reader, const Format1& format1,
+                std::optional<QMap<QString, QString>>& layerIds)
+{
+    const int version = readHeader(reader, FORMAT_SCENE, SCENE_FORMAT_VERSION);
+    if (version == 1) {
+        layerIds.emplace();
+        return readSceneFormat1(reader, format1, *layerIds);
+    }
+    Scene scene;
+    scene.size = reader.size(QStringLiteral("size"));
+    scene.fit = reader.optionalEnum<Fit>(QStringLiteral("fit"));
+    for (ObjectReader& item : reader.objectArray(QStringLiteral("entities"))) {
+        scene.entities.push_back(readEntityFields(item, version, Format2Place::TopLevel));
     }
     scene.extras = reader.extras();
     return scene;
@@ -366,12 +800,12 @@ bool checkPathId(const QString& path, const QString& id, const QString& what,
 // ---------------------------------------------------------------------------------------
 // Writing
 
-void writeHeader(JsonWriter& writer, const QString& format)
+void writeHeader(JsonWriter& writer, const QString& format, int version = FORMAT_VERSION)
 {
     writer.key(u"format");
     writer.string(format);
     writer.key(u"version");
-    writer.integer(FORMAT_VERSION);
+    writer.integer(version);
 }
 
 void writeExtras(JsonWriter& writer, const QJsonObject& extras)
@@ -609,7 +1043,7 @@ QByteArray writePreset(const Preset& preset)
 {
     JsonWriter writer;
     writer.beginObject();
-    writeHeader(writer, FORMAT_PRESET);
+    writeHeader(writer, FORMAT_PRESET, PRESET_FORMAT_VERSION);
     writeExtras(writer, preset.content);
     writer.endObject();
     return writer.finish();
@@ -645,12 +1079,6 @@ void writeEntity(JsonWriter& writer, const Entity& entity)
         writer.key(u"id");
         writer.string(entity.id);
     }
-    writer.key(u"type");
-    writer.string(enumName(entity.type));
-    if (!entity.layer.isEmpty()) {
-        writer.key(u"layer");
-        writer.string(entity.layer);
-    }
     if (!entity.classes.isEmpty()) {
         writer.key(u"classes");
         writer.stringArray(entity.classes);
@@ -663,29 +1091,90 @@ void writeEntity(JsonWriter& writer, const Entity& entity)
         writer.key(u"visible");
         writer.boolean(false);
     }
-    if (entity.sprite) {
-        writer.key(u"sprite");
-        writer.beginObject();
-        writer.key(u"sheet");
-        writer.string(entity.sprite->sheet);
-        writer.key(u"path");
-        writer.string(entity.sprite->path);
-        writeExtras(writer, entity.sprite->extras);
-        writer.endObject();
+    if (entity.space) {
+        writer.key(u"space");
+        writer.string(enumName(*entity.space));
     }
-    if (entity.animation) {
-        writer.key(u"animation");
-        writer.beginObject();
-        writer.key(u"sheet");
-        writer.string(entity.animation->sheet);
-        writer.key(u"name");
-        writer.string(entity.animation->name);
-        writeExtras(writer, entity.animation->extras);
-        writer.endObject();
+    if (entity.parallax) {
+        writer.key(u"parallax");
+        writePoint(writer, *entity.parallax);
+    }
+    if (entity.fit) {
+        writer.key(u"fit");
+        writer.string(enumName(*entity.fit));
     }
     if (entity.transform != Transform{}) {
         writer.key(u"transform");
         writeTransform(writer, entity.transform);
+    }
+    if (entity.at != Anchor{}) {
+        writer.key(u"at");
+        writer.value(QJsonArray{lengthToJson(entity.at.x), lengthToJson(entity.at.y)});
+    }
+    if (entity.size) {
+        writer.key(u"size");
+        writer.value(
+            QJsonArray{lengthToJson(entity.size->width), lengthToJson(entity.size->height)});
+    }
+    if (entity.pivot) {
+        writer.key(u"pivot");
+        writePoint(writer, *entity.pivot);
+    }
+    if (entity.area != Area::Viewport) {
+        writer.key(u"area");
+        writer.string(enumName(entity.area));
+    }
+    if (entity.image) {
+        const Image& image = *entity.image;
+        writer.key(u"image");
+        writer.beginObject();
+        writer.key(u"sheet");
+        writer.string(image.sheet);
+        if (image.isAnimation()) {
+            writer.key(u"animation");
+            writer.string(image.animation);
+        }
+        else {
+            writer.key(u"sprite");
+            writer.string(image.sprite);
+        }
+        if (image.mode != ImageMode::Stretch) {
+            writer.key(u"mode");
+            writer.string(enumName(image.mode));
+        }
+        writeExtras(writer, image.extras);
+        writer.endObject();
+    }
+    if (entity.fill) {
+        writer.key(u"fill");
+        writer.string(entity.fill->name());
+    }
+    if (entity.tint != Color{}) {
+        writer.key(u"tint");
+        writer.string(entity.tint.name());
+    }
+    if (entity.tintMode != TintMode::Mix) {
+        writer.key(u"tint_mode");
+        writer.string(enumName(entity.tintMode));
+    }
+    if (entity.clip) {
+        writer.key(u"clip");
+        writer.boolean(true);
+    }
+    if (entity.container) {
+        const Container& container = *entity.container;
+        writer.key(u"container");
+        writer.beginObject();
+        writer.key(u"type");
+        writer.string(enumName(container.type));
+        writer.key(u"tile_size");
+        writer.numberArray({container.tileSize.width, container.tileSize.height});
+        if (container.tilePivot != Container{}.tilePivot) {
+            writer.key(u"tile_pivot");
+            writePoint(writer, container.tilePivot);
+        }
+        writeExtras(writer, container.extras);
+        writer.endObject();
     }
     if (!entity.props.isEmpty()) {
         writer.key(u"props");
@@ -707,7 +1196,7 @@ QByteArray writeScene(const Scene& scene)
 {
     JsonWriter writer;
     writer.beginObject();
-    writeHeader(writer, FORMAT_SCENE);
+    writeHeader(writer, FORMAT_SCENE, SCENE_FORMAT_VERSION);
     writer.key(u"size");
     writer.numberArray(
         {static_cast<double>(scene.size.width), static_cast<double>(scene.size.height)});
@@ -715,26 +1204,6 @@ QByteArray writeScene(const Scene& scene)
         writer.key(u"fit");
         writer.string(enumName(*scene.fit));
     }
-    writer.key(u"layers");
-    writer.beginArray();
-    for (const Layer& layer : scene.layers) {
-        writer.beginObject();
-        writer.key(u"id");
-        writer.string(layer.id);
-        writer.key(u"space");
-        writer.string(enumName(layer.space));
-        if (layer.parallax != Point{1, 1}) {
-            writer.key(u"parallax");
-            writePoint(writer, layer.parallax);
-        }
-        if (layer.fit) {
-            writer.key(u"fit");
-            writer.string(enumName(*layer.fit));
-        }
-        writeExtras(writer, layer.extras);
-        writer.endObject();
-    }
-    writer.endArray();
     writer.key(u"entities");
     writer.beginArray();
     for (const Entity& entity : scene.entities) {
@@ -793,9 +1262,16 @@ QString FileError::toString() const
     return QStringLiteral("%1: %2").arg(file, message);
 }
 
-Entity readDetachedEntity(ObjectReader& reader)
+Entity readEntity(ObjectReader& reader)
 {
-    return readEntity(reader, EntityPlace::Detached);
+    return readEntityFields(reader);
+}
+
+QJsonObject entityToJson(const Entity& entity)
+{
+    JsonWriter writer;
+    writeEntity(writer, entity);
+    return parseJsonObject(writer.finish());
 }
 
 namespace paths {
@@ -855,14 +1331,23 @@ ParseResult parseProject(const ProjectFiles& files)
     }
 
     // Scenes before modifiers, so each modifier finds its host scene.
+    const Format1 format1{project.manifest.designResolution};
+    QMap<QString, QMap<QString, QString>> format1Layers;  // by scene, for its modifiers
     for (const auto& [path, bytes] : files) {
         if (const auto match = SCENE_PATH.match(path); match.hasMatch()) {
             const QString sceneId = match.captured(1);
             if (!checkPathId(path, sceneId, QStringLiteral("scene"), errors)) {
                 continue;
             }
-            if (auto scene = readFile<Scene>(path, bytes, errors, readScene)) {
+            std::optional<QMap<QString, QString>> layerIds;
+            auto scene = readFile<Scene>(path, bytes, errors, [&](ObjectReader& reader) {
+                return readScene(reader, format1, layerIds);
+            });
+            if (scene) {
                 project.scenes.insert(sceneId, std::move(*scene));
+            }
+            if (layerIds) {
+                format1Layers.insert(sceneId, *layerIds);
             }
         }
         else if (const auto presetMatch = PRESET_PATH.match(path); presetMatch.hasMatch()) {
@@ -870,7 +1355,10 @@ ParseResult parseProject(const ProjectFiles& files)
             if (!checkPathId(path, presetId, QStringLiteral("preset"), errors)) {
                 continue;
             }
-            if (auto preset = readFile<Preset>(path, bytes, errors, readPreset)) {
+            auto preset = readFile<Preset>(path, bytes, errors, [&](ObjectReader& reader) {
+                return readPreset(reader, format1);
+            });
+            if (preset) {
                 project.presets.insert(presetId, std::move(*preset));
             }
         }
@@ -892,6 +1380,10 @@ ParseResult parseProject(const ProjectFiles& files)
         }
         auto modifier = readFile<Modifier>(path, bytes, errors, readModifier);
         const auto host = project.scenes.find(sceneId);
+        if (modifier && format1Layers.contains(sceneId)) {
+            // Its host had layers: its selectors name them as groups now.
+            modifier->actions = renameLayerTerms(modifier->actions, format1Layers.value(sceneId));
+        }
         if (modifier && host != project.scenes.end()) {
             host->modifiers.insert(modifierId, std::move(*modifier));
         }

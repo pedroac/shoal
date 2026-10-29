@@ -1,31 +1,29 @@
 {
   "format": "shoal-scene",
-  "version": 1,
+  "version": 3,
   "size": [1920, 1080],
-  "layers": [
-    {
-      "id": "world",
-      "space": "world"
-    }
-  ],
   "entities": [
     {
-      "id": "camera",
-      "type": "camera",
-      "layer": "world",
-      "classes": ["main"],
-      "transform": {
-        "pos": [960, 540]
-      }
-    },
-    {
-      "id": "spawn_west_door",
-      "type": "mark",
-      "layer": "world",
-      "classes": ["spawn"],
-      "transform": {
-        "pos": [64, 640]
-      }
+      "id": "world",
+      "children": [
+        {
+          "id": "camera",
+          "classes": ["main"],
+          "transform": {
+            "pos": [960, 540]
+          },
+          "size": [1920, 1080],
+          "pivot": [0.5, 0.5],
+          "view": {}
+        },
+        {
+          "id": "spawn_west_door",
+          "classes": ["spawn"],
+          "transform": {
+            "pos": [64, 640]
+          }
+        }
+      ]
     }
   ]
 }

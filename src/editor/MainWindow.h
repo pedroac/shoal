@@ -35,9 +35,9 @@ struct SheetItem;
 
 /// The editor's top-level window: one open project, with the flow view in the first tab
 /// and a tab for each open scene. The docks follow the current tab, and show only where
-/// they can be used: the scenes and the selected scene's settings on the flow; the layers
-/// and entities, the presets and the entity inspector on a scene; the sheets and the
-/// classes on both. Each keeps, per tab kind, whether the user closed it.
+/// they can be used: the scenes and the selected scene's settings on the flow; the scene
+/// tree, the presets and the entity inspector on a scene; the sheets and the classes on
+/// both. Each keeps, per tab kind, whether the user closed it.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:

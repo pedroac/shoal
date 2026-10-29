@@ -15,31 +15,34 @@ namespace {
 
 const QRegularExpression COLOR(QStringLiteral("^#[0-9A-Fa-f]{6}$"));
 
-QJsonObject entityJson(const char* id, const char* type, const char* className)
+QJsonObject entityJson(const char* id, const char* className)
 {
-    QJsonObject entity{{QStringLiteral("type"), QLatin1StringView(type)},
-                       {QStringLiteral("classes"), QJsonArray{QLatin1StringView(className)}}};
+    QJsonObject entity{{QStringLiteral("classes"), QJsonArray{QLatin1StringView(className)}}};
     if (id) {
         entity.insert(QStringLiteral("id"), QLatin1StringView(id));
     }
     return entity;
 }
 
-Preset builtIn(const char* name, const char* doc, const char* tint, QJsonObject entity)
+/// `entity` with a rect of `size`, `pivot` on its origin.
+QJsonObject withRect(QJsonObject entity, QJsonArray size, QJsonArray pivot = {})
+{
+    entity.insert(QStringLiteral("size"), size);
+    if (!pivot.isEmpty()) {
+        entity.insert(QStringLiteral("pivot"), pivot);
+    }
+    return entity;
+}
+
+Preset builtIn(const char* name, const char* doc, const char* swatch, QJsonObject entity)
 {
     QJsonObject content{{QStringLiteral("name"), QLatin1StringView(name)},
                         {QStringLiteral("doc"), QLatin1StringView(doc)},
                         {QStringLiteral("entities"), QJsonArray{entity}}};
-    if (tint) {
-        content.insert(QStringLiteral("tint"), QLatin1StringView(tint));
+    if (swatch) {
+        content.insert(QStringLiteral("swatch"), QLatin1StringView(swatch));
     }
     return Preset{content};
-}
-
-QJsonObject withShape(QJsonObject entity, QJsonArray rect)
-{
-    entity.insert(QStringLiteral("shape"), QJsonObject{{QStringLiteral("rect"), rect}});
-    return entity;
 }
 
 }  // namespace
@@ -55,10 +58,10 @@ PresetRead readPresetDefinition(const QString& presetId, const Preset& preset)
             definition.name = presetId;
         }
         definition.doc = reader.optionalString(QStringLiteral("doc"));
-        definition.tint = reader.optionalString(QStringLiteral("tint"));
-        if (!definition.tint.isEmpty() && !COLOR.match(definition.tint).hasMatch()) {
-            reader.fail(QStringLiteral("tint"), QStringLiteral("a color such as \"#e0a030\""),
-                        definition.tint);
+        definition.swatch = reader.optionalString(QStringLiteral("swatch"));
+        if (!definition.swatch.isEmpty() && !COLOR.match(definition.swatch).hasMatch()) {
+            reader.fail(QStringLiteral("swatch"), QStringLiteral("a color such as \"#e0a030\""),
+                        definition.swatch);
         }
         definition.classes = reader.stringList(QStringLiteral("classes"));
         for (qsizetype i = 0; i < definition.classes.size(); ++i) {
@@ -69,7 +72,7 @@ PresetRead readPresetDefinition(const QString& presetId, const Preset& preset)
             }
         }
         for (ObjectReader& item : reader.objectArray(QStringLiteral("entities"))) {
-            definition.entities.push_back(readDetachedEntity(item));
+            definition.entities.push_back(readEntity(item));
         }
         if (definition.entities.empty()) {
             reader.failMessage(QStringLiteral("entities"),
@@ -83,37 +86,38 @@ PresetRead readPresetDefinition(const QString& presetId, const Preset& preset)
     return result;
 }
 
-const QMap<QString, Preset>& builtInPresets()
+QMap<QString, Preset> builtInPresets(Size designResolution)
 {
-    static const QMap<QString, Preset> presets{
+    QJsonObject camera =
+        withRect(entityJson("camera", "main"),
+                 QJsonArray{designResolution.width, designResolution.height}, QJsonArray{0.5, 0.5});
+    camera.insert(QStringLiteral("view"), QJsonObject{});
+    return {
         {QStringLiteral("trigger_region"),
          builtIn("Trigger Region", "A region the engine fires an event on enter/exit of", "#e0a030",
-                 withShape(entityJson("trigger", "region", "trigger"),
-                           QJsonArray{-64, -64, 128, 128}))},
+                 withRect(entityJson("trigger", "trigger"), QJsonArray{128, 128},
+                          QJsonArray{0.5, 0.5}))},
         {QStringLiteral("camera_bounds"),
          builtIn("Camera Bounds", "A region cameras stay inside, with the others like it",
                  "#30a0e0",
-                 withShape(entityJson(nullptr, "region", "camera_bounds"),
-                           QJsonArray{0, 0, 1920, 1080}))},
+                 withRect(entityJson(nullptr, "camera_bounds"), QJsonArray{1920, 1080}))},
         {QStringLiteral("spawn_mark"),
          builtIn("Spawn Mark", "Where a carried entity enters the scene", "#40c070",
-                 entityJson("spawn", "mark", "spawn"))},
+                 entityJson("spawn", "spawn"))},
         {QStringLiteral("camera"),
-         builtIn("Camera", "A camera; the one tagged .main is the scene's", nullptr,
-                 entityJson("camera", "camera", "main"))},
+         builtIn("Camera", "A camera; the one tagged .main is the scene's", nullptr, camera)},
     };
-    return presets;
 }
 
 QMap<QString, Preset> availablePresets(const Project& project)
 {
-    QMap<QString, Preset> presets = builtInPresets();
+    QMap<QString, Preset> presets = builtInPresets(project.manifest.designResolution);
     presets.insert(project.presets);
     return presets;
 }
 
 std::vector<Entity> instantiatePreset(const PresetDefinition& preset, const Scene& scene,
-                                      const QString& layer, Point position)
+                                      Point position)
 {
     QSet<QString> taken;
     forEachEntity(scene, [&](const Entity& entity, const EntityPath&) {
@@ -138,7 +142,6 @@ std::vector<Entity> instantiatePreset(const PresetDefinition& preset, const Scen
 
     std::vector<Entity> entities;
     for (Entity entity : preset.entities) {
-        entity.layer = layer;
         entity.transform.pos.x += position.x;
         entity.transform.pos.y += position.y;
         QStringList classes = preset.classes;

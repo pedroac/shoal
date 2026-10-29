@@ -1,14 +1,13 @@
 {
   "format": "shoal-scene",
-  "version": 1,
+  "version": 3,
   "size": [1920, 1080],
   "fit": "letterbox",
-  "layers": [
+  "entities": [
     {
       "id": "overlay",
       "space": "screen",
       "fit": "stretch"
     }
-  ],
-  "entities": []
+  ]
 }

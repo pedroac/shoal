@@ -92,10 +92,6 @@ public:
     void reorderEntities(const QString& sceneId, const EntityPath& parent, const QList<int>& order);
     /// Replaces an entity's own fields; its children stay.
     void setEntityFields(const QString& sceneId, const EntityPath& path, const Entity& fields);
-    void insertLayer(const QString& sceneId, int index, Layer layer);
-    Layer removeLayer(const QString& sceneId, int index);
-    void setLayer(const QString& sceneId, int index, Layer layer);
-    void moveLayer(const QString& sceneId, int from, int to);
     /// Declares a sprat sheet in the manifest, or changes its file; a null `file` removes it.
     void setSheet(const QString& alias, std::optional<QString> file);
     /// Replaces classes.json; null removes it.
@@ -112,7 +108,7 @@ signals:
     void transitionAdded(const QString& id);
     void transitionRemoved(const QString& id);
     void transitionChanged(const QString& id);
-    /// A scene's layers or entities changed.
+    /// A scene's entities changed.
     void sceneContentChanged(const QString& sceneId);
     /// A sheet was declared in the manifest, or its file changed, or it was removed.
     void sheetsChanged();

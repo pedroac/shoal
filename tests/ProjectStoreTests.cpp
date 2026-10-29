@@ -28,9 +28,9 @@ private slots:
         const LoadResult loaded = loadProject(dir.path());
         QVERIFY(loaded.errors.isEmpty());
         QVERIFY(loaded.project);
-        QCOMPARE(loaded.files.size(), 10);
+        QCOMPARE(loaded.files.size(), 11);
         QVERIFY(!loaded.files.contains(QStringLiteral("art/hero.sprat")));
-        QCOMPARE(loaded.project->scenes.size(), 4);
+        QCOMPARE(loaded.project->scenes.size(), 5);
     }
 
     void reportsAFolderThatIsNotAProject()

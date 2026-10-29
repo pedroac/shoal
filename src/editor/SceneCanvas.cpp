@@ -14,6 +14,7 @@
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
 #include "editor/EntityItem.h"
+#include "editor/TileGridOverlay.h"
 #include "editor/TransformHandle.h"
 
 namespace shoal::editor {
@@ -23,25 +24,40 @@ using core::EntityPath;
 
 namespace {
 
-/// Layers sit far apart in z, so an entity's z can be its draw order within its layer.
-constexpr double LAYER_Z_STEP = 1e6;
+QString pathKey(const EntityPath& path)
+{
+    QStringList indexes;
+    for (int index : path) {
+        indexes << QString::number(index);
+    }
+    return indexes.join(u'.');
+}
+
+/// Whether only the editor draws an entity: see EntityItem::isGuide().
+bool isGuide(const Entity& entity)
+{
+    return !entity.image && !entity.fill && !entity.extras.contains(QStringLiteral("text"));
+}
+
+/// `scenePosition`, snapped, in the coordinates of `parent` (the top level if empty).
+QPointF positionIn(const SceneCanvas& canvas, const EntityPath& parent, QPointF scenePosition)
+{
+    const QPointF at = canvas.snap(scenePosition);
+    const EntityItem* item = parent.isEmpty() ? nullptr : canvas.item(parent);
+    return item ? item->mapFromScene(at) : at;
+}
 
 /// The shape of a scene's tree: what decides whether the items can be updated in place.
 QStringList treeShape(const core::Scene& scene)
 {
     QStringList shape;
-    for (const core::Layer& layer : scene.layers) {
-        shape << QStringLiteral("L%1:%2").arg(layer.id).arg(int(layer.space));
-    }
     core::forEachEntity(scene, [&](const Entity& entity, const EntityPath& path) {
-        QStringList indexes;
-        for (int index : path) {
-            indexes << QString::number(index);
-        }
-        // The type too: regions, cameras and paths take a different z value.
-        shape << QStringLiteral("%1:%2:%3")
-                     .arg(indexes.join(u'.'), entity.layer)
-                     .arg(int(entity.type));
+        // What sets z, flags and visibility too: guides go under, space and ids (for the
+        // editor's hidden and locked state) decide whether it is shown and picked.
+        shape << QStringLiteral("%1:%2:%3:%4")
+                     .arg(pathKey(path), entity.id)
+                     .arg(isGuide(entity))
+                     .arg(entity.space ? int(*entity.space) : -1);
     });
     return shape;
 }
@@ -58,10 +74,12 @@ SceneCanvas::SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sh
                     rebuild();
                 }
             });
-    // Its size only moves the bounds the views draw behind the items.
+    // Its size moves the bounds the views draw behind the items, and the top-level
+    // entities measured in percent of it.
     connect(&m_document, &core::ProjectDocument::sceneSettingsChanged, this,
             [this](const QString& id) {
                 if (id == m_sceneId) {
+                    rebuild();
                     update();
                 }
             });
@@ -85,15 +103,8 @@ SceneCanvas::SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sh
     });
     connect(&m_sheets, &assets::SheetCache::sheetChanged, this, &SceneCanvas::onSheetChanged);
     connect(this, &QGraphicsScene::selectionChanged, this, &SceneCanvas::updateHandles);
+    connect(this, &SceneCanvas::currentParentChanged, this, &SceneCanvas::updateGrids);
 
-    if (const core::Scene* current = scene()) {
-        for (auto it = current->layers.rbegin(); it != current->layers.rend(); ++it) {
-            if (it->space == core::Space::World) {
-                m_currentLayer = it->id;  // the front-most world layer
-                break;
-            }
-        }
-    }
     rebuild();
 }
 
@@ -148,44 +159,88 @@ void SceneCanvas::select(const QList<EntityPath>& paths)
     emit selectionChanged();
 }
 
-void SceneCanvas::setCurrentLayer(const QString& layerId)
+void SceneCanvas::setCurrentParent(const EntityPath& path)
 {
-    if (m_currentLayer != layerId) {
-        m_currentLayer = layerId;
-        emit currentLayerChanged(layerId);
+    const Entity* entity = scene() && !path.isEmpty() ? core::entityAt(*scene(), path) : nullptr;
+    const QString id = entity ? entity->id : QString();
+    if (m_currentParent != path || m_currentParentId != id) {
+        m_currentParent = path;
+        m_currentParentId = id;
+        emit currentParentChanged();
     }
 }
 
-void SceneCanvas::setLayerHidden(const QString& layerId, bool hidden)
+QString SceneCanvas::stateKey(const EntityPath& path) const
 {
-    if (hidden == m_hidden.contains(layerId)) {
+    const Entity* entity = scene() ? core::entityAt(*scene(), path) : nullptr;
+    return entity && !entity->id.isEmpty() ? u'#' + entity->id : u'@' + pathKey(path);
+}
+
+bool SceneCanvas::isHidden(const EntityPath& path) const
+{
+    return m_hidden.contains(stateKey(path));
+}
+
+void SceneCanvas::setHidden(const EntityPath& path, bool hidden)
+{
+    const QString key = stateKey(path);
+    if (hidden == m_hidden.contains(key)) {
         return;
     }
     if (hidden) {
-        m_hidden.insert(layerId);
+        m_hidden.insert(key);
     }
     else {
-        m_hidden.remove(layerId);
+        m_hidden.remove(key);
     }
     m_treeShape.clear();  // the items' flags and visibility change
     rebuild();
-    emit layerStateChanged();
+    emit entityStateChanged();
 }
 
-void SceneCanvas::setLayerLocked(const QString& layerId, bool locked)
+bool SceneCanvas::isLocked(const EntityPath& path) const
 {
-    if (locked == m_locked.contains(layerId)) {
+    return m_locked.contains(stateKey(path));
+}
+
+void SceneCanvas::setLocked(const EntityPath& path, bool locked)
+{
+    const QString key = stateKey(path);
+    if (locked == m_locked.contains(key)) {
         return;
     }
     if (locked) {
-        m_locked.insert(layerId);
+        m_locked.insert(key);
     }
     else {
-        m_locked.remove(layerId);
+        m_locked.remove(key);
     }
     m_treeShape.clear();  // the items' flags and visibility change
     rebuild();
-    emit layerStateChanged();
+    emit entityStateChanged();
+}
+
+bool SceneCanvas::isHiddenOrLocked(const EntityPath& path) const
+{
+    for (qsizetype depth = 1; depth <= path.size(); ++depth) {
+        if (isHidden(path.first(depth)) || isLocked(path.first(depth))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SceneCanvas::isInScreenSpace(const EntityPath& path) const
+{
+    const core::Scene* current = scene();
+    bool screen = false;
+    for (qsizetype depth = 1; current && depth <= path.size(); ++depth) {
+        const Entity* entity = core::entityAt(*current, path.first(depth));
+        if (entity && entity->space) {
+            screen = *entity->space == core::Space::Screen;
+        }
+    }
+    return screen;
 }
 
 void SceneCanvas::setSnapping(bool snapping)
@@ -212,11 +267,16 @@ QPointF SceneCanvas::snap(QPointF point) const
 
 // --- edits ---
 
+core::Frame SceneCanvas::currentFrame() const
+{
+    return scene() ? core::frameIn(*scene(), m_currentParent, imageMetrics()) : core::Frame{};
+}
+
 bool SceneCanvas::canAddEntities() const
 {
     const core::Scene* current = scene();
-    return current && core::layerIndex(*current, m_currentLayer) >= 0 &&
-           !isLayerHidden(m_currentLayer) && !isLayerLocked(m_currentLayer);
+    return current && (m_currentParent.isEmpty() || core::entityAt(*current, m_currentParent)) &&
+           !isHiddenOrLocked(m_currentParent) && !isInScreenSpace(m_currentParent);
 }
 
 EntityPath SceneCanvas::addEntity(Entity entity, QPointF scenePosition)
@@ -225,10 +285,22 @@ EntityPath SceneCanvas::addEntity(Entity entity, QPointF scenePosition)
     if (!canAddEntities()) {
         return {};
     }
-    const QPointF at = snap(scenePosition);
-    entity.layer = m_currentLayer;
+    const QPointF at = positionIn(*this, m_currentParent, scenePosition);
     entity.transform.pos = core::Point{at.x(), at.y()};
-    const EntityPath path{int(current->entities.size())};
+    entity.at = {};
+    if (const core::Frame frame = currentFrame(); frame.grid) {
+        // On the tile under the cursor.
+        for (int axis = 0; axis < 2; ++axis) {
+            const double along = axis == 0 ? at.x() : at.y();
+            entity.at.axis(axis) = {double(frame.grid->nearest(axis, along)), core::Unit::Cell};
+        }
+        entity.transform.pos = {};
+    }
+    const std::vector<Entity>& siblings = m_currentParent.isEmpty()
+                                              ? current->entities
+                                              : core::entityAt(*current, m_currentParent)->children;
+    EntityPath path = m_currentParent;
+    path.append(int(siblings.size()));
     m_document.commands().push(
         std::make_unique<core::AddEntityCommand>(m_document, m_sceneId, path, std::move(entity)));
     select({path});
@@ -253,15 +325,29 @@ QList<EntityPath> SceneCanvas::addPreset(const QString& presetId, QPointF sceneP
         }
         return {};
     }
-    const QPointF at = snap(scenePosition);
-    std::vector<Entity> entities =
-        core::instantiatePreset(*read.definition, *current, m_currentLayer, {at.x(), at.y()});
+    const QPointF at = positionIn(*this, m_currentParent, scenePosition);
+    const core::Frame frame = currentFrame();
+    // In a tiled container, the preset's entities go on the tile under the cursor, placed
+    // from it as they are from the preset's origin.
+    std::vector<Entity> entities = core::instantiatePreset(
+        *read.definition, *current, frame.grid ? core::Point{} : core::Point{at.x(), at.y()});
+    if (frame.grid) {
+        const core::Anchor tile{{double(frame.grid->nearest(0, at.x())), core::Unit::Cell},
+                                {double(frame.grid->nearest(1, at.y())), core::Unit::Cell}};
+        for (Entity& entity : entities) {
+            entity.at = tile;
+        }
+    }
     QList<EntityPath> paths;
-    int index = int(current->entities.size());
+    int index =
+        int(m_currentParent.isEmpty() ? current->entities.size()
+                                      : core::entityAt(*current, m_currentParent)->children.size());
     core::CommandStack& commands = m_document.commands();
     commands.beginMacro(tr("Add %1").arg(read.definition->name));
     for (Entity& entity : entities) {
-        paths << EntityPath{index++};
+        EntityPath path = m_currentParent;
+        path.append(index++);
+        paths << path;
         commands.push(std::make_unique<core::AddEntityCommand>(m_document, m_sceneId, paths.last(),
                                                                std::move(entity)));
     }
@@ -354,13 +440,30 @@ void SceneCanvas::addArrangeActions(QMenu& menu)
     }
 }
 
-void SceneCanvas::nudgeSelection(QPointF delta)
+void SceneCanvas::nudgeSelection(QPoint direction, bool large)
 {
+    const int count = large ? NUDGE_MULTIPLIER : 1;
+    const double step = (m_snapping ? m_gridSize : 1) * count;
     QList<std::pair<EntityPath, Entity>> changes;
     for (const EntityPath& path : core::outermost(selectedPaths())) {
-        Entity entity = item(path)->entity();
-        entity.transform.pos.x += delta.x();
-        entity.transform.pos.y += delta.y();
+        const EntityItem* entityItem = item(path);
+        Entity entity = entityItem->entity();
+        const std::optional<core::TileGrid>& grid = entityItem->placement().frame.grid;
+        for (int axis = 0; axis < 2; ++axis) {
+            const int by = axis == 0 ? direction.x() : direction.y();
+            core::Length& at = entity.at.axis(axis);
+            if (at.unit == core::Unit::Cell && grid) {
+                // From tile to tile, staying in the grid.
+                const int tiles = axis == 0 ? grid->columns : grid->rows;
+                at.value = std::clamp(at.value + by * count, 0.0, double(std::max(tiles - 1, 0)));
+            }
+            else {
+                (axis == 0 ? entity.transform.pos.x : entity.transform.pos.y) += by * step;
+            }
+        }
+        if (entity == entityItem->entity()) {
+            continue;
+        }
         changes.append({path, entity});
     }
     if (!changes.isEmpty()) {
@@ -374,13 +477,15 @@ void SceneCanvas::commitMoves()
     QList<std::pair<EntityPath, Entity>> changes;
     for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
         const EntityItem* entityItem = it.value();
-        const core::Point stored = entityItem->entity().transform.pos;
-        const QPointF position = entityItem->pos();
-        if (position != QPointF(stored.x, stored.y)) {
-            Entity entity = entityItem->entity();
-            entity.transform.pos = core::Point{position.x(), position.y()};
-            changes.append({it.key(), entity});
+        const core::Point position = entityItem->entityPosition();
+        if (position == entityItem->entity().transform.pos) {
+            continue;
         }
+        // On an axis in tiles, the tile nearest to where it was dropped, as it was placed
+        // from its own.
+        const Entity entity = core::movedTo(entityItem->placement().frame, entityItem->entity(),
+                                            {entityItem->pos().x(), entityItem->pos().y()});
+        changes.append({it.key(), entity});
     }
     if (changes.isEmpty()) {
         return;
@@ -421,14 +526,26 @@ void SceneCanvas::commitSize(const EntityPath& path, QSizeF size)
     }
     Entity entity = *current;
     entity.children.clear();
-    if (nineSliceSize(entity) == size) {
+    // In the units it had, so a percentage stays one.
+    const core::Extent resized =
+        core::extentIn(entity.size.value_or(core::Extent{}), {size.width(), size.height()},
+                       entityItem->placement().frame);
+    if (entity.size == resized) {
         entityItem->setEntity(entity);  // drops what the handle showed
         return;
     }
-    core::setEntitySize(entity, size);
+    entity.size = resized;
     m_document.commands().push(std::make_unique<core::EditEntitiesCommand>(
         m_document, m_sceneId, QList<std::pair<EntityPath, Entity>>{{path, entity}},
         tr("Resize %1").arg(core::describe(entity))));
+}
+
+void SceneCanvas::moveEntity(const EntityPath& from, const EntityPath& to)
+{
+    clearSelection();  // the paths will name other entities afterwards
+    m_document.commands().push(
+        std::make_unique<core::MoveEntityCommand>(m_document, m_sceneId, from, to, imageMetrics()));
+    select({to});
 }
 
 void SceneCanvas::clearItems()
@@ -436,9 +553,10 @@ void SceneCanvas::clearItems()
     // Removing selected items emits selectionChanged(), which places the handles.
     m_rotateHandle = nullptr;
     m_scaleHandle = nullptr;
+    m_gridOverlay = nullptr;
+    m_gridPaths.clear();
     clear();
     m_items.clear();
-    m_layerItems.clear();
 }
 
 void SceneCanvas::createHandles()
@@ -447,6 +565,8 @@ void SceneCanvas::createHandles()
     m_scaleHandle = new TransformHandle(*this, TransformHandle::Kind::Scale);
     addItem(m_rotateHandle);
     addItem(m_scaleHandle);
+    m_gridOverlay = new TileGridOverlay;
+    addItem(m_gridOverlay);
 }
 
 void SceneCanvas::updateHandles()
@@ -458,30 +578,87 @@ void SceneCanvas::updateHandles()
     const EntityPath target = selected.size() == 1 ? selected.first() : EntityPath();
     m_rotateHandle->attach(target);
     m_scaleHandle->attach(target);
+    updateGrids();
+}
+
+void SceneCanvas::updateGrids()
+{
+    if (!m_gridOverlay) {
+        return;
+    }
+    QList<EntityPath> candidates = selectedPaths();
+    for (const EntityPath& path : selectedPaths()) {
+        if (path.size() > 1) {
+            candidates << path.first(path.size() - 1);
+        }
+    }
+    if (!m_currentParent.isEmpty()) {
+        candidates << m_currentParent;
+    }
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+
+    QList<EntityPath> paths;
+    QList<const EntityItem*> containers;
+    for (const EntityPath& path : std::as_const(candidates)) {
+        const EntityItem* container = item(path);
+        if (container && container->tileGrid() && container->isVisible()) {
+            paths << path;
+            containers << container;
+        }
+    }
+    m_gridPaths = paths;
+    m_gridOverlay->showGrids(containers);
 }
 
 // --- visuals ---
 
-SceneCanvas::SpriteVisual SceneCanvas::visualOf(const Entity& entity) const
+SceneCanvas::SpriteVisual SceneCanvas::visualOf(const core::Image& image) const
 {
-    if (entity.type == core::EntityType::Animation && entity.animation) {
-        return animationVisual(entity.animation->sheet, entity.animation->name);
-    }
-    if (entity.sprite) {
-        return spriteVisual(entity.sprite->sheet, entity.sprite->path);
-    }
-    return {};
+    return image.isAnimation() ? animationVisual(image.sheet, image.animation)
+                               : spriteVisual(image.sheet, image.sprite);
 }
 
-QSizeF SceneCanvas::nineSliceSize(const Entity& entity, const SpriteVisual& visual)
+core::ImageMetricsFn SceneCanvas::imageMetrics() const
 {
-    if (entity.type != core::EntityType::NineSlice) {
-        return {};
+    return [this](const core::Image& image) -> std::optional<core::ImageMetrics> {
+        const SpriteVisual visual = visualOf(image);
+        if (!visual.sprite || visual.sprite->sourceSize.isEmpty()) {
+            return std::nullopt;
+        }
+        const QSizeF size = assets::naturalSize(*visual.sprite, visual.drawScale);
+        const QSize source = visual.sprite->sourceSize;
+        return core::ImageMetrics{{size.width(), size.height()},
+                                  {double(visual.sprite->pivot.x()) / source.width(),
+                                   double(visual.sprite->pivot.y()) / source.height()}};
+    };
+}
+
+QPixmap SceneCanvas::tintedAtlas(const SpriteVisual& visual, const core::Color& tint) const
+{
+    if (tint.red == 255 && tint.green == 255 && tint.blue == 255) {
+        return visual.atlas;
     }
-    if (const std::optional<QSizeF> size = core::entitySize(entity)) {
-        return *size;
+    const QString key = QStringLiteral("%1/%2/%3")
+                            .arg(visual.sheet)
+                            .arg(visual.atlasIndex)
+                            .arg(core::Color{tint.red, tint.green, tint.blue, 255}.name());
+    if (const auto it = m_tintedAtlases.constFind(key); it != m_tintedAtlases.cend()) {
+        return *it;
     }
-    return visual.sprite ? assets::naturalSize(*visual.sprite, visual.drawScale) : QSizeF();
+    // Channel by channel, as raylib's tint and SDL's color mod multiply.
+    QImage image = visual.atlas.toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < image.height(); ++y) {
+        auto* line = reinterpret_cast<QRgb*>(image.scanLine(y));
+        for (int x = 0; x < image.width(); ++x) {
+            const QRgb pixel = line[x];
+            line[x] = qRgba(qRed(pixel) * tint.red / 255, qGreen(pixel) * tint.green / 255,
+                            qBlue(pixel) * tint.blue / 255, qAlpha(pixel));
+        }
+    }
+    const QPixmap tinted = QPixmap::fromImage(image);
+    m_tintedAtlases.insert(key, tinted);
+    return tinted;
 }
 
 SceneCanvas::SpriteVisual SceneCanvas::spriteVisual(const QString& sheet, const QString& path) const
@@ -506,6 +683,8 @@ SceneCanvas::SpriteVisual SceneCanvas::spriteVisual(const QString& sheet, const 
     }
     if (size_t(visual.sprite->atlas) < atlases->size()) {
         visual.atlas = (*atlases)[size_t(visual.sprite->atlas)];
+        visual.sheet = sheet;
+        visual.atlasIndex = visual.sprite->atlas;
     }
     return visual;
 }
@@ -548,6 +727,8 @@ QSizeF SceneCanvas::designResolution() const
 void SceneCanvas::onSheetChanged(const QString& alias)
 {
     m_atlases.remove(alias);
+    m_tintedAtlases.removeIf(
+        [&](const auto& entry) { return entry.key().startsWith(alias + u'/'); });
     for (EntityItem* entityItem : std::as_const(m_items)) {
         entityItem->refreshVisual();
     }
@@ -566,16 +747,28 @@ void SceneCanvas::rebuild()
         emit contentChanged();
         return;
     }
+    // The current parent is found by its id where it moved, if it has one.
+    if (!m_currentParentId.isEmpty()) {
+        const EntityPath found = core::findEntity(*current, m_currentParentId);
+        if (found != m_currentParent) {
+            m_currentParent = found;  // empty, the top level, once it is removed
+            if (found.isEmpty()) {
+                m_currentParentId.clear();
+            }
+            emit currentParentChanged();
+        }
+    }
+    else if (!m_currentParent.isEmpty() && !core::entityAt(*current, m_currentParent)) {
+        setCurrentParent({});  // it was removed
+    }
 
     // Field changes, such as the end of a drag, update the items in place: the item that
     // started the drag is still handling its mouse event.
     const QStringList shape = treeShape(*current);
+    EntityPath path;
     if (shape == m_treeShape) {
-        core::forEachEntity(*current, [&](const Entity& entity, const EntityPath& path) {
-            if (EntityItem* entityItem = item(path)) {
-                entityItem->setEntity(entity);
-            }
-        });
+        placeItems(current->entities, path, core::sceneFrame(*current), nullptr, core::Color{},
+                   false, false, false);
         updateHandles();
         emit contentChanged();
         return;
@@ -585,53 +778,52 @@ void SceneCanvas::rebuild()
     const QList<EntityPath> selected = selectedPaths();
     clearItems();
     createHandles();
-    for (size_t i = 0; i < current->layers.size(); ++i) {
-        const core::Layer& layer = current->layers[i];
-        auto* layerItem = new QGraphicsRectItem();  // an empty rect draws nothing
-        layerItem->setPen(Qt::NoPen);
-        layerItem->setZValue(double(i) * LAYER_Z_STEP);
-        layerItem->setVisible(layer.space == core::Space::World && !m_hidden.contains(layer.id));
-        addItem(layerItem);
-        m_layerItems.push_back(layerItem);
-    }
-    for (size_t i = 0; i < current->entities.size(); ++i) {
-        const Entity& entity = current->entities[i];
-        const int layer = core::layerIndex(*current, entity.layer);
-        if (layer < 0) {
-            continue;  // on a missing layer: the Problems panel's to report
-        }
-        EntityPath path{int(i)};
-        auto* top = new EntityItem(*this, path, entity, m_layerItems[size_t(layer)]);
-        // Regions, cameras and paths only exist in the editor, so they go under what the
-        // game draws; otherwise a room-sized region would catch every click.
-        const bool guide = entity.type == core::EntityType::Region ||
-                           entity.type == core::EntityType::Camera ||
-                           entity.type == core::EntityType::Path;
-        top->setZValue(double(i) - (guide ? double(current->entities.size()) : 0));
-        const bool locked = m_locked.contains(entity.layer);
-        if (locked) {
-            top->setFlags(top->flags() &
-                          ~(QGraphicsItem::ItemIsSelectable | QGraphicsItem::ItemIsMovable));
-        }
-        m_items.insert(path, top);
-        addItems(entity.children, path, top, locked);
-    }
+    placeItems(current->entities, path, core::sceneFrame(*current), nullptr, core::Color{}, false,
+               false, true);
     select(selected);
     emit contentChanged();
 }
 
-void SceneCanvas::addItems(const std::vector<Entity>& entities, EntityPath& path,
-                           QGraphicsItem* parent, bool locked)
+void SceneCanvas::placeItems(const std::vector<Entity>& entities, EntityPath& path,
+                             const core::Frame& frame, EntityItem* parent, const core::Color& tint,
+                             bool screen, bool blocked, bool create)
 {
+    const core::ImageMetricsFn metrics = imageMetrics();
     for (size_t i = 0; i < entities.size(); ++i) {
+        const Entity& entity = entities[i];
         path.append(int(i));
-        auto* child = new EntityItem(*this, path, entities[i], parent);
-        if (locked) {
-            child->setFlags(child->flags() &
-                            ~(QGraphicsItem::ItemIsSelectable | QGraphicsItem::ItemIsMovable));
+        const core::Point offset = core::anchorPoint(frame, entity.at);
+        const bool inScreen = entity.space ? *entity.space == core::Space::Screen : screen;
+        const EntityItem::Placement placement{
+            {offset.x, offset.y}, core::effectiveTint(entity, tint), inScreen, frame};
+        const core::Frame children = core::childFrame(entity, frame, metrics);
+        EntityItem* item = nullptr;
+        if (create) {
+            item = new EntityItem(*this, path, entity, placement, parent);
+            if (!parent) {
+                addItem(item);
+            }
+            // Guides only exist in the editor, so they go under what the game draws among
+            // their siblings; otherwise a room-sized region would catch every click.
+            item->setZValue(double(i) - (item->isGuide() ? double(entities.size()) : 0));
+            item->setVisible(!inScreen && !isHidden(path));
+            const bool locked = blocked || isLocked(path) || inScreen;
+            if (locked) {
+                item->setFlags(item->flags() &
+                               ~(QGraphicsItem::ItemIsSelectable | QGraphicsItem::ItemIsMovable));
+            }
+            m_items.insert(path, item);
+            placeItems(entity.children, path, children, item, placement.tint, inScreen, locked,
+                       true);
         }
-        m_items.insert(path, child);
-        addItems(entities[i].children, path, child, locked);
+        else {
+            item = m_items.value(path);
+            if (item) {
+                item->setEntity(entity, placement);
+            }
+            placeItems(entity.children, path, children, item, placement.tint, inScreen, blocked,
+                       false);
+        }
         path.removeLast();
     }
 }

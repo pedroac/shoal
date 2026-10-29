@@ -3,9 +3,8 @@
 #include <QDropEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
-#include <QInputDialog>
 #include <QMenu>
-#include <QMessageBox>
+#include <QStyle>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -14,6 +13,7 @@
 
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
+#include "editor/EntityItem.h"
 #include "editor/SceneCanvas.h"
 
 namespace shoal::editor {
@@ -24,13 +24,12 @@ using core::EntityPath;
 namespace {
 
 enum Column { NAME, SHOWN, LOCKED };
-enum Role { KIND = Qt::UserRole, LAYER_ID, PATH };
-enum Kind { LAYER_ROW, ENTITY_ROW };
+enum Role { PATH = Qt::UserRole };
 
 QString entityLabel(const Entity& entity)
 {
     QString label =
-        entity.id.isEmpty() ? QStringLiteral("‹%1›").arg(core::enumName(entity.type)) : entity.id;
+        entity.id.isEmpty() ? QStringLiteral("‹%1›").arg(core::kindOf(entity)) : entity.id;
     for (const QString& name : entity.classes) {
         label += QStringLiteral(" .") + name;
     }
@@ -56,7 +55,7 @@ protected:
         QTreeWidgetItem* target = itemAt(event->position().toPoint());
         event->setDropAction(Qt::IgnoreAction);
         event->accept();
-        if (!dragged || !target || dragged->data(NAME, KIND).toInt() != ENTITY_ROW) {
+        if (!dragged) {
             return;
         }
         Drop drop = Drop::On;
@@ -77,13 +76,11 @@ SceneTreePanel::SceneTreePanel(QWidget* parent)
     : QWidget(parent),
       m_tree(new Tree(*this)),
       m_addButton(new QToolButton(this)),
-      m_removeButton(new QToolButton(this)),
-      m_backButton(new QToolButton(this)),
-      m_frontButton(new QToolButton(this))
+      m_removeButton(new QToolButton(this))
 {
     m_tree->setObjectName(QStringLiteral("sceneTree"));
     m_tree->setColumnCount(3);
-    m_tree->setHeaderLabels({tr("Layers and entities"), tr("Shown"), tr("Locked")});
+    m_tree->setHeaderLabels({tr("Entities"), tr("Shown"), tr("Locked")});
     m_tree->header()->setStretchLastSection(false);
     m_tree->header()->setSectionResizeMode(NAME, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(SHOWN, QHeaderView::ResizeToContents);
@@ -92,22 +89,13 @@ SceneTreePanel::SceneTreePanel(QWidget* parent)
     m_tree->setDragDropMode(QAbstractItemView::InternalMove);
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
 
-    const std::pair<QToolButton*, QString> buttons[] = {
-        {m_addButton, tr("Add Layer")},
-        {m_removeButton, tr("Remove Layer")},
-        {m_backButton, tr("Move Layer Back")},
-        {m_frontButton, tr("Move Layer Front")},
-    };
-    auto* buttonRow = new QHBoxLayout;
-    for (const auto& [button, text] : buttons) {
-        button->setText(text);
-        button->setToolTip(text);
-        buttonRow->addWidget(button);
-    }
     m_addButton->setText(QStringLiteral("+"));
+    m_addButton->setToolTip(tr("Add a group to the current parent"));
     m_removeButton->setText(QStringLiteral("−"));
-    m_backButton->setText(QStringLiteral("↑"));
-    m_frontButton->setText(QStringLiteral("↓"));
+    m_removeButton->setToolTip(tr("Remove the selection"));
+    auto* buttonRow = new QHBoxLayout;
+    buttonRow->addWidget(m_addButton);
+    buttonRow->addWidget(m_removeButton);
     buttonRow->addStretch();
 
     auto* layout = new QVBoxLayout(this);
@@ -115,10 +103,8 @@ SceneTreePanel::SceneTreePanel(QWidget* parent)
     layout->addWidget(m_tree);
     layout->addLayout(buttonRow);
 
-    connect(m_addButton, &QToolButton::clicked, this, &SceneTreePanel::addLayer);
-    connect(m_removeButton, &QToolButton::clicked, this, &SceneTreePanel::removeCurrentLayer);
-    connect(m_backButton, &QToolButton::clicked, this, &SceneTreePanel::moveCurrentLayerBack);
-    connect(m_frontButton, &QToolButton::clicked, this, &SceneTreePanel::moveCurrentLayerFront);
+    connect(m_addButton, &QToolButton::clicked, this, &SceneTreePanel::addGroup);
+    connect(m_removeButton, &QToolButton::clicked, this, &SceneTreePanel::removeSelection);
     connect(m_tree, &QTreeWidget::itemSelectionChanged, this,
             &SceneTreePanel::onTreeSelectionChanged);
     connect(m_tree, &QTreeWidget::itemChanged, this, &SceneTreePanel::onItemChanged);
@@ -137,11 +123,17 @@ void SceneTreePanel::setCanvas(SceneCanvas* canvas)
     if (m_canvas) {
         disconnect(m_canvas, nullptr, this, nullptr);
     }
+    if (m_document) {
+        disconnect(m_document, nullptr, this, nullptr);
+    }
     m_canvas = canvas;
+    m_document = canvas ? &canvas->document() : nullptr;
     if (m_canvas) {
+        // The top level's row is named after the scene; the canvas follows it first.
+        connect(m_document, &core::ProjectDocument::sceneRenamed, this, &SceneTreePanel::rebuild);
         connect(m_canvas, &SceneCanvas::contentChanged, this, &SceneTreePanel::rebuild);
-        connect(m_canvas, &SceneCanvas::layerStateChanged, this, &SceneTreePanel::rebuild);
-        connect(m_canvas, &SceneCanvas::currentLayerChanged, this, &SceneTreePanel::rebuild);
+        connect(m_canvas, &SceneCanvas::entityStateChanged, this, &SceneTreePanel::rebuild);
+        connect(m_canvas, &SceneCanvas::currentParentChanged, this, &SceneTreePanel::rebuild);
         connect(m_canvas, &QGraphicsScene::selectionChanged, this,
                 &SceneTreePanel::onCanvasSelectionChanged);
     }
@@ -149,22 +141,11 @@ void SceneTreePanel::setCanvas(SceneCanvas* canvas)
     rebuild();
 }
 
-QTreeWidgetItem* SceneTreePanel::layerRow(const QString& layerId) const
-{
-    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
-        QTreeWidgetItem* row = m_tree->topLevelItem(i);
-        if (row->data(NAME, LAYER_ID).toString() == layerId) {
-            return row;
-        }
-    }
-    return nullptr;
-}
-
 QTreeWidgetItem* SceneTreePanel::entityRow(const EntityPath& path) const
 {
     QTreeWidgetItemIterator it(m_tree);
     for (; *it; ++it) {
-        if ((*it)->data(NAME, KIND).toInt() == ENTITY_ROW && pathOf(*it) == path) {
+        if (pathOf(*it) == path) {
             return *it;
         }
     }
@@ -178,47 +159,54 @@ void SceneTreePanel::rebuild()
     m_tree->clear();
     const core::Scene* scene = m_canvas ? m_canvas->scene() : nullptr;
     if (scene) {
-        std::function<void(QTreeWidgetItem*, const std::vector<Entity>&, EntityPath&)> addChildren =
-            [&](QTreeWidgetItem* parent, const std::vector<Entity>& children, EntityPath& path) {
-                for (size_t i = 0; i < children.size(); ++i) {
+        // The top level: the scene, holding the top-level entities. It can't be dragged,
+        // hidden or locked.
+        auto* root = new QTreeWidgetItem(m_tree, {m_canvas->sceneId()});
+        root->setData(NAME, PATH, QVariant::fromValue(EntityPath{}));
+        root->setFlags(root->flags() & ~Qt::ItemIsDragEnabled);
+        root->setIcon(NAME, style()->standardIcon(QStyle::SP_DirHomeIcon));
+        QString rootTip = tr("The top level: the scene, %1 × %2, which its entities measure "
+                             "against")
+                              .arg(scene->size.width)
+                              .arg(scene->size.height);
+        if (m_canvas->currentParent().isEmpty()) {
+            QFont font = root->font(NAME);
+            font.setBold(true);
+            root->setFont(NAME, font);
+            rootTip += tr(", where new entities go");
+        }
+        root->setToolTip(NAME, rootTip);
+        const std::function<void(QTreeWidgetItem*, const std::vector<Entity>&, EntityPath&)>
+            addRows = [&](QTreeWidgetItem* parent, const std::vector<Entity>& entities,
+                          EntityPath& path) {
+                for (size_t i = 0; i < entities.size(); ++i) {
+                    const Entity& entity = entities[i];
                     path.append(int(i));
-                    auto* row = new QTreeWidgetItem(parent, {entityLabel(children[i])});
-                    row->setData(NAME, KIND, ENTITY_ROW);
+                    auto* row = new QTreeWidgetItem(parent, {entityLabel(entity)});
                     row->setData(NAME, PATH, QVariant::fromValue(path));
-                    row->setToolTip(NAME, core::enumName(children[i].type));
-                    addChildren(row, children[i].children, path);
+                    row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
+                    row->setCheckState(SHOWN,
+                                       m_canvas->isHidden(path) ? Qt::Unchecked : Qt::Checked);
+                    row->setCheckState(LOCKED,
+                                       m_canvas->isLocked(path) ? Qt::Checked : Qt::Unchecked);
+                    QString tooltip = core::kindOf(entity);
+                    if (path == m_canvas->currentParent()) {
+                        QFont font = row->font(NAME);
+                        font.setBold(true);
+                        row->setFont(NAME, font);
+                        tooltip += tr(", where new entities go");
+                    }
+                    if (m_canvas->isInScreenSpace(path)) {
+                        tooltip += tr(", in screen space: laid out in a later version");
+                        row->setForeground(NAME, palette().color(QPalette::PlaceholderText));
+                    }
+                    row->setToolTip(NAME, tooltip);
+                    addRows(row, entity.children, path);
                     path.removeLast();
                 }
             };
-        for (const core::Layer& layer : scene->layers) {
-            auto* row = new QTreeWidgetItem(m_tree, {layer.id});
-            row->setData(NAME, KIND, LAYER_ROW);
-            row->setData(NAME, LAYER_ID, layer.id);
-            row->setFlags((row->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDropEnabled) &
-                          ~Qt::ItemIsDragEnabled);
-            row->setCheckState(SHOWN,
-                               m_canvas->isLayerHidden(layer.id) ? Qt::Unchecked : Qt::Checked);
-            row->setCheckState(LOCKED,
-                               m_canvas->isLayerLocked(layer.id) ? Qt::Checked : Qt::Unchecked);
-            QFont font = row->font(NAME);
-            font.setBold(layer.id == m_canvas->currentLayer());
-            row->setFont(NAME, font);
-            if (layer.space == core::Space::Screen) {
-                row->setToolTip(NAME, tr("Screen space: laid out in a later version"));
-                row->setForeground(NAME, palette().color(QPalette::PlaceholderText));
-            }
-            for (size_t i = 0; i < scene->entities.size(); ++i) {
-                if (scene->entities[i].layer != layer.id) {
-                    continue;
-                }
-                EntityPath path{int(i)};
-                auto* top = new QTreeWidgetItem(row, {entityLabel(scene->entities[i])});
-                top->setData(NAME, KIND, ENTITY_ROW);
-                top->setData(NAME, PATH, QVariant::fromValue(path));
-                top->setToolTip(NAME, core::enumName(scene->entities[i].type));
-                addChildren(top, scene->entities[i].children, path);
-            }
-        }
+        EntityPath path;
+        addRows(root, scene->entities, path);
         m_tree->expandAll();
     }
     m_syncing = false;
@@ -228,18 +216,8 @@ void SceneTreePanel::rebuild()
 
 void SceneTreePanel::updateButtons()
 {
-    const core::Scene* scene = m_canvas ? m_canvas->scene() : nullptr;
-    const int index = currentLayerIndex();
-    m_addButton->setEnabled(scene != nullptr);
-    m_removeButton->setEnabled(index >= 0);
-    m_backButton->setEnabled(index > 0);
-    m_frontButton->setEnabled(scene && index >= 0 && size_t(index) + 1 < scene->layers.size());
-}
-
-int SceneTreePanel::currentLayerIndex() const
-{
-    const core::Scene* scene = m_canvas ? m_canvas->scene() : nullptr;
-    return scene ? core::layerIndex(*scene, m_canvas->currentLayer()) : -1;
+    m_addButton->setEnabled(m_canvas && m_canvas->scene() && m_canvas->canAddEntities());
+    m_removeButton->setEnabled(m_canvas && !m_canvas->selectedPaths().isEmpty());
 }
 
 void SceneTreePanel::onTreeSelectionChanged()
@@ -247,28 +225,17 @@ void SceneTreePanel::onTreeSelectionChanged()
     if (m_syncing || !m_canvas) {
         return;
     }
+    // The top level's row stands for no entity selected.
     QList<EntityPath> paths;
-    QString layer;
     for (QTreeWidgetItem* row : m_tree->selectedItems()) {
-        if (row->data(NAME, KIND).toInt() == ENTITY_ROW) {
+        if (!pathOf(row).isEmpty()) {
             paths << pathOf(row);
         }
-    }
-    if (QTreeWidgetItem* current = m_tree->currentItem()) {
-        QTreeWidgetItem* top = current;
-        while (top->parent()) {
-            top = top->parent();
-        }
-        layer = top->data(NAME, LAYER_ID).toString();
     }
     m_syncing = true;
     m_canvas->select(paths);
     m_syncing = false;
-    if (!layer.isEmpty() && m_canvas->scene() &&
-        m_canvas->scene()->layers[size_t(core::layerIndex(*m_canvas->scene(), layer))].space ==
-            core::Space::World) {
-        m_canvas->setCurrentLayer(layer);  // rebuilds the rows
-    }
+    updateButtons();
 }
 
 void SceneTreePanel::onCanvasSelectionChanged()
@@ -279,206 +246,127 @@ void SceneTreePanel::onCanvasSelectionChanged()
     m_syncing = true;
     const QSignalBlocker blocker(m_tree);
     m_tree->clearSelection();
-    for (const EntityPath& path : m_canvas->selectedPaths()) {
+    const QList<EntityPath> selected = m_canvas->selectedPaths();
+    for (const EntityPath& path : selected) {
         if (QTreeWidgetItem* row = entityRow(path)) {
             row->setSelected(true);
             m_tree->scrollToItem(row);
         }
     }
+    if (QTreeWidgetItem* root = topLevelRow(); root && selected.isEmpty()) {
+        root->setSelected(true);
+    }
     m_syncing = false;
+    updateButtons();
 }
 
 void SceneTreePanel::onItemChanged(QTreeWidgetItem* item, int column)
 {
-    if (m_syncing || !m_canvas || item->data(NAME, KIND).toInt() != LAYER_ROW) {
+    if (m_syncing || !m_canvas) {
         return;
     }
-    const QString layer = item->data(NAME, LAYER_ID).toString();
-    if (column == SHOWN) {
-        m_canvas->setLayerHidden(layer, item->checkState(SHOWN) != Qt::Checked);
+    const EntityPath path = pathOf(item);
+    if (path.isEmpty()) {
+        return;  // the top level has no check boxes
     }
-    else if (column == LOCKED) {
-        m_canvas->setLayerLocked(layer, item->checkState(LOCKED) == Qt::Checked);
-    }
+    const bool checked = item->checkState(column) == Qt::Checked;
+    // Applied once the row's own call returns: the canvas rebuilds the rows, this one too.
+    QMetaObject::invokeMethod(
+        this,
+        [this, path, column, checked] {
+            if (!m_canvas) {
+                return;
+            }
+            if (column == SHOWN) {
+                m_canvas->setHidden(path, !checked);
+            }
+            else if (column == LOCKED) {
+                m_canvas->setLocked(path, checked);
+            }
+        },
+        Qt::QueuedConnection);
 }
 
 bool SceneTreePanel::dropEntity(const EntityPath& from, QTreeWidgetItem* target, Drop drop)
 {
     const core::Scene* scene = m_canvas ? m_canvas->scene() : nullptr;
-    if (!scene || !target || !core::entityAt(*scene, from)) {
+    if (!scene || !core::entityAt(*scene, from)) {
         return false;
     }
     EntityPath to;
-    QString layer;  // for a top-level destination
-    if (target->data(NAME, KIND).toInt() == LAYER_ROW) {
-        if (drop != Drop::On) {
-            return false;
-        }
-        layer = target->data(NAME, LAYER_ID).toString();
-        // After the last entity on that layer, so it is drawn in front of them.
-        int index = int(scene->entities.size());
-        for (int i = int(scene->entities.size()) - 1; i >= 0; --i) {
-            if (scene->entities[size_t(i)].layer == layer) {
-                index = i + 1;
-                break;
-            }
-        }
-        to = {index};
+    if (!target || (pathOf(target).isEmpty() && drop == Drop::On)) {
+        to = {int(scene->entities.size())};  // in front of everything
+    }
+    else if (pathOf(target).isEmpty()) {
+        return false;  // nothing goes beside the top level
     }
     else {
         const EntityPath targetPath = pathOf(target);
         if (targetPath == from || core::isAncestor(from, targetPath)) {
             return false;  // onto itself or into its own subtree
         }
+        to = targetPath;
         if (drop == Drop::On) {
-            to = targetPath;
             to.append(int(core::entityAt(*scene, targetPath)->children.size()));
         }
-        else {
-            to = targetPath;
-            if (drop == Drop::Below) {
-                ++to.back();
-            }
-            if (to.size() == 1) {
-                layer = core::layerOf(*scene, targetPath);
-            }
+        else if (drop == Drop::Below) {
+            ++to.back();
         }
     }
     if (to == from) {
         return false;
     }
     const EntityPath final = core::pathAfterRemoval(to, from);
-    const bool moves = final != from;
-    const bool relayers =
-        final.size() == 1 && !layer.isEmpty() && core::layerOf(*scene, from) != layer;
-    if (!moves && !relayers) {
+    if (final == from) {
         return false;
     }
-
-    core::ProjectDocument& document = m_canvas->document();
-    const QString sceneId = m_canvas->sceneId();
-    document.commands().beginMacro(tr("Move %1").arg(entityLabel(*core::entityAt(*scene, from))));
-    if (moves) {
-        document.commands().push(
-            std::make_unique<core::MoveEntityCommand>(document, sceneId, from, final));
-    }
-    if (relayers) {
-        Entity entity = *core::entityAt(*m_canvas->scene(), final);
-        entity.layer = layer;
-        document.commands().push(std::make_unique<core::EditEntitiesCommand>(
-            document, sceneId, QList<std::pair<EntityPath, Entity>>{{final, entity}},
-            tr("Move to layer %1").arg(layer)));
-    }
-    document.commands().endMacro();
-    m_canvas->select({final});
+    m_canvas->moveEntity(from, final);
     return true;
 }
 
-// --- layers ---
-
-void SceneTreePanel::addLayer()
+void SceneTreePanel::addGroup()
 {
-    const core::Scene* scene = m_canvas ? m_canvas->scene() : nullptr;
-    if (!scene) {
+    if (!m_canvas || !m_canvas->canAddEntities()) {
         return;
     }
-    QStringList ids;
-    for (const core::Layer& layer : scene->layers) {
-        ids << layer.id;
-    }
-    QString id = QStringLiteral("layer");
-    for (int n = 2; ids.contains(id); ++n) {
-        id = QStringLiteral("layer_%1").arg(n);
-    }
-    core::Layer layer;
-    layer.id = id;
-    const int index = currentLayerIndex() + 1;  // in front of the current one
-    core::ProjectDocument& document = m_canvas->document();
-    document.commands().push(std::make_unique<core::AddLayerCommand>(
-        document, m_canvas->sceneId(), index > 0 ? index : int(scene->layers.size()), layer));
-    m_canvas->setCurrentLayer(id);
+    // At the parent's origin: a group draws nothing, and its children are placed in it.
+    const EntityPath parent = m_canvas->currentParent();
+    const EntityItem* parentItem = parent.isEmpty() ? nullptr : m_canvas->item(parent);
+    const bool snapping = m_canvas->snapping();
+    m_canvas->setSnapping(false);
+    m_canvas->addEntity(Entity{}, parentItem ? parentItem->mapToScene(QPointF()) : QPointF());
+    m_canvas->setSnapping(snapping);
 }
 
-void SceneTreePanel::removeCurrentLayer()
+void SceneTreePanel::removeSelection()
 {
-    const int index = currentLayerIndex();
-    if (index < 0) {
-        return;
-    }
-    m_canvas->clearSelection();
-    core::ProjectDocument& document = m_canvas->document();
-    document.commands().push(
-        std::make_unique<core::RemoveLayerCommand>(document, m_canvas->sceneId(), index));
-}
-
-void SceneTreePanel::moveCurrentLayerBack()
-{
-    const int index = currentLayerIndex();
-    if (index > 0) {
-        core::ProjectDocument& document = m_canvas->document();
-        document.commands().push(std::make_unique<core::MoveLayerCommand>(
-            document, m_canvas->sceneId(), index, index - 1));
-    }
-}
-
-void SceneTreePanel::moveCurrentLayerFront()
-{
-    const int index = currentLayerIndex();
-    const core::Scene* scene = m_canvas ? m_canvas->scene() : nullptr;
-    if (scene && index >= 0 && size_t(index) + 1 < scene->layers.size()) {
-        core::ProjectDocument& document = m_canvas->document();
-        document.commands().push(std::make_unique<core::MoveLayerCommand>(
-            document, m_canvas->sceneId(), index, index + 1));
-    }
-}
-
-void SceneTreePanel::renameLayer(const QString& layerId)
-{
-    const core::Scene* scene = m_canvas ? m_canvas->scene() : nullptr;
-    const int index = scene ? core::layerIndex(*scene, layerId) : -1;
-    if (index < 0) {
-        return;
-    }
-    bool ok = false;
-    const QString id = QInputDialog::getText(this, tr("Rename Layer"), tr("New id:"),
-                                             QLineEdit::Normal, layerId, &ok)
-                           .trimmed();
-    if (!ok || id == layerId) {
-        return;
-    }
-    if (!core::isValidId(id) || core::layerIndex(*scene, id) >= 0) {
-        QMessageBox::warning(this, tr("Rename Layer"),
-                             tr("%1 isn't a valid id, or another layer has it.").arg(id));
-        return;
-    }
-    core::Layer layer = scene->layers[size_t(index)];
-    layer.id = id;
-    core::ProjectDocument& document = m_canvas->document();
-    const bool current = m_canvas->currentLayer() == layerId;
-    document.commands().push(
-        std::make_unique<core::EditLayerCommand>(document, m_canvas->sceneId(), index, layer));
-    if (current) {
-        m_canvas->setCurrentLayer(id);
+    if (m_canvas) {
+        m_canvas->removeSelection();
     }
 }
 
 void SceneTreePanel::showContextMenu(const QPoint& position)
 {
-    QTreeWidgetItem* row = m_tree->itemAt(position);
-    if (!m_canvas || !row) {
+    if (!m_canvas || !m_canvas->scene()) {
         return;
     }
-    QMenu menu(this);
-    if (row->data(NAME, KIND).toInt() == LAYER_ROW) {
-        const QString layer = row->data(NAME, LAYER_ID).toString();
-        menu.addAction(tr("Rename Layer…"), this, [this, layer] { renameLayer(layer); });
-        menu.addAction(tr("Remove Layer"), this, [this, layer] {
-            m_canvas->setCurrentLayer(layer);
-            removeCurrentLayer();
-        });
+    QTreeWidgetItem* row = m_tree->itemAt(position);
+    if (row && pathOf(row).isEmpty()) {
+        row = nullptr;  // the top level: only where new entities go
     }
-    else {
+    QMenu menu(this);
+    if (row) {
+        const EntityPath path = pathOf(row);
         m_canvas->addArrangeActions(menu);
+        menu.addSeparator();
+        QAction* here = menu.addAction(tr("New Entities Go Here"), this,
+                                       [this, path] { m_canvas->setCurrentParent(path); });
+        here->setEnabled(path != m_canvas->currentParent() && !m_canvas->isInScreenSpace(path));
+    }
+    QAction* top = menu.addAction(tr("New Entities Go at the Top Level"), this,
+                                  [this] { m_canvas->setCurrentParent({}); });
+    top->setEnabled(!m_canvas->currentParent().isEmpty());
+    if (row) {
         menu.addSeparator();
         menu.addAction(tr("Remove"), m_canvas.data(), &SceneCanvas::removeSelection);
     }

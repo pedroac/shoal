@@ -1,0 +1,119 @@
+{
+  "format": "shoal-scene",
+  "version": 1,
+  "size": [3840, 1080],
+  "layers": [
+    {
+      "id": "bg",
+      "space": "world",
+      "parallax": [0.5, 0.5]
+    },
+    {
+      "id": "world",
+      "space": "world"
+    },
+    {
+      "id": "hud",
+      "space": "screen"
+    }
+  ],
+  "entities": [
+    {
+      "id": "camera",
+      "type": "camera",
+      "layer": "world",
+      "classes": ["main"],
+      "transform": {
+        "pos": [960, 540]
+      },
+      "bounds": ".camera_bounds"
+    },
+    {
+      "id": "player",
+      "type": "sprite",
+      "layer": "world",
+      "classes": ["actor"],
+      "sprite": {
+        "sheet": "hero",
+        "path": "hero/idle.png"
+      },
+      "transform": {
+        "pos": [320, 640],
+        "flip": [true, false]
+      },
+      "props": {
+        "speed": 4.5
+      }
+    },
+    {
+      "type": "sprite",
+      "layer": "bg",
+      "sprite": {
+        "sheet": "hero",
+        "path": "props/bush.png"
+      },
+      "transform": {
+        "pos": [700.25, 650],
+        "rot": -12.5,
+        "scale": [2, 2]
+      }
+    },
+    {
+      "id": "altar_group",
+      "type": "group",
+      "layer": "world",
+      "transform": {
+        "pos": [2400, 600]
+      },
+      "children": [
+        {
+          "id": "mark_altar",
+          "type": "mark"
+        },
+        {
+          "id": "mark_altar_front",
+          "type": "mark",
+          "transform": {
+            "pos": [0, 80]
+          }
+        }
+      ]
+    },
+    {
+      "id": "secret_door",
+      "type": "sprite",
+      "layer": "world",
+      "active": false,
+      "visible": false,
+      "sprite": {
+        "sheet": "hero",
+        "path": "props/door.png"
+      },
+      "transform": {
+        "pos": [2600, 640]
+      }
+    },
+    {
+      "id": "room_1_bounds",
+      "type": "region",
+      "layer": "world",
+      "classes": ["camera_bounds"],
+      "shape": {
+        "rect": [0, 0, 1920, 1080]
+      }
+    },
+    {
+      "id": "torch",
+      "type": "animation",
+      "layer": "world",
+      "animation": {
+        "sheet": "hero",
+        "name": "idle",
+        "x_speed": 2
+      },
+      "transform": {
+        "pos": [1200, 600]
+      }
+    }
+  ]
+}

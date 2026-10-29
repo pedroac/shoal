@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QList>
 #include <QString>
 #include <QStringView>
@@ -55,10 +56,12 @@ struct ParseResult {
 /// transition to a missing scene, load fine and are left to validation.
 ParseResult parseProject(const ProjectFiles& files);
 
-/// Reads an entity that is on no layer yet, such as a preset's: as in a scene file, except
-/// that it has no `layer`, since it goes on the layer it is placed on.
+/// Reads an entity, and its children, as a scene file writes them, such as a preset's.
 /// @throws FormatError
-Entity readDetachedEntity(ObjectReader& reader);
+Entity readEntity(ObjectReader& reader);
+
+/// An entity, and its children, as a scene file writes them.
+QJsonObject entityToJson(const Entity& entity);
 
 /// Writes a project in canonical form: the same project always gives the same bytes.
 ProjectFiles serializeProject(const Project& project);

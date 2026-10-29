@@ -123,7 +123,7 @@ void PresetsPanel::rebuild()
             own.contains(it.key()) ? core::paths::preset(it.key()) : tr("built in");
         if (read.definition) {
             row->setText(read.definition->name);
-            row->setIcon(swatch(QColor(read.definition->tint), outline));
+            row->setIcon(swatch(QColor(read.definition->swatch), outline));
             QStringList tips{QStringLiteral("<b>%1</b> (%2)").arg(it.key(), origin)};
             if (!read.definition->doc.isEmpty()) {
                 tips << read.definition->doc.toHtmlEscaped();

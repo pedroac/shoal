@@ -1,0 +1,16 @@
+{
+  "format": "shoal-classes",
+  "version": 1,
+  "classes": {
+    "camera_bounds": {
+      "doc": "Region; cameras stay inside the union of these",
+      "color": "#30a0e0"
+    },
+    "enemy": {},
+    "trigger": {
+      "doc": "Region; the engine fires an event on enter/exit",
+      "color": "#e0a030",
+      "x_owner": "gameplay team"
+    }
+  }
+}

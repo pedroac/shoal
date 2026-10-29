@@ -6,7 +6,6 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QPainter>
-#include <cmath>
 
 #include "assets/SpriteSheet.h"
 #include "editor/EntityItem.h"
@@ -14,11 +13,6 @@
 #include "editor/SceneCanvas.h"
 
 namespace shoal::editor {
-
-namespace {
-constexpr double MIN_GRID_PIXELS = 12;  ///< Finer grids aren't drawn.
-constexpr double NUDGE_MULTIPLIER = 10;
-}  // namespace
 
 SceneView::SceneView(core::ProjectDocument& document, assets::SheetCache& sheets,
                      const QString& sceneId, QWidget* parent)
@@ -38,13 +32,14 @@ SceneView::~SceneView()
 core::EntityPath SceneView::place(const SheetItem& item, QPointF scenePosition)
 {
     core::Entity entity = item.toEntity();
-    // A sprite with nine-slice insets is placed as a nine-slice, at its own size.
-    if (entity.sprite) {
-        const SceneCanvas::SpriteVisual visual =
-            m_canvas->spriteVisual(entity.sprite->sheet, entity.sprite->path);
+    // A sprite with nine-slice insets is placed as a nine-slice, its natural size set so
+    // the scale handle resizes it.
+    if (entity.image && !entity.image->isAnimation()) {
+        const SceneCanvas::SpriteVisual visual = m_canvas->visualOf(*entity.image);
         if (visual.sprite && visual.sprite->hasSlice) {
-            entity.type = core::EntityType::NineSlice;
-            core::setEntitySize(entity, assets::naturalSize(*visual.sprite, visual.drawScale));
+            entity.image->mode = core::ImageMode::NineSlice;
+            const QSizeF size = assets::naturalSize(*visual.sprite, visual.drawScale);
+            entity.size = core::Extent::px({size.width(), size.height()});
         }
     }
     const core::EntityPath path = m_canvas->addEntity(std::move(entity), scenePosition);
@@ -85,21 +80,6 @@ void SceneView::drawBackground(QPainter* painter, const QRectF& rect)
     const QRectF bounds = m_canvas->sceneBounds();
     painter->fillRect(bounds, palette().color(QPalette::Base));
 
-    // The grid, inside the scene, when its cells are big enough on screen to help.
-    const double grid = m_canvas->gridSize();
-    if (grid * zoom() >= MIN_GRID_PIXELS) {
-        const QRectF area = rect.intersected(bounds);
-        QPen pen(palette().color(QPalette::Midlight), 0);
-        painter->setPen(pen);
-        QVector<QLineF> lines;
-        for (double x = std::ceil(area.left() / grid) * grid; x <= area.right(); x += grid) {
-            lines << QLineF(x, area.top(), x, area.bottom());
-        }
-        for (double y = std::ceil(area.top() / grid) * grid; y <= area.bottom(); y += grid) {
-            lines << QLineF(area.left(), y, area.right(), y);
-        }
-        painter->drawLines(lines);
-    }
     painter->setPen(QPen(palette().color(QPalette::Mid), 0));
     painter->setBrush(Qt::NoBrush);
     painter->drawRect(bounds);
@@ -107,7 +87,7 @@ void SceneView::drawBackground(QPainter* painter, const QRectF& rect)
 
 void SceneView::keyPressEvent(QKeyEvent* event)
 {
-    QPointF direction;
+    QPoint direction;
     switch (event->key()) {
         case Qt::Key_Left:
             direction = {-1, 0};
@@ -125,11 +105,7 @@ void SceneView::keyPressEvent(QKeyEvent* event)
             CanvasView::keyPressEvent(event);
             return;
     }
-    double step = m_canvas->snapping() ? m_canvas->gridSize() : 1;
-    if (event->modifiers() & Qt::ShiftModifier) {
-        step *= NUDGE_MULTIPLIER;
-    }
-    m_canvas->nudgeSelection(direction * step);
+    m_canvas->nudgeSelection(direction, event->modifiers().testFlag(Qt::ShiftModifier));
     event->accept();
 }
 
@@ -169,7 +145,7 @@ void SceneView::dragMoveEvent(QDragMoveEvent* event)
         CanvasView::dragMoveEvent(event);
         return;
     }
-    // Refused on a hidden or locked layer, where the new entity couldn't be seen or picked.
+    // Refused into a hidden or locked parent, where the new entity couldn't be seen or picked.
     if (m_canvas->canAddEntities()) {
         event->acceptProposedAction();
     }

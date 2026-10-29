@@ -2,6 +2,7 @@
 
 #include <QPointer>
 #include <QWidget>
+#include <optional>
 
 class QCheckBox;
 class QComboBox;
@@ -13,15 +14,20 @@ namespace shoal::editor {
 
 class FlowScene;
 
-/// The flow's selected scene: its id, whether the game starts there, its size and its
-/// fit. Each edit is one undo step. Renaming it renames its folder and every reference.
+/// A scene's settings: its id, whether the game starts there, its size and its fit. It
+/// shows the flow's selected scene, or one scene set with setScene(), as the inspector
+/// does for an open scene's top level. Each edit is one undo step. Renaming it renames its
+/// folder and every reference.
 class SceneSettingsPanel : public QWidget {
     Q_OBJECT
 public:
     explicit SceneSettingsPanel(QWidget* parent = nullptr);
 
-    /// Shows `flow`'s selected scene; null shows nothing.
+    /// Shows `flow`'s selected scene, or the one setScene() chose; null shows nothing.
     void setFlowScene(FlowScene* flow);
+    /// Shows `sceneId`, following its renames, instead of the flow's selection; null goes
+    /// back to the selection.
+    void setScene(const std::optional<QString>& sceneId);
 
     QLabel* summary() const { return m_summary; }
     QLineEdit* idField() const { return m_idField; }
@@ -49,6 +55,7 @@ private:
     void applySettings();
 
     QPointer<FlowScene> m_flow;
+    std::optional<QString> m_scene;  ///< Shown instead of the selection.
     QLabel* m_summary;
     QLineEdit* m_idField;
     QCheckBox* m_startBox;

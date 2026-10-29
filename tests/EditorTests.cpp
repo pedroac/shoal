@@ -262,7 +262,7 @@ private slots:
         MainWindow window;
         QVERIFY(window.openProject(dir.path()).isEmpty());
         QListWidget* list = window.scenesPanel()->list();
-        QCOMPARE(list->count(), 4);
+        QCOMPARE(list->count(), 5);
         QCOMPARE(window.scenesPanel()->sceneRow(QStringLiteral("main_menu"))->text(),
                  QStringLiteral("main_menu (start)"));
 

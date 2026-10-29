@@ -374,40 +374,4 @@ void ProjectDocument::setClassRegistry(std::optional<ClassRegistry> registry)
     emit changed();
 }
 
-void ProjectDocument::insertLayer(const QString& sceneId, int index, Layer layer)
-{
-    std::vector<Layer>& layers = sceneForEdit(sceneId).layers;
-    Q_ASSERT(index >= 0 && size_t(index) <= layers.size());
-    layers.insert(layers.begin() + index, std::move(layer));
-    emitSceneContentChanged(sceneId);
-}
-
-Layer ProjectDocument::removeLayer(const QString& sceneId, int index)
-{
-    std::vector<Layer>& layers = sceneForEdit(sceneId).layers;
-    Q_ASSERT(index >= 0 && size_t(index) < layers.size());
-    Layer removed = std::move(layers[size_t(index)]);
-    layers.erase(layers.begin() + index);
-    emitSceneContentChanged(sceneId);
-    return removed;
-}
-
-void ProjectDocument::setLayer(const QString& sceneId, int index, Layer layer)
-{
-    std::vector<Layer>& layers = sceneForEdit(sceneId).layers;
-    Q_ASSERT(index >= 0 && size_t(index) < layers.size());
-    layers[size_t(index)] = std::move(layer);
-    emitSceneContentChanged(sceneId);
-}
-
-void ProjectDocument::moveLayer(const QString& sceneId, int from, int to)
-{
-    std::vector<Layer>& layers = sceneForEdit(sceneId).layers;
-    Q_ASSERT(from >= 0 && size_t(from) < layers.size() && to >= 0 && size_t(to) < layers.size());
-    Layer layer = std::move(layers[size_t(from)]);
-    layers.erase(layers.begin() + from);
-    layers.insert(layers.begin() + to, std::move(layer));
-    emitSceneContentChanged(sceneId);
-}
-
 }  // namespace shoal::core

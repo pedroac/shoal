@@ -82,8 +82,24 @@ void SceneSettingsPanel::setFlowScene(FlowScene* flow)
         });
         connect(&m_flow->document(), &core::ProjectDocument::changed, this,
                 &SceneSettingsPanel::refresh);
+        connect(&m_flow->document(), &core::ProjectDocument::sceneRenamed, this,
+                [this](const QString& from, const QString& to) {
+                    if (m_scene == from) {
+                        m_scene = to;
+                        refresh();
+                    }
+                });
     }
     showMessage({});
+    refresh();
+}
+
+void SceneSettingsPanel::setScene(const std::optional<QString>& sceneId)
+{
+    if (m_scene != sceneId) {
+        m_scene = sceneId;
+        showMessage({});
+    }
     refresh();
 }
 
@@ -152,10 +168,9 @@ void SceneSettingsPanel::refresh()
     const core::Scene& scene = *project.scenes.find(id);
     int entities = 0;
     core::forEachEntity(scene, [&](const core::Entity&, const core::EntityPath&) { ++entities; });
-    m_summary->setText(QStringLiteral("%1 · %2 · %3")
-                           .arg(tr("%n layers", nullptr, int(scene.layers.size())),
-                                tr("%n entities", nullptr, entities),
-                                tr("%n modifiers", nullptr, int(scene.modifiers.size()))));
+    m_summary->setText(
+        QStringLiteral("%1 · %2").arg(tr("%n entities", nullptr, entities),
+                                      tr("%n modifiers", nullptr, int(scene.modifiers.size()))));
     if (!(m_idField->hasFocus() && m_idField->isModified())) {
         m_idField->setText(id);
         m_idField->setModified(false);
@@ -178,6 +193,9 @@ QString SceneSettingsPanel::selected() const
 {
     if (!m_flow) {
         return {};
+    }
+    if (m_scene) {
+        return m_flow->document().project().scenes.contains(*m_scene) ? *m_scene : QString();
     }
     const QStringList ids = m_flow->selectedSceneIds();
     return ids.size() == 1 && m_flow->document().project().scenes.contains(ids.first())

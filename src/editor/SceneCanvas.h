@@ -26,13 +26,14 @@ class ProjectDocument;
 namespace shoal::editor {
 
 class EntityItem;
+class TileGridOverlay;
 class TransformHandle;
 
-/// One scene's world-space layers and entities, drawn with their sprites. It follows the
-/// document, so undo and redo show up here, and turns what the user does into commands.
+/// One scene's entities, drawn with their parts. It follows the document, so undo and redo
+/// show up here, and turns what the user does into commands.
 ///
-/// Which layers are hidden or locked, the current layer and the grid are the editor's own
-/// state; none of it changes the project. Screen-space layers are laid out in a later
+/// Which entities are hidden or locked, the current parent and the grid are the editor's
+/// own state; none of it changes the project. Screen-space entities are laid out in a later
 /// roadmap step and aren't drawn yet.
 class SceneCanvas : public QGraphicsScene {
     Q_OBJECT
@@ -55,13 +56,19 @@ public:
     QList<core::EntityPath> selectedPaths() const;
     void select(const QList<core::EntityPath>& paths);
 
-    /// Where new entities go: a world-space layer.
-    QString currentLayer() const { return m_currentLayer; }
-    void setCurrentLayer(const QString& layerId);
-    bool isLayerHidden(const QString& layerId) const { return m_hidden.contains(layerId); }
-    void setLayerHidden(const QString& layerId, bool hidden);
-    bool isLayerLocked(const QString& layerId) const { return m_locked.contains(layerId); }
-    void setLayerLocked(const QString& layerId, bool locked);
+    /// Where new entities go: an entity, or the top level (empty).
+    core::EntityPath currentParent() const { return m_currentParent; }
+    void setCurrentParent(const core::EntityPath& path);
+    /// Whether the editor hides or locks the entity, with its descendants; an entity is
+    /// known by its id, or by its path if it has none.
+    bool isHidden(const core::EntityPath& path) const;
+    void setHidden(const core::EntityPath& path, bool hidden);
+    bool isLocked(const core::EntityPath& path) const;
+    void setLocked(const core::EntityPath& path, bool locked);
+    /// Whether it, or one of its ancestors, is hidden or locked.
+    bool isHiddenOrLocked(const core::EntityPath& path) const;
+    /// Whether the entity is in screen space, which isn't drawn yet.
+    bool isInScreenSpace(const core::EntityPath& path) const;
 
     bool snapping() const { return m_snapping; }
     void setSnapping(bool snapping);
@@ -72,25 +79,33 @@ public:
 
     // --- edits, each one undo step ---
 
-    /// Whether new entities can go on the current layer: it must be shown and unlocked, or
-    /// they couldn't be seen or selected.
+    /// What the current parent offers new entities to measure against: in a tiled
+    /// container, they go on its tiles.
+    core::Frame currentFrame() const;
+    /// Whether new entities can go into the current parent: it must be in world space,
+    /// shown and unlocked, or they couldn't be seen or selected.
     bool canAddEntities() const;
-    /// Adds `entity` at the top level of the current layer, at `scenePosition`; selects it.
+    /// Adds `entity` as the current parent's last child, at `scenePosition`; selects it.
     /// Empty if canAddEntities() is false.
     core::EntityPath addEntity(core::Entity entity, QPointF scenePosition);
-    /// Adds what a preset creates, on the current layer around `scenePosition`, with fresh
-    /// ids; selects it. Empty, with `error` set when the preset can't be read, if nothing
-    /// was added.
+    /// Adds what a preset creates, into the current parent around `scenePosition`, with
+    /// fresh ids; selects it. Empty, with `error` set when the preset can't be read, if
+    /// nothing was added.
     QList<core::EntityPath> addPreset(const QString& presetId, QPointF scenePosition,
                                       QString* error = nullptr);
     void removeSelection();
-    /// Moves the selected entities in draw order among their siblings (on their own layer,
-    /// for top-level ones), keeping them selected. Nothing if none would move.
+    /// Moves the selected entities in draw order among their siblings, keeping them
+    /// selected. Nothing if none would move.
     void arrangeSelection(core::Arrange arrange);
-    /// Moves the selected entities by `delta`, in their parents' units.
-    void nudgeSelection(QPointF delta);
+    /// Moves the selected entities a step in `direction` (each axis -1, 0 or 1), in their
+    /// parents' units: a unit, or a grid cell when snapping, or ten with `large`. In a
+    /// tiled container they move from cell to cell instead, staying in the grid.
+    void nudgeSelection(QPoint direction, bool large = false);
 
     // --- the arrange commands, for the menus ---
+
+    /// How many steps a large nudge moves.
+    static constexpr int NUDGE_MULTIPLIER = 10;
 
     static constexpr core::Arrange ARRANGES[] = {core::Arrange::ToFront, core::Arrange::Forward,
                                                  core::Arrange::Backward, core::Arrange::ToBack};
@@ -108,11 +123,19 @@ public:
     /// nothing if they didn't change.
     void commitTransform(const core::EntityPath& path, double rotation, core::Point scale,
                          const QString& verb);
-    /// Pushes one command setting a nine-slice's size, as the scale handle leaves it;
-    /// nothing if it didn't change.
+    /// Pushes one command setting an entity's size, as the scale handle leaves it; nothing
+    /// if it didn't change.
     void commitSize(const core::EntityPath& path, QSizeF size);
+    /// Moves the entity at `from` to `to` (see core::MoveEntityCommand), keeping where it is
+    /// drawn; one undo step.
+    void moveEntity(const core::EntityPath& from, const core::EntityPath& to);
     /// Puts the rotate and scale handles on the one selected entity, or hides them.
     void updateHandles();
+    /// Shows the grids of the tiled containers that help now: the selected entities', their
+    /// parents', and the current parent's.
+    void updateGrids();
+    /// The containers whose grids are shown, in tree order.
+    QList<core::EntityPath> gridPaths() const { return m_gridPaths; }
     TransformHandle* rotateHandle() const { return m_rotateHandle; }
     TransformHandle* scaleHandle() const { return m_scaleHandle; }
     bool isDragging() const { return m_dragging; }
@@ -124,53 +147,61 @@ public:
         double drawScale = 1;
         bool flipX = false;  ///< An animation's own flips.
         bool flipY = false;
+        QString sheet;  ///< Where the atlas comes from.
+        int atlasIndex = -1;
     };
     SpriteVisual spriteVisual(const QString& sheet, const QString& path) const;
     /// The first frame of an animation.
     SpriteVisual animationVisual(const QString& sheet, const QString& name) const;
-    /// What a sprite, nine-slice or animation entity draws.
-    SpriteVisual visualOf(const core::Entity& entity) const;
-    /// A nine-slice's size: its `size`, or its sprite's natural size if it has none. Empty
-    /// for other entities, or when the sprite can't be found.
-    static QSizeF nineSliceSize(const core::Entity& entity, const SpriteVisual& visual);
-    QSizeF nineSliceSize(const core::Entity& entity) const
-    {
-        return nineSliceSize(entity, visualOf(entity));
-    }
+    /// What an image draws.
+    SpriteVisual visualOf(const core::Image& image) const;
+    /// The natural size and pivot of images, from the sheets: what core needs to place an
+    /// entity whose size or pivot is automatic.
+    core::ImageMetricsFn imageMetrics() const;
+    /// The atlas `visual` draws from, multiplied by `tint`'s color (its alpha is the
+    /// painter's to apply).
+    QPixmap tintedAtlas(const SpriteVisual& visual, const core::Color& tint) const;
     /// The color of the first declared class that has one, or `fallback`.
     QColor classColor(const QStringList& classes, const QColor& fallback) const;
     QSizeF designResolution() const;
 
 signals:
-    void currentLayerChanged(const QString& layerId);
-    /// Layers were hidden, shown, locked or unlocked.
-    void layerStateChanged();
-    /// The scene's layers or entities changed, and the items were rebuilt.
+    void currentParentChanged();
+    /// Entities were hidden, shown, locked or unlocked in the editor.
+    void entityStateChanged();
+    /// The scene's entities changed, and the items were rebuilt or updated.
     void contentChanged();
 
 private:
     void rebuild();
     void clearItems();
     void createHandles();
-    void addItems(const std::vector<core::Entity>& entities, core::EntityPath& path,
-                  QGraphicsItem* parent, bool locked);
+    /// Creates the items of `entities`, children of `parent` (null at the top level), or
+    /// updates them in place when `create` is false.
+    void placeItems(const std::vector<core::Entity>& entities, core::EntityPath& path,
+                    const core::Frame& frame, EntityItem* parent, const core::Color& tint,
+                    bool screen, bool blocked, bool create);
+    QString stateKey(const core::EntityPath& path) const;
     void onSheetChanged(const QString& alias);
 
     core::ProjectDocument& m_document;
     assets::SheetCache& m_sheets;
     QString m_sceneId;
     QHash<core::EntityPath, EntityItem*> m_items;
-    std::vector<QGraphicsItem*> m_layerItems;
     QStringList m_treeShape;  ///< Of the scene the items were built from.
-    QString m_currentLayer;
-    QSet<QString> m_hidden;
+    core::EntityPath m_currentParent;
+    QString m_currentParentId;  ///< Its id, if it has one, so it is found where it moves.
+    QSet<QString> m_hidden;     ///< By stateKey().
     QSet<QString> m_locked;
     bool m_snapping = false;
     double m_gridSize = 16;
     bool m_dragging = false;
     TransformHandle* m_rotateHandle = nullptr;
     TransformHandle* m_scaleHandle = nullptr;
+    TileGridOverlay* m_gridOverlay = nullptr;
+    QList<core::EntityPath> m_gridPaths;
     mutable QHash<QString, std::vector<QPixmap>> m_atlases;  ///< By sheet alias.
+    mutable QHash<QString, QPixmap> m_tintedAtlases;         ///< By sheet, atlas and color.
 };
 
 }  // namespace shoal::editor

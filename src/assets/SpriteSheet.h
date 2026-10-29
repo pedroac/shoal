@@ -100,4 +100,10 @@ struct NineSlicePlacement {
 NineSlicePlacement placeNineSlice(const Sprite& sprite, double drawScale, QSizeF size, bool flipX,
                                   bool flipY);
 
+/// Places `sprite` into `box`, in pivot space before flipping: as a nine-slice when `sliced`
+/// and it has insets, otherwise simply stretched. A box the size of the sprite's original
+/// image, at its pivot, covers what placeSprite() does.
+NineSlicePlacement placeInBox(const Sprite& sprite, double drawScale, const QRectF& box,
+                              bool sliced, bool flipX, bool flipY);
+
 }  // namespace shoal::assets

@@ -1,0 +1,98 @@
+{
+  "format": "shoal-scene",
+  "version": 3,
+  "size": [1920, 1080],
+  "entities": [
+    {
+      "id": "backdrop",
+      "parallax": [0.25, 0],
+      "fit": "crop",
+      "children": [
+        {
+          "id": "panel",
+          "transform": {
+            "pos": [960, 540]
+          },
+          "size": [800, 600],
+          "pivot": [0.5, 0.5],
+          "image": {
+            "sheet": "hero",
+            "sprite": "ui/panel.9.png",
+            "mode": "nineslice"
+          },
+          "tint": "#ffffffc0",
+          "clip": true,
+          "children": [
+            {
+              "id": "close",
+              "transform": {
+                "pos": [-16, 16]
+              },
+              "at": ["100%", "0%"],
+              "size": [48, 48],
+              "pivot": [1, 0],
+              "fill": "#c04040",
+              "tint_mode": "override"
+            },
+            {
+              "id": "slider_area",
+              "transform": {
+                "pos": [0, 40]
+              },
+              "at": ["50%", "50%"],
+              "shape": {
+                "polygon": [
+                  [-200, -20],
+                  [200, -20],
+                  [200, 20],
+                  [-200, 20]
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "overlay",
+      "space": "screen",
+      "area": "safe",
+      "tint": "#80c0ff",
+      "tint_mode": "inherit"
+    },
+    {
+      "id": "inventory",
+      "transform": {
+        "pos": [160, 160]
+      },
+      "size": [256, 128],
+      "fill": "#202830",
+      "container": {
+        "type": "tiled",
+        "tile_size": [64, 64],
+        "tile_pivot": [0.5, 1]
+      },
+      "children": [
+        {
+          "id": "slot_hero",
+          "at": ["1□", "0□"],
+          "image": {
+            "sheet": "hero",
+            "sprite": "hero/idle.png"
+          }
+        },
+        {
+          "id": "slot_bush",
+          "transform": {
+            "pos": [0, -8]
+          },
+          "at": ["3□", "1□"],
+          "image": {
+            "sheet": "hero",
+            "sprite": "props/bush.png"
+          }
+        }
+      ]
+    }
+  ]
+}

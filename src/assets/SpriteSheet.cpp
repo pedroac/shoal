@@ -195,18 +195,28 @@ SpritePlacement placeRegion(const Sprite& sprite, const QRectF& upright, const Q
 NineSlicePlacement placeNineSlice(const Sprite& sprite, double drawScale, QSizeF size, bool flipX,
                                   bool flipY)
 {
-    NineSlicePlacement placement;
     const QSizeF source(sprite.sourceSize);
     if (source.isEmpty() || size.isEmpty()) {
-        return placement;
+        return {};
     }
     const QRectF box(-sprite.pivot.x() * size.width() / source.width(),
                      -sprite.pivot.y() * size.height() / source.height(), size.width(),
                      size.height());
+    return placeInBox(sprite, drawScale, box, true, flipX, flipY);
+}
+
+NineSlicePlacement placeInBox(const Sprite& sprite, double drawScale, const QRectF& box,
+                              bool sliced, bool flipX, bool flipY)
+{
+    NineSlicePlacement placement;
+    const QSizeF source(sprite.sourceSize);
+    if (source.isEmpty() || box.isEmpty()) {
+        return placement;
+    }
     const QTransform mirror = QTransform::fromScale(flipX ? -1 : 1, flipY ? -1 : 1);
     placement.bounds = mirror.mapRect(box);
 
-    const QMargins slice = sprite.hasSlice ? sprite.slice : QMargins();
+    const QMargins slice = sliced && sprite.hasSlice ? sprite.slice : QMargins();
     const std::array<double, 4> sourceX{0.0, double(slice.left()), source.width() - slice.right(),
                                         source.width()};
     const std::array<double, 4> sourceY{0.0, double(slice.top()), source.height() - slice.bottom(),

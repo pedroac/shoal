@@ -33,16 +33,23 @@ Scene newScene(const Manifest& manifest)
 {
     Scene scene;
     scene.size = manifest.designResolution;
-    scene.layers.push_back({QStringLiteral("world"), Space::World, {1, 1}, std::nullopt, {}});
-    scene.layers.push_back({QStringLiteral("hud"), Space::Screen, {1, 1}, std::nullopt, {}});
 
     Entity camera;
     camera.id = QStringLiteral("camera");
-    camera.type = EntityType::Camera;
-    camera.layer = QStringLiteral("world");
     camera.classes = {QStringLiteral("main")};
     camera.transform.pos = {scene.size.width / 2.0, scene.size.height / 2.0};
-    scene.entities.push_back(std::move(camera));
+    camera.size = Extent::px({double(scene.size.width), double(scene.size.height)});
+    camera.pivot = Point{0.5, 0.5};
+    camera.extras.insert(QStringLiteral("view"), QJsonObject{});
+
+    Entity world;
+    world.id = QStringLiteral("world");
+    world.children.push_back(std::move(camera));
+    Entity hud;
+    hud.id = QStringLiteral("hud");
+    hud.space = Space::Screen;
+    scene.entities.push_back(std::move(world));
+    scene.entities.push_back(std::move(hud));
     return scene;
 }
 

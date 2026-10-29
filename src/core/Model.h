@@ -4,7 +4,6 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QMap>
-#include <QSizeF>
 #include <QString>
 #include <QStringList>
 #include <QStringView>
@@ -15,13 +14,18 @@
 /// The project model: plain values mirroring the source files described in docs/DESIGN.md.
 ///
 /// Every object keeps the keys this version of Shoal doesn't model in `extras`, so nothing a
-/// user or a later roadmap step writes is lost on save. Type-specific entity data (sprites,
-/// shapes, camera settings, layout) and modifier actions round-trip that way until the
-/// editor models them.
+/// user or a later roadmap step writes is lost on save. The entity parts the editor doesn't
+/// model yet (views, layouts, shapes, paths, text) and modifier actions round-trip that
+/// way until it does.
 namespace shoal::core {
 
-/// The version of every source file format this Shoal reads and writes.
+/// The versions of the source file formats this Shoal writes. It reads older ones too, and
+/// migrates them: scene format 1 had layers and entity types, and preset format 1 too, with
+/// a `tint` for its swatch; scene and preset format 2 placed entities by `align` and `cell`
+/// where format 3 has units.
 inline constexpr int FORMAT_VERSION = 1;
+inline constexpr int SCENE_FORMAT_VERSION = 3;
+inline constexpr int PRESET_FORMAT_VERSION = 3;
 
 struct Point {
     double x = 0;
@@ -35,22 +39,36 @@ struct Size {
     bool operator==(const Size&) const = default;
 };
 
+/// An entity's size, in pixels: zero on an axis makes its rect a point on that axis.
+struct SizeF {
+    double width = 0;
+    double height = 0;
+    bool operator==(const SizeF&) const = default;
+};
+
+/// A color with alpha, written `#rrggbb`, or `#rrggbbaa` when it isn't opaque.
+struct Color {
+    quint8 red = 255;
+    quint8 green = 255;
+    quint8 blue = 255;
+    quint8 alpha = 255;
+    bool operator==(const Color&) const = default;
+
+    /// Reads `#rrggbb` or `#rrggbbaa`, in either case; null for anything else.
+    static std::optional<Color> fromName(QStringView name);
+    /// `#rrggbb`, or `#rrggbbaa` when it isn't opaque, in lowercase.
+    QString name() const;
+    /// Channel by channel, as tints combine.
+    Color multiplied(const Color& other) const;
+};
+
 enum class Fit { Expand, Letterbox, Crop, Stretch };
 enum class ExportTarget { Raw, Json };
 enum class Space { World, Screen };
-enum class EntityType {
-    Empty,
-    Group,
-    Sprite,
-    Animation,
-    NineSlice,
-    Text,
-    Rect,
-    Mark,
-    Path,
-    Region,
-    Camera,
-};
+enum class Area { Viewport, Safe };
+enum class ImageMode { Stretch, NineSlice };
+enum class TintMode { Mix, Inherit, Override };
+enum class ContainerType { Tiled };
 enum class TransitionMode { Replace, Push, PushModifier, Pop };
 enum class Underlying { Paused, Running, Hidden };
 enum class RestoreMode { Commit, Restore };
@@ -157,15 +175,6 @@ struct Preset {
 
 // --- scenes/<id>/scene.json ---
 
-struct Layer {
-    QString id;
-    Space space = Space::World;
-    Point parallax{1, 1};
-    std::optional<Fit> fit;  ///< Overrides the scene's or the project's fit.
-    QJsonObject extras;
-    bool operator==(const Layer&) const = default;
-};
-
 /// The smallest scale the editor sets: a zero scale can't be undone by scaling.
 constexpr double MIN_SCALE = 1e-3;
 
@@ -180,32 +189,102 @@ struct Transform {
 };
 
 /// A sprat sprite, by the sheet's alias and the sprite's path (unique in a sheet, unlike
-/// its name). `sprite` and `nineslice` entities draw one.
-struct SpriteRef {
+/// its name), or a sprat animation, by name. It fills its entity's rect.
+struct Image {
     QString sheet;
-    QString path;
+    QString sprite;     ///< The sprite's path; empty for an animation.
+    QString animation;  ///< The animation's name; empty for a sprite.
+    ImageMode mode = ImageMode::Stretch;
     QJsonObject extras;
-    bool operator==(const SpriteRef&) const = default;
+    bool operator==(const Image&) const = default;
+
+    bool isAnimation() const { return !animation.isEmpty(); }
 };
 
-/// A sprat animation, by the sheet's alias and the animation's name.
-struct AnimationRef {
-    QString sheet;
-    QString name;
-    QJsonObject extras;
-    bool operator==(const AnimationRef&) const = default;
+/// A cell of a tiled container's grid: its column and row, counted from the top-left one.
+struct Cell {
+    int column = 0;
+    int row = 0;
+    bool operator==(const Cell&) const = default;
 };
 
+/// What a length on one axis counts: pixels, a percentage of the parent's rect on that
+/// axis, or its parent's tiles (`□`), when the parent is a tiled container.
+enum class Unit { Px, Percent, Cell };
+
+/// A length on one axis, in its unit. Written as a number for pixels, and as a string with
+/// its unit otherwise: `"50%"`, `"3□"`.
+struct Length {
+    double value = 0;
+    Unit unit = Unit::Px;
+    bool operator==(const Length&) const = default;
+
+    static Length px(double value) { return {value, Unit::Px}; }
+    /// `"50%"`, `"3□"` or `"12px"`, for the editor to show.
+    QString toString() const;
+};
+
+/// An entity's size, each side in its own unit: 0 or more pixels, a percentage of the
+/// parent's rect, or a number of its tiles.
+struct Extent {
+    Length width;
+    Length height;
+    bool operator==(const Extent&) const = default;
+
+    static Extent px(SizeF size) { return {Length::px(size.width), Length::px(size.height)}; }
+    bool isPx() const { return width.unit == Unit::Px && height.unit == Unit::Px; }
+};
+
+/// Where an entity's position is measured from, on each axis: the parent's origin (pixels,
+/// with a value of 0), a percentage of the parent's rect from its top-left corner, or a
+/// tile of a tiled parent, a whole number from 0, at the tile's pivot. Its `pos` adds an
+/// offset in pixels.
+struct Anchor {
+    Length x;
+    Length y;
+    bool operator==(const Anchor&) const = default;
+
+    bool isPx() const { return x.unit == Unit::Px && y.unit == Unit::Px; }
+    Length& axis(int index) { return index == 0 ? x : y; }
+    const Length& axis(int index) const { return index == 0 ? x : y; }
+};
+
+/// How an entity places its children. A tiled one lays a grid of tiles over its rect, as
+/// many as fit, and puts each child's origin on its cell's `tilePivot`.
+struct Container {
+    ContainerType type = ContainerType::Tiled;
+    SizeF tileSize{32, 32};     ///< Each side more than 0.
+    Point tilePivot{0.5, 0.5};  ///< The point of each tile, as fractions of it.
+    QJsonObject extras;
+    bool operator==(const Container&) const = default;
+};
+
+/// A node of a scene's tree: the same fields for every entity, and the parts it has, which
+/// say what it is. Parts the editor doesn't model yet (`view`, `layout`, `shape`, `path`,
+/// `text`) are kept in `extras`.
 struct Entity {
     QString id;  ///< Optional: only entities something refers to need one.
-    EntityType type = EntityType::Empty;
-    QString layer;  ///< Top-level entities only; children inherit their parent's layer.
     QStringList classes;
     bool active = true;
     bool visible = true;
-    std::optional<SpriteRef> sprite;
-    std::optional<AnimationRef> animation;
+    std::optional<Space> space;     ///< Set: it and its descendants are in that space.
+    std::optional<Point> parallax;  ///< Set: it and its descendants scroll by it.
+    std::optional<Fit> fit;         ///< Overrides the viewport fit, with `space`.
     Transform transform;
+    /// Its rect's size; null for automatic: an image's natural size, or no rect.
+    std::optional<Extent> size;
+    /// The fraction of its rect on its origin; null for automatic (see entityPivot()).
+    std::optional<Point> pivot;
+    /// Where `transform.pos` is measured from in the parent (`at` in the file).
+    Anchor at;
+    Area area = Area::Viewport;
+    std::optional<Image> image;
+    std::optional<Color> fill;
+    Color tint;
+    TintMode tintMode = TintMode::Mix;
+    bool clip = false;
+    /// How it places its children; null places them freely.
+    std::optional<Container> container;
     QJsonObject props;  ///< Kept as written until typed props are modeled.
     QJsonObject extras;
     std::vector<Entity> children;
@@ -235,7 +314,6 @@ struct Modifier {
 struct Scene {
     Size size;
     std::optional<Fit> fit;  ///< Overrides the project's fit.
-    std::vector<Layer> layers;
     std::vector<Entity> entities;
     QMap<QString, Modifier> modifiers;  ///< Modifier id (its file name) -> modifier.
     QJsonObject extras;
@@ -253,19 +331,13 @@ struct Project {
     bool operator==(const Project&) const = default;
 };
 
-/// Whether `id` is a valid id for a scene, modifier, preset, layer, entity, class or
-/// transition: `[A-Za-z_][A-Za-z0-9_-]*`.
+/// Whether `id` is a valid id for a scene, modifier, preset, entity, class or transition:
+/// `[A-Za-z_][A-Za-z0-9_-]*`.
 bool isValidId(QStringView id);
 
 /// Ids are compared without case where they name files, so a project stays valid on
 /// case-insensitive file systems.
 bool idsCollideAsFileNames(QStringView a, QStringView b);
-
-/// A box's size (`nineslice`, `rect`, `text`): `"size": [w, h]`, kept in the entity's
-/// extras until boxes are modeled. Null when it has none, or one that isn't two positive
-/// numbers.
-std::optional<QSizeF> entitySize(const Entity& entity);
-void setEntitySize(Entity& entity, QSizeF size);
 
 // --- enum names, as written in the files ---
 
@@ -278,7 +350,10 @@ struct EnumName {
 std::span<const EnumName<Fit>> enumNames(Fit);
 std::span<const EnumName<ExportTarget>> enumNames(ExportTarget);
 std::span<const EnumName<Space>> enumNames(Space);
-std::span<const EnumName<EntityType>> enumNames(EntityType);
+std::span<const EnumName<Area>> enumNames(Area);
+std::span<const EnumName<ImageMode>> enumNames(ImageMode);
+std::span<const EnumName<TintMode>> enumNames(TintMode);
+std::span<const EnumName<ContainerType>> enumNames(ContainerType);
 std::span<const EnumName<TransitionMode>> enumNames(TransitionMode);
 std::span<const EnumName<Underlying>> enumNames(Underlying);
 std::span<const EnumName<RestoreMode>> enumNames(RestoreMode);

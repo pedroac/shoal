@@ -3,8 +3,11 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QLocale>
+#include <QRegularExpression>
 #include <cmath>
 #include <limits>
+
+#include "core/JsonWriter.h"
 
 namespace shoal::core {
 
@@ -220,6 +223,114 @@ Point ObjectReader::point(const QString& key, Point fallback)
     return {array[0].toDouble(), array[1].toDouble()};
 }
 
+Cell ObjectReader::cell(const QString& key, Cell fallback)
+{
+    if (!has(key)) {
+        return fallback;
+    }
+    const QJsonValue value = take(key);
+    const QJsonArray array = value.toArray();
+    constexpr double MAX_INDEX = 1 << 24;  // sprat's coordinate limit
+    const auto isIndex = [&](const QJsonValue& index) {
+        const double number = index.toDouble();
+        return index.isDouble() && number == std::floor(number) && number >= 0 &&
+               number <= MAX_INDEX;
+    };
+    if (!value.isArray() || array.size() != 2 || !isIndex(array[0]) || !isIndex(array[1])) {
+        fail(key, QStringLiteral("[column, row], whole numbers from 0 to 16777216"), value);
+    }
+    return {array[0].toInt(), array[1].toInt()};
+}
+
+std::optional<Point> ObjectReader::optionalPoint(const QString& key)
+{
+    if (!has(key)) {
+        return std::nullopt;
+    }
+    return point(key, {});
+}
+
+std::optional<Extent> ObjectReader::optionalExtent(const QString& key)
+{
+    if (!has(key)) {
+        return std::nullopt;
+    }
+    const QJsonValue value = take(key);
+    const QJsonArray array = value.toArray();
+    std::optional<Length> sides[2];
+    if (value.isArray() && array.size() == 2) {
+        for (int i = 0; i < 2; ++i) {
+            sides[i] = parseLength(array[i]);
+            if (sides[i] && sides[i]->value < 0) {
+                sides[i].reset();
+            }
+        }
+    }
+    if (!sides[0] || !sides[1]) {
+        fail(key,
+             QStringLiteral("[width, height], each 0 or more pixels, a percentage such as "
+                            "\"50%\" or a number of tiles such as \"2□\""),
+             value);
+    }
+    return Extent{*sides[0], *sides[1]};
+}
+
+Anchor ObjectReader::anchor(const QString& key)
+{
+    if (!has(key)) {
+        return {};
+    }
+    const QJsonValue value = take(key);
+    const QJsonArray array = value.toArray();
+    constexpr double MAX_INDEX = 1 << 24;  // sprat's coordinate limit
+    const auto isAxis = [&](const std::optional<Length>& length) {
+        if (!length) {
+            return false;
+        }
+        switch (length->unit) {
+            case Unit::Px:
+                return length->value == 0;
+            case Unit::Percent:
+                return true;
+            case Unit::Cell:
+                return length->value == std::floor(length->value) && length->value >= 0 &&
+                       length->value <= MAX_INDEX;
+        }
+        return false;
+    };
+    std::optional<Length> axes[2];
+    if (value.isArray() && array.size() == 2) {
+        axes[0] = parseLength(array[0]);
+        axes[1] = parseLength(array[1]);
+    }
+    if (!isAxis(axes[0]) || !isAxis(axes[1])) {
+        fail(key,
+             QStringLiteral("[x, y], each 0, a percentage such as \"50%\" or a tile such as "
+                            "\"3□\", a whole number from 0"),
+             value);
+    }
+    return Anchor{*axes[0], *axes[1]};
+}
+
+std::optional<Color> ObjectReader::optionalColor(const QString& key)
+{
+    if (!has(key)) {
+        return std::nullopt;
+    }
+    const QJsonValue value = take(key);
+    const std::optional<Color> color =
+        value.isString() ? Color::fromName(value.toString()) : std::nullopt;
+    if (!color) {
+        fail(key, QStringLiteral("a color such as \"#e0a030\" or \"#e0a03080\""), value);
+    }
+    return color;
+}
+
+Color ObjectReader::color(const QString& key, Color fallback)
+{
+    return optionalColor(key).value_or(fallback);
+}
+
 Size ObjectReader::size(const QString& key)
 {
     if (!has(key)) {
@@ -325,7 +436,38 @@ QJsonObject ObjectReader::extras() const
     return rest;
 }
 
-void readHeader(ObjectReader& reader, const QString& format)
+std::optional<Length> parseLength(const QJsonValue& value)
+{
+    if (value.isDouble()) {
+        return Length::px(value.toDouble());
+    }
+    if (!value.isString()) {
+        return std::nullopt;
+    }
+    static const QRegularExpression LENGTH(
+        QStringLiteral("^(-?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?)(%|□)$"));
+    const QRegularExpressionMatch match = LENGTH.match(value.toString());
+    if (!match.hasMatch()) {
+        return std::nullopt;
+    }
+    bool ok = false;
+    const double number = match.captured(1).toDouble(&ok);
+    if (!ok || !std::isfinite(number)) {
+        return std::nullopt;
+    }
+    return Length{number, match.captured(2) == u"%" ? Unit::Percent : Unit::Cell};
+}
+
+QJsonValue lengthToJson(const Length& length)
+{
+    if (length.unit == Unit::Px) {
+        return length.value;
+    }
+    const QString number = QString::fromLatin1(jsonNumber(length.value));
+    return number + (length.unit == Unit::Percent ? QChar(u'%') : QChar(0x25A1));
+}
+
+int readHeader(ObjectReader& reader, const QString& format, int current)
 {
     const QString found = reader.string(QStringLiteral("format"));
     if (found != format) {
@@ -336,17 +478,17 @@ void readHeader(ObjectReader& reader, const QString& format)
         reader.failMessage(versionKey, QStringLiteral("missing"));
     }
     const int version = reader.integer(versionKey, 0, 0, std::numeric_limits<int>::max());
-    if (version > FORMAT_VERSION) {
+    if (version > current) {
         reader.failMessage(versionKey,
                            QStringLiteral("%1 is newer than this Shoal reads (%2); update Shoal "
                                           "to open this project")
                                .arg(version)
-                               .arg(FORMAT_VERSION));
+                               .arg(current));
     }
     if (version < 1) {
-        reader.fail(versionKey, QString::number(FORMAT_VERSION), reader.value(versionKey));
+        reader.fail(versionKey, QString::number(current), reader.value(versionKey));
     }
-    // Versions older than FORMAT_VERSION are upgraded here once a second version exists.
+    return version;
 }
 
 }  // namespace shoal::core

@@ -1,5 +1,6 @@
 #include <QAction>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCompleter>
 #include <QDoubleSpinBox>
 #include <QDropEvent>
@@ -8,11 +9,13 @@
 #include <QListWidget>
 #include <QMimeData>
 #include <QScrollBar>
+#include <QStandardItemModel>
 #include <QStatusBar>
 #include <QStringListModel>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QtMath>
 #include <cmath>
@@ -20,13 +23,16 @@
 #include "Support.h"
 #include "assets/SpriteSheet.h"
 #include "core/ProjectDocument.h"
+#include "core/SceneCommands.h"
 #include "editor/ClassesPanel.h"
 #include "editor/EntityItem.h"
 #include "editor/FlowScene.h"
 #include "editor/InspectorPanel.h"
 #include "editor/MainWindow.h"
+#include "editor/PointGrid.h"
 #include "editor/PresetsPanel.h"
 #include "editor/SceneCanvas.h"
+#include "editor/SceneSettingsPanel.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
 #include "editor/SheetBrowserPanel.h"
@@ -38,6 +44,13 @@ using namespace shoal::editor;
 namespace {
 
 const QString LEVEL_1 = QStringLiteral("level_1");
+// In level_1: bg {0} holds the bush; world {1} holds the camera, the player, the altar group
+// (two marks), the secret door, the room's bounds and the torch; hud {2} is screen space.
+const EntityPath BUSH{0, 0};
+const EntityPath WORLD{1};
+const EntityPath PLAYER{1, 1};
+const EntityPath ALTAR{1, 2};
+const EntityPath DOOR{1, 3};
 const SheetItem IDLE_SPRITE{SheetItem::Kind::Sprite, QStringLiteral("hero"),
                             QStringLiteral("hero/idle.png")};
 const SheetItem IDLE_ANIMATION{SheetItem::Kind::Animation, QStringLiteral("hero"),
@@ -55,6 +68,27 @@ void type(QLineEdit* field, const QString& text)
         QTest::keyClicks(field, text);
     }
     QTest::keyClick(field, Qt::Key_Return);
+}
+
+/// Picks `unit` in a unit box, as a user would.
+void choose(QComboBox* box, Unit unit)
+{
+    const int index = box->findData(int(unit));
+    QVERIFY(index >= 0);
+    box->setCurrentIndex(index);
+    emit box->activated(index);
+}
+
+Unit unitOf(const QComboBox* box)
+{
+    return Unit(box->currentData().toInt());
+}
+
+/// Whether a unit box lets `unit` be picked.
+bool offers(const QComboBox* box, Unit unit)
+{
+    const auto* model = qobject_cast<const QStandardItemModel*>(box->model());
+    return model->item(box->findData(int(unit)))->isEnabled();
 }
 
 QByteArray readFile(const QString& path)
@@ -157,32 +191,35 @@ private slots:
         QVERIFY(f.window.flowScene()->renameScene(LEVEL_1, QStringLiteral("forest")));
         QCOMPARE(f.window.tabs()->tabText(1), QStringLiteral("forest"));
         QCOMPARE(f.canvas().sceneId(), QStringLiteral("forest"));
-        QVERIFY(f.canvas().item({1}));
+        QVERIFY(f.canvas().item(PLAYER));
 
         f.window.flowScene()->select({QStringLiteral("forest")});
         f.window.flowScene()->removeSelection();
         QCOMPARE(f.window.tabs()->count(), 1);
     }
 
-    void drawsWorldEntitiesWithTheirSprites()
+    void drawsEntitiesWithTheirSprites()
     {
         Fixture f;
         const Scene& scene = f.scene();
-        // Every entity on a world layer has an item, children under their parent's.
+        // Every entity has an item, children under their parent's.
         forEachEntity(scene, [&](const Entity&, const EntityPath& path) {
             QVERIFY2(f.canvas().item(path), qPrintable(QString::number(path.first())));
         });
-        QCOMPARE(f.canvas().item({3, 1})->parentItem(), f.canvas().item({3}));
-        QCOMPARE(f.canvas().item({3, 1})->scenePos(), QPointF(2400, 680));
+        QCOMPARE(f.canvas().item({1, 2, 1})->parentItem(), f.canvas().item(ALTAR));
+        QCOMPARE(f.canvas().item({1, 2, 1})->scenePos(), QPointF(2400, 680));
+        // Screen space is laid out in a later version.
+        QVERIFY(!f.canvas().item({2})->isVisible());
+        QVERIFY(f.canvas().isInScreenSpace({2}));
 
         // The door is drawn upright from its rotated atlas region, as sprat-lib places it.
         const auto sheet = f.window.sheets().sheet(QStringLiteral("hero"));
         QVERIFY(sheet);
         const auto* door = sheet->sprite(QStringLiteral("props/door.png"));
-        QCOMPARE(f.canvas().item({4})->visualRect(),
+        QCOMPARE(f.canvas().item(DOOR)->visualRect(),
                  shoal::assets::placeSprite(*door, 1, false, false).bounds);
         // The bush, scaled by 2 and turned by -12.5 degrees: its local x axis.
-        const QPointF axis = f.canvas().item({2})->transform().map(QPointF(1, 0));
+        const QPointF axis = f.canvas().item(BUSH)->transform().map(QPointF(1, 0));
         QVERIFY(qFuzzyCompare(axis.x(), 2 * std::cos(qDegreesToRadians(-12.5))));
         QVERIFY(qFuzzyCompare(axis.y(), 2 * std::sin(qDegreesToRadians(-12.5))));
     }
@@ -191,11 +228,10 @@ private slots:
     {
         Fixture f;
         Entity ghost;
-        ghost.type = EntityType::Sprite;
-        ghost.sprite = SpriteRef{QStringLiteral("hero"), QStringLiteral("nope.png"), {}};
+        ghost.image = Image{QStringLiteral("hero"), QStringLiteral("nope.png"), {}, {}, {}};
         const EntityPath path = f.canvas().addEntity(ghost, QPointF(100, 100));
+        QCOMPARE(path, (EntityPath{3}));  // at the top level, the current parent
         QCOMPARE(f.canvas().item(path)->visualRect(), QRectF(-16, -16, 32, 32));
-        QCOMPARE(f.scene().entities.back().layer, QStringLiteral("world"));  // the current one
     }
 
     void aDragMovesTheSelectionInOneStep()
@@ -205,9 +241,9 @@ private slots:
         f.drag(player, player + QPoint(40, 10));
         QCOMPARE(f.document().commands().count(), 1);
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Move player"));
-        QCOMPARE(entityAt(f.scene(), {1})->transform.pos, (Point{360, 650}));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.pos, (Point{360, 650}));
         f.document().commands().undo();
-        QCOMPARE(f.canvas().item({1})->pos(), QPointF(320, 640));
+        QCOMPARE(f.canvas().item(PLAYER)->pos(), QPointF(320, 640));
     }
 
     void aClickNeverMovesAnEntity()
@@ -226,7 +262,7 @@ private slots:
         QApplication::processEvents();
         QTest::mouseRelease(f.view->viewport(), Qt::LeftButton, {}, player);
         QCOMPARE(f.document().commands().count(), 0);
-        QCOMPARE(f.canvas().item({1})->pos(), QPointF(320, 640));
+        QCOMPARE(f.canvas().item(PLAYER)->pos(), QPointF(320, 640));
     }
 
     void snapsToTheGrid()
@@ -236,16 +272,16 @@ private slots:
         const QPoint player = f.at(QPointF(320, 630));
         f.drag(player, player + QPoint(37, 13));
         // 357, 653 snaps to the 16-unit grid.
-        QCOMPARE(entityAt(f.scene(), {1})->transform.pos, (Point{352, 656}));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.pos, (Point{352, 656}));
     }
 
     void nudgesWithTheArrowKeys()
     {
         Fixture f;
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         QTest::keyClick(f.view, Qt::Key_Right);
         QTest::keyClick(f.view, Qt::Key_Up, Qt::ShiftModifier);
-        QCOMPARE(entityAt(f.scene(), {1})->transform.pos, (Point{321, 630}));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.pos, (Point{321, 630}));
         QCOMPARE(f.document().commands().count(), 2);
     }
 
@@ -257,9 +293,9 @@ private slots:
         QVERIFY(rotate && scale);
         QVERIFY(!rotate->isVisible() && !scale->isVisible());
 
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         QVERIFY(rotate->isVisible() && scale->isVisible());
-        const EntityItem* player = f.canvas().item({1});
+        const EntityItem* player = f.canvas().item(PLAYER);
         const QRectF rect = player->visualRect();
         QCOMPARE(rotate->scenePos(), player->mapToScene(QPointF(rect.center().x(), rect.top())));
         QCOMPARE(scale->scenePos(), player->mapToScene(rect.bottomRight()));
@@ -270,7 +306,7 @@ private slots:
         f.drag(at, at + QPoint(40, 10));
         QCOMPARE(scale->scenePos(), before + QPointF(40, 10));
 
-        f.canvas().select({{1}, {2}});
+        f.canvas().select({PLAYER, ALTAR});
         QVERIFY(!rotate->isVisible() && !scale->isVisible());
         f.canvas().select({});
         QVERIFY(!rotate->isVisible());
@@ -279,8 +315,8 @@ private slots:
     void theRotateHandleTurnsTheEntityInOneStep()
     {
         Fixture f;
-        f.canvas().select({{1}});
-        const QPointF origin = f.canvas().item({1})->scenePos();
+        f.canvas().select({PLAYER});
+        const QPointF origin = f.canvas().item(PLAYER)->scenePos();
         // The handle's knob sits above its position, at a fixed distance on screen.
         const QPoint knob = f.at(f.canvas().rotateHandle()->scenePos()) - QPoint(0, 24);
         // A quarter turn clockwise (y points down) about the origin, Shift snapping it.
@@ -293,23 +329,23 @@ private slots:
 
         QCOMPARE(f.document().commands().count(), 1);
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Rotate player"));
-        QCOMPARE(entityAt(f.scene(), {1})->transform.rot, 90.0);
-        QCOMPARE(entityAt(f.scene(), {1})->transform.pos, (Point{320, 640}));  // not moved
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.rot, 90.0);
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.pos, (Point{320, 640}));  // not moved
         f.document().commands().undo();
-        QCOMPARE(entityAt(f.scene(), {1})->transform.rot, 0.0);
-        QCOMPARE(f.canvas().item({1})->transform(), QTransform());
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.rot, 0.0);
+        QCOMPARE(f.canvas().item(PLAYER)->transform(), QTransform());
     }
 
     void theScaleHandleScalesTheEntity()
     {
         Fixture f;
-        f.canvas().select({{1}});
-        const QPointF origin = f.canvas().item({1})->scenePos();
+        f.canvas().select({PLAYER});
+        const QPointF origin = f.canvas().item(PLAYER)->scenePos();
         const QPointF corner = f.canvas().scaleHandle()->scenePos();
         f.drag(f.at(corner), f.at(origin + 2 * (corner - origin)));
 
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Scale player"));
-        const Point scale = entityAt(f.scene(), {1})->transform.scale;
+        const Point scale = entityAt(f.scene(), PLAYER)->transform.scale;
         QVERIFY2(std::abs(scale.x - 2) < 0.05 && std::abs(scale.y - 2) < 0.05,
                  qPrintable(QStringLiteral("%1, %2").arg(scale.x).arg(scale.y)));
         // The handle stays on the outline, which has grown.
@@ -321,62 +357,72 @@ private slots:
     void nineSlicesResizeInsteadOfScaling()
     {
         Fixture f;
-        // A sprite with insets is placed as a nine-slice, at its own size.
+        // A sprite with insets is placed as a nine-slice, its natural size set.
         const SheetItem panelItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
                                   QStringLiteral("ui/panel.9.png")};
         QVERIFY(f.dropOnView(panelItem, f.at(QPointF(320, 600))));
         const EntityPath path{int(f.scene().entities.size()) - 1};
         const Entity* panel = entityAt(f.scene(), path);
-        QCOMPARE(panel->type, EntityType::NineSlice);
-        QCOMPARE(entitySize(*panel), QSizeF(12, 12));
+        QCOMPARE(panel->image->mode, ImageMode::NineSlice);
+        QCOMPARE(panel->size, std::optional(Extent::px({12, 12})));
+        QVERIFY(!panel->pivot);  // its sprite's: its top-left
         EntityItem* item = f.canvas().item(path);
-        QCOMPARE(item->visualRect(), QRectF(0, 0, 12, 12));  // its pivot is its top-left
+        QCOMPARE(item->visualRect(), QRectF(0, 0, 12, 12));
 
         // The scale handle resizes it on each axis, and leaves its scale alone.
         const QPointF origin = item->scenePos();
         const QPointF corner = f.canvas().scaleHandle()->scenePos();
         f.drag(f.at(corner), f.at(origin + QPointF(60, 24)));
-        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Resize nineslice"));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Resize nine-slice"));
         panel = entityAt(f.scene(), path);
-        const QSizeF size = *entitySize(*panel);
-        QVERIFY2(std::abs(size.width() - 60) <= 1 && std::abs(size.height() - 24) <= 1,
-                 qPrintable(QStringLiteral("%1 x %2").arg(size.width()).arg(size.height())));
+        QVERIFY(panel->size->isPx());
+        const SizeF size{panel->size->width.value, panel->size->height.value};
+        QVERIFY2(std::abs(size.width - 60) <= 1 && std::abs(size.height - 24) <= 1,
+                 qPrintable(QStringLiteral("%1 x %2").arg(size.width).arg(size.height)));
         QCOMPARE(panel->transform.scale, (Point{1, 1}));
-        QCOMPARE(f.canvas().item(path)->visualRect(), QRectF(QPointF(), size));
+        QCOMPARE(f.canvas().item(path)->visualRect(), QRectF(0, 0, size.width, size.height));
 
         // The inspector shows its size instead of its scale.
         InspectorPanel* inspector = f.window.inspector();
         QVERIFY(inspector->showsSize());
+        QVERIFY(inspector->sizeBox()->isChecked());
         QVERIFY(!inspector->showsScale());
-        QCOMPARE(inspector->widthBox()->value(), size.width());
+        QCOMPARE(inspector->widthBox()->value(), size.width);
         inspector->widthBox()->setFocus();
         inspector->widthBox()->selectAll();
         QTest::keyClicks(inspector->widthBox(), QStringLiteral("100"));
         QTest::keyClick(inspector->widthBox(), Qt::Key_Return);
-        QCOMPARE(entitySize(*entityAt(f.scene(), path)), QSizeF(100, size.height()));
+        QCOMPARE(entityAt(f.scene(), path)->size, std::optional(Extent::px({100, size.height})));
         f.document().commands().undo();
-        QCOMPARE(inspector->widthBox()->value(), size.width());
+        QCOMPARE(inspector->widthBox()->value(), size.width);
 
-        // A sprite shows its scale.
-        f.canvas().select({{1}});
+        // A sprite sized by its sprite shows its scale, and its size can't be typed.
+        f.canvas().select({PLAYER});
         QVERIFY(inspector->showsScale());
-        QVERIFY(!inspector->showsSize());
+        QVERIFY(!inspector->sizeBox()->isChecked());
+        QVERIFY(!inspector->widthBox()->isEnabled());
+        QCOMPARE(inspector->widthBox()->value(), 16.0);  // the idle sprite's original image
+        // Its scale handle scales it.
+        const QPointF playerCorner = f.canvas().scaleHandle()->scenePos();
+        const QPointF playerOrigin = f.canvas().item(PLAYER)->scenePos();
+        f.drag(f.at(playerCorner), f.at(playerOrigin + 2 * (playerCorner - playerOrigin)));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Scale player"));
     }
 
     void aClickOnAHandleChangesNothing()
     {
         Fixture f;
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         const QPoint corner = f.at(f.canvas().scaleHandle()->scenePos());
         QTest::mouseClick(f.view->viewport(), Qt::LeftButton, {}, corner);
         QCOMPARE(f.document().commands().count(), 0);
-        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{{1}});
+        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{PLAYER});
     }
 
     void deletesTheSelection()
     {
         Fixture f;
-        f.canvas().select({{1}, {3, 0}});
+        f.canvas().select({PLAYER, {1, 2, 0}});
         auto* remove = f.window.findChild<QAction*>(QStringLiteral("deleteAction"));
         QVERIFY(remove->isEnabled());
         remove->trigger();
@@ -386,34 +432,71 @@ private slots:
         QCOMPARE(f.document().commands().count(), 1);
     }
 
-    void hiddenAndLockedLayersAreLeftAlone()
+    void hiddenAndLockedEntitiesAreLeftAlone()
     {
         Fixture f;
-        f.canvas().setLayerHidden(QStringLiteral("bg"), true);
-        QVERIFY(!f.canvas().item({2})->isVisible());
-        f.canvas().setLayerLocked(QStringLiteral("world"), true);
-        f.canvas().select({{1}});
+        f.canvas().setHidden({0}, true);
+        QVERIFY(f.canvas().isHidden({0}));
+        QVERIFY(!f.canvas().item(BUSH)->isVisible());  // with its parent
+        f.canvas().setLocked(WORLD, true);
+        f.canvas().select({PLAYER});
         QVERIFY(f.canvas().selectedPaths().isEmpty());
+        QVERIFY(f.canvas().isHiddenOrLocked(PLAYER));
         QVERIFY(f.document().commands().isClean());  // editor state, not the project's
+
+        // Known by id, so the state follows the entity when it moves.
+        f.canvas().setLocked(WORLD, false);
+        f.canvas().setLocked(ALTAR, true);
+        QVERIFY(f.window.sceneTreePanel()->dropEntity(ALTAR, nullptr, SceneTreePanel::Drop::On));
+        QVERIFY(f.canvas().isLocked({3}));
+        QVERIFY(!f.canvas().isLocked(ALTAR));  // the secret door, there now
     }
 
-    void theTreeListsLayersAndFollowsTheSelection()
+    void theTreeListsEntitiesAndFollowsTheSelection()
     {
         Fixture f;
         SceneTreePanel* panel = f.window.sceneTreePanel();
         QCOMPARE(panel->canvas(), &f.canvas());
-        QCOMPARE(panel->tree()->topLevelItemCount(), 3);  // bg, world, hud
-        QTreeWidgetItem* world = panel->layerRow(QStringLiteral("world"));
-        QVERIFY(world);
-        QCOMPARE(world->font(0).bold(), true);  // the current layer
-        QVERIFY(panel->entityRow({3, 1}));
-        QCOMPARE(panel->entityRow({3, 1})->parent(), panel->entityRow({3}));
+        // Under the top level, the scene: bg, world, hud.
+        QCOMPARE(panel->tree()->topLevelItemCount(), 1);
+        QTreeWidgetItem* root = panel->topLevelRow();
+        QCOMPARE(root, panel->tree()->topLevelItem(0));
+        QCOMPARE(root->text(0), LEVEL_1);
+        QCOMPARE(root->childCount(), 3);
+        QCOMPARE(root->child(1)->text(0), QStringLiteral("world"));
+        QCOMPARE(panel->entityRow({1})->parent(), root);
+        QVERIFY(panel->entityRow({1, 2, 1}));
+        QCOMPARE(panel->entityRow({1, 2, 1})->parent(), panel->entityRow(ALTAR));
+        QCOMPARE(panel->entityRow(BUSH)->text(0), QStringLiteral("‹sprite›"));
 
-        f.canvas().select({{1}});
-        QVERIFY(panel->entityRow({1})->isSelected());
+        // The current parent is in bold: the top level until another is chosen.
+        QVERIFY(panel->topLevelRow()->font(0).bold());
+        QVERIFY(!panel->entityRow(WORLD)->font(0).bold());
+        f.canvas().setCurrentParent(WORLD);
+        QVERIFY(panel->entityRow(WORLD)->font(0).bold());
+        QVERIFY(!panel->topLevelRow()->font(0).bold());
+        // It can't be dragged, hidden or locked.
+        QVERIFY(!(panel->topLevelRow()->flags() & Qt::ItemIsDragEnabled));
+        QVERIFY(!panel->topLevelRow()->data(1, Qt::CheckStateRole).isValid());
+
+        // Its check boxes hide and lock in the editor, once the row's call returns.
+        panel->entityRow({0})->setCheckState(1, Qt::Unchecked);
+        QTRY_VERIFY(f.canvas().isHidden({0}));
+        panel->entityRow(PLAYER)->setCheckState(2, Qt::Checked);
+        QTRY_VERIFY(f.canvas().isLocked(PLAYER));
+        QVERIFY(panel->entityRow(PLAYER)->checkState(2) == Qt::Checked);
+
+        // With nothing selected the top level is; choosing it clears the selection.
+        QVERIFY(panel->topLevelRow()->isSelected());
+        f.canvas().select({ALTAR});
+        QVERIFY(panel->entityRow(ALTAR)->isSelected());
+        QVERIFY(!panel->topLevelRow()->isSelected());
         panel->tree()->clearSelection();
-        panel->entityRow({4})->setSelected(true);
-        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{{4}});
+        panel->entityRow(DOOR)->setSelected(true);
+        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{DOOR});
+        panel->tree()->setCurrentItem(panel->topLevelRow());
+        QVERIFY(f.canvas().selectedPaths().isEmpty());
+        QVERIFY(panel->topLevelRow()->isSelected());
 
         // The flow tab has no scene to show.
         f.window.tabs()->setCurrentIndex(0);
@@ -425,51 +508,76 @@ private slots:
     {
         Fixture f;
         SceneTreePanel* panel = f.window.sceneTreePanel();
-        // The player into the altar group, as its last child.
-        QVERIFY(panel->dropEntity({1}, panel->entityRow({3}), SceneTreePanel::Drop::On));
+        // The player into the altar group, as its last child: where it is drawn stays.
+        QVERIFY(panel->dropEntity(PLAYER, panel->entityRow(ALTAR), SceneTreePanel::Drop::On));
         const EntityPath moved = findEntity(f.scene(), u"player");
-        QCOMPARE(moved, (EntityPath{2, 2}));
+        QCOMPARE(moved, (EntityPath{1, 1, 2}));
+        QCOMPARE(entityAt(f.scene(), moved)->transform.pos, (Point{-2080, 40}));
+        QCOMPARE(f.canvas().item(moved)->scenePos(), QPointF(320, 640));
         QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{moved});
         QCOMPARE(f.document().commands().count(), 1);
 
-        // Onto the bg layer: top-level again, drawn in front of what bg has.
-        QVERIFY(panel->dropEntity(moved, panel->layerRow(QStringLiteral("bg")),
-                                  SceneTreePanel::Drop::On));
-        const EntityPath back = findEntity(f.scene(), u"player");
-        QCOMPARE(back, (EntityPath{2}));
-        QCOMPARE(entityAt(f.scene(), back)->layer, QStringLiteral("bg"));
-        QCOMPARE(f.document().commands().count(), 2);
+        // Below the bush, in bg.
+        QVERIFY(panel->dropEntity(moved, panel->entityRow(BUSH), SceneTreePanel::Drop::Below));
+        QCOMPARE(findEntity(f.scene(), u"player"), (EntityPath{0, 1}));
+        // On empty space: in front of everything, at the top level.
+        QVERIFY(panel->dropEntity({0, 1}, nullptr, SceneTreePanel::Drop::On));
+        QCOMPARE(findEntity(f.scene(), u"player"), (EntityPath{3}));
+        QCOMPARE(entityAt(f.scene(), {3})->transform.pos, (Point{320, 640}));
+        QCOMPARE(f.document().commands().count(), 3);
         f.document().commands().undo();
-        QCOMPARE(findEntity(f.scene(), u"player"), (EntityPath{2, 2}));
+        QCOMPARE(findEntity(f.scene(), u"player"), (EntityPath{0, 1}));
+        // On the top level's row, the same; nothing goes beside it.
+        QVERIFY(panel->dropEntity({0, 1}, panel->topLevelRow(), SceneTreePanel::Drop::On));
+        QCOMPARE(findEntity(f.scene(), u"player"), (EntityPath{3}));
+        QVERIFY(!panel->dropEntity({3}, panel->topLevelRow(), SceneTreePanel::Drop::Above));
 
-        // Not into itself.
-        QVERIFY(!panel->dropEntity({2}, panel->entityRow({2, 0}), SceneTreePanel::Drop::On));
+        // Not into itself, nor where it already is.
+        QVERIFY(!panel->dropEntity({1, 1}, panel->entityRow({1, 1, 0}), SceneTreePanel::Drop::On));
+        QVERIFY(!panel->dropEntity(BUSH, panel->entityRow(BUSH), SceneTreePanel::Drop::Above));
     }
 
-    void editsLayersFromThePanel()
+    void newEntitiesGoIntoTheCurrentParent()
     {
         Fixture f;
         SceneTreePanel* panel = f.window.sceneTreePanel();
-        panel->addLayer();  // in front of world, the current layer
-        QCOMPARE(f.scene().layers[2].id, QStringLiteral("layer"));
-        QCOMPARE(f.canvas().currentLayer(), QStringLiteral("layer"));
-        panel->moveCurrentLayerBack();
-        QCOMPARE(f.scene().layers[1].id, QStringLiteral("layer"));
-        panel->removeCurrentLayer();
-        QCOMPARE(f.scene().layers.size(), size_t(3));
-        QCOMPARE(f.document().commands().count(), 3);
+        // At the top level until another is chosen.
+        panel->addGroup();
+        QCOMPARE(f.scene().entities.size(), size_t{4});
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Add mark"));
+
+        // Into the altar group, at (2400, 600): in its coordinates.
+        f.canvas().setCurrentParent(ALTAR);
+        QVERIFY(f.dropOnView(IDLE_SPRITE, f.at(QPointF(2410, 620))));
+        const EntityPath sprite{1, 2, 2};
+        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{sprite});
+        const Point pos = entityAt(f.scene(), sprite)->transform.pos;
+        QVERIFY2(std::abs(pos.x - 10) <= 0.5 && std::abs(pos.y - 20) <= 0.5,
+                 qPrintable(QStringLiteral("%1, %2").arg(pos.x).arg(pos.y)));
+        panel->addGroup();
+        QCOMPARE(entityAt(f.scene(), {1, 2, 3})->transform.pos, (Point{0, 0}));
+
+        // Removing it puts new entities back at the top level.
+        f.canvas().select({ALTAR});
+        f.canvas().removeSelection();
+        QVERIFY(f.canvas().currentParent().isEmpty());
+
+        // Not into screen space, which isn't drawn yet.
+        f.canvas().setCurrentParent({2});
+        QVERIFY(!f.canvas().canAddEntities());
     }
 
     void reloadsSpritesWhenTheSheetChanges()
     {
         Fixture f;
-        const QRectF before = f.canvas().item({2})->visualRect();  // the bush
+        const QRectF before = f.canvas().item(BUSH)->visualRect();
         QByteArray sheet = readFile(f.dir.filePath(QStringLiteral("art/hero.sprat")));
         sheet.replace("0 0 0 0 8 8 0 0 0 0 0 0 0 0 4:bush", "0 0 0 0 8 0 0 0 0 0 0 0 0 0 4:bush");
         QFile file(f.dir.filePath(QStringLiteral("art/hero.sprat")));
         QVERIFY(file.open(QIODevice::WriteOnly) && file.write(sheet) == sheet.size());
         file.close();
-        QTRY_COMPARE(f.canvas().item({2})->visualRect(), before.translated(0, 8));
+        // Its pivot is its sprite's: the bush moves down with it.
+        QTRY_COMPARE(f.canvas().item(BUSH)->visualRect(), before.translated(0, 8));
     }
 
     void theSheetBrowserListsSpritesAndAnimations()
@@ -577,20 +685,20 @@ private slots:
         QVERIFY(forward && toFront && backward && toBack);
         QVERIFY(!forward->isEnabled());  // nothing selected
 
-        // The player (1) passes the altar group (3), not bg's sprite (2) on another layer.
-        f.canvas().select({{1}});
+        // The player passes the altar group, among world's children.
+        f.canvas().select({PLAYER});
         QVERIFY(forward->isEnabled() && toFront->isEnabled());
         forward->trigger();
-        QCOMPARE(entityAt(f.scene(), {3})->id, QStringLiteral("player"));
-        QCOMPARE(entityAt(f.scene(), {1})->id, QStringLiteral("altar_group"));
+        QCOMPARE(entityAt(f.scene(), {1, 2})->id, QStringLiteral("player"));
+        QCOMPARE(entityAt(f.scene(), {1, 1})->id, QStringLiteral("altar_group"));
         // Still selected, and drawn in front of the group.
-        QCOMPARE(f.canvas().selectedPaths(), (QList<EntityPath>{{3}}));
-        QVERIFY(f.canvas().item({3})->zValue() > f.canvas().item({1})->zValue());
+        QCOMPARE(f.canvas().selectedPaths(), (QList<EntityPath>{{1, 2}}));
+        QVERIFY(f.canvas().item({1, 2})->zValue() > f.canvas().item({1, 1})->zValue());
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Bring Forward"));
 
         toFront->trigger();
-        QCOMPARE(entityAt(f.scene(), {6})->id, QStringLiteral("player"));
-        QCOMPARE(f.canvas().selectedPaths(), (QList<EntityPath>{{6}}));
+        QCOMPARE(entityAt(f.scene(), {1, 5})->id, QStringLiteral("player"));
+        QCOMPARE(f.canvas().selectedPaths(), (QList<EntityPath>{{1, 5}}));
         QVERIFY(!forward->isEnabled() && !toFront->isEnabled());  // already in front
         QVERIFY(backward->isEnabled() && toBack->isEnabled());
 
@@ -599,13 +707,13 @@ private slots:
         QVERIFY(QTest::qWaitForWindowActive(&f.window));
         f.view->setFocus();
         QTest::keyClick(f.view, Qt::Key_BracketLeft, Qt::ControlModifier | Qt::ShiftModifier);
-        QCOMPARE(entityAt(f.scene(), {0})->id, QStringLiteral("player"));
+        QCOMPARE(entityAt(f.scene(), {1, 0})->id, QStringLiteral("player"));
         QVERIFY(!backward->isEnabled());
 
         f.document().commands().undo();
         f.document().commands().undo();
         f.document().commands().undo();
-        QCOMPARE(entityAt(f.scene(), {1})->id, QStringLiteral("player"));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->id, QStringLiteral("player"));
     }
 
     void theSheetBrowserFilters()
@@ -658,10 +766,9 @@ private slots:
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Add sprite"));
         const EntityPath path{int(f.scene().entities.size()) - 1};
         const Entity* added = entityAt(f.scene(), path);
-        QCOMPARE(added->type, EntityType::Sprite);
-        QCOMPARE(added->sprite->sheet, QStringLiteral("hero"));
-        QCOMPARE(added->sprite->path, QStringLiteral("hero/idle.png"));
-        QCOMPARE(added->layer, f.canvas().currentLayer());
+        QCOMPARE(added->image->sheet, QStringLiteral("hero"));
+        QCOMPARE(added->image->sprite, QStringLiteral("hero/idle.png"));
+        QVERIFY(!added->size && !added->pivot);  // its sprite's
         QVERIFY(std::abs(added->transform.pos.x - where.x()) <= 0.5);
         QVERIFY(std::abs(added->transform.pos.y - where.y()) <= 0.5);
         // Selected, and in the scene tree.
@@ -682,19 +789,18 @@ private slots:
         f.canvas().setSnapping(true);
         QVERIFY(f.dropOnView(IDLE_ANIMATION, f.at(QPointF(357, 653))));
         const Entity& added = f.scene().entities.back();
-        QCOMPARE(added.type, EntityType::Animation);
-        QCOMPARE(added.animation->name, QStringLiteral("idle"));
+        QCOMPARE(added.image->animation, QStringLiteral("idle"));
         QCOMPARE(added.transform.pos, (Point{352, 656}));
     }
 
-    void aHiddenOrLockedLayerRefusesDrops()
+    void aHiddenOrLockedParentRefusesDrops()
     {
         Fixture f;
-        const QString layer = f.canvas().currentLayer();
-        f.canvas().setLayerLocked(layer, true);
+        f.canvas().setCurrentParent(ALTAR);
+        f.canvas().setLocked(WORLD, true);  // an ancestor of it
         QVERIFY(!f.dropOnView(IDLE_SPRITE, f.at(QPointF(320, 600))));
-        f.canvas().setLayerLocked(layer, false);
-        f.canvas().setLayerHidden(layer, true);
+        f.canvas().setLocked(WORLD, false);
+        f.canvas().setHidden(ALTAR, true);
         QVERIFY(!f.dropOnView(IDLE_SPRITE, f.at(QPointF(320, 600))));
         QCOMPARE(f.document().commands().count(), 0);
 
@@ -710,43 +816,79 @@ private slots:
     {
         Fixture f;
         InspectorPanel* inspector = f.window.inspector();
-        QCOMPARE(inspector->summary()->text(), QStringLiteral("Nothing selected."));
-        QVERIFY(!inspector->idField()->isEnabled());
+        // Nothing selected: the top level, the scene, with its settings.
+        QVERIFY(inspector->showsTopLevel());
+        QVERIFY(inspector->summary()->text().startsWith(QStringLiteral("The top level")));
+        QCOMPARE(inspector->topLevel()->idField()->text(), LEVEL_1);
+        QCOMPARE(inspector->topLevel()->widthBox()->value(), 3840.0);
 
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
+        QVERIFY(!inspector->showsTopLevel());
         QCOMPARE(inspector->summary()->text(), QStringLiteral("sprite · hero · hero/idle.png"));
         QCOMPARE(inspector->idField()->text(), QStringLiteral("player"));
         QCOMPARE(inspector->classesField()->text(), QStringLiteral("actor"));
         QVERIFY(inspector->activeBox()->isChecked());
         QVERIFY(inspector->classesField()->toolTip().contains(QStringLiteral("not declared")));
 
-        f.canvas().select({{4}});  // the secret door is inactive and hidden
+        f.canvas().select({DOOR});  // the secret door is inactive and hidden
         QVERIFY(!inspector->activeBox()->isChecked());
         QVERIFY(!inspector->visibleBox()->isChecked());
 
-        f.canvas().select({{1}, {4}});
+        f.canvas().select({PLAYER, DOOR});
         QCOMPARE(inspector->summary()->text(), QStringLiteral("2 entities selected."));
         QVERIFY(!inspector->idField()->isEnabled());
+        QVERIFY(!inspector->showsTopLevel());
 
         f.window.tabs()->setCurrentIndex(0);  // the flow
         QCOMPARE(inspector->summary()->text(),
                  QStringLiteral("Open a scene to inspect its entities."));
+        QVERIFY(!inspector->showsTopLevel());
+    }
+
+    void theTopLevelEditsTheScene()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        SceneSettingsPanel* topLevel = inspector->topLevel();
+        // A top-level entity in percent follows the scene's size.
+        Entity marker;
+        marker.at = Anchor{{50, Unit::Percent}, {50, Unit::Percent}};
+        const EntityPath path{int(f.scene().entities.size())};
+        f.document().commands().push(
+            std::make_unique<AddEntityCommand>(f.document(), LEVEL_1, path, marker));
+        QCOMPARE(f.canvas().item(path)->scenePos(), QPointF(1920, 540));
+        f.canvas().select({});
+        QVERIFY(inspector->showsTopLevel());
+
+        topLevel->widthBox()->setValue(1000);
+        QCOMPARE(f.scene().size, (Size{1000, 1080}));
+        QCOMPARE(f.canvas().item(path)->scenePos(), QPointF(500, 540));
+        f.document().commands().undo();
+        QCOMPARE(f.canvas().item(path)->scenePos(), QPointF(1920, 540));
+
+        // Renamed, it still shows the scene.
+        topLevel->idField()->setText(QStringLiteral("cave"));
+        QVERIFY(topLevel->applyId());
+        QCOMPARE(f.canvas().sceneId(), QStringLiteral("cave"));
+        QCOMPARE(topLevel->idField()->text(), QStringLiteral("cave"));
+        QCOMPARE(f.window.sceneTreePanel()->topLevelRow()->text(0), QStringLiteral("cave"));
+        QVERIFY(topLevel->widthBox()->isEnabled());
     }
 
     void renamingAnIdRenamesItInTheTransitions()
     {
         Fixture f;
         InspectorPanel* inspector = f.window.inspector();
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         type(inspector->idField(), QStringLiteral("hero"));
 
         QCOMPARE(f.document().commands().count(), 1);
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Rename player to hero"));
-        QCOMPARE(entityAt(f.scene(), {1})->id, QStringLiteral("hero"));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->id, QStringLiteral("hero"));
         const Transition* l1ToL2 = f.document().findTransition(u"l1_to_l2");
         QVERIFY(l1ToL2->persist.entities.contains(QStringLiteral("hero")));
         QCOMPARE(inspector->idField()->text(), QStringLiteral("hero"));
-        QVERIFY(f.window.sceneTreePanel()->entityRow({1})->text(0).startsWith(u"hero"));
+        QVERIFY(f.window.sceneTreePanel()->entityRow(PLAYER)->text(0).startsWith(u"hero"));
 
         f.document().commands().undo();
         QCOMPARE(inspector->idField()->text(), QStringLiteral("player"));
@@ -759,7 +901,7 @@ private slots:
     {
         Fixture f;
         InspectorPanel* inspector = f.window.inspector();
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         type(inspector->idField(), QStringLiteral("two words"));
         QVERIFY(inspector->message().startsWith(QStringLiteral("“two words” isn't a valid id")));
         type(inspector->idField(), QStringLiteral("camera"));
@@ -777,22 +919,22 @@ private slots:
         QVERIFY(inspector->message().isEmpty());
 
         // An entity nothing refers to can be named and unnamed.
-        f.canvas().select({{2}});
+        f.canvas().select({BUSH});
         type(inspector->idField(), QStringLiteral("bush"));
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Name sprite bush"));
         type(inspector->idField(), QString());
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Remove the id of bush"));
-        QCOMPARE(entityAt(f.scene(), {2})->id, QString());
+        QCOMPARE(entityAt(f.scene(), BUSH)->id, QString());
     }
 
     void editsClasses()
     {
         Fixture f;
         InspectorPanel* inspector = f.window.inspector();
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         type(inspector->classesField(), QStringLiteral(".actor, enemy actor"));
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Set the classes of player"));
-        QCOMPARE(entityAt(f.scene(), {1})->classes,
+        QCOMPARE(entityAt(f.scene(), PLAYER)->classes,
                  (QStringList{QStringLiteral("actor"), QStringLiteral("enemy")}));
         QCOMPARE(inspector->classesField()->text(), QStringLiteral("actor enemy"));
         QVERIFY(inspector->classesField()->toolTip().contains(QStringLiteral("<b>.enemy</b>")));
@@ -813,7 +955,7 @@ private slots:
             QVERIFY2(known.contains(QLatin1StringView(name)), name);
         }
 
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         QLineEdit* field = inspector->classesField();
         field->setFocus();
         field->end(false);
@@ -823,7 +965,7 @@ private slots:
         emit completer->activated(QStringLiteral("camera_bounds"));
         QCOMPARE(field->text(), QStringLiteral("actor .camera_bounds "));
         QVERIFY(inspector->applyClasses());
-        QCOMPARE(entityAt(f.scene(), {1})->classes,
+        QCOMPARE(entityAt(f.scene(), PLAYER)->classes,
                  (QStringList{QStringLiteral("actor"), QStringLiteral("camera_bounds")}));
     }
 
@@ -831,13 +973,13 @@ private slots:
     {
         Fixture f;
         InspectorPanel* inspector = f.window.inspector();
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         inspector->activeBox()->click();
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Deactivate player"));
-        QVERIFY(!entityAt(f.scene(), {1})->active);
+        QVERIFY(!entityAt(f.scene(), PLAYER)->active);
         inspector->visibleBox()->click();
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Hide player"));
-        QVERIFY(!entityAt(f.scene(), {1})->visible);
+        QVERIFY(!entityAt(f.scene(), PLAYER)->visible);
         f.document().commands().undo();
         QVERIFY(inspector->visibleBox()->isChecked());
     }
@@ -846,7 +988,7 @@ private slots:
     {
         Fixture f;
         InspectorPanel* inspector = f.window.inspector();
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         const auto typeNumber = [](QDoubleSpinBox* box, const QString& text) {
             box->setFocus();
             box->selectAll();
@@ -854,14 +996,29 @@ private slots:
             QTest::keyClick(box, Qt::Key_Return);
         };
 
+        QCOMPARE(inspector->xBox()->value(), 320.0);
+        QCOMPARE(inspector->yBox()->value(), 640.0);
+        typeNumber(inspector->xBox(), QStringLiteral("400.5"));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Move player"));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.pos, (Point{400.5, 640}));
+        QCOMPARE(f.canvas().item(PLAYER)->pos(), QPointF(400.5, 640));
+        f.document().commands().undo();
+        QCOMPARE(inspector->xBox()->value(), 320.0);
+        // A drag on the canvas shows in the boxes.
+        const QPoint player = f.at(QPointF(320, 630));
+        f.drag(player, player + QPoint(40, 10));
+        QCOMPARE(inspector->xBox()->value(), 360.0);
+        QCOMPARE(inspector->yBox()->value(), 650.0);
+        f.document().commands().undo();
+
         typeNumber(inspector->angleBox(), QStringLiteral("45"));
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Rotate player"));
-        QCOMPARE(entityAt(f.scene(), {1})->transform.rot, 45.0);
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.rot, 45.0);
         QVERIFY(inspector->angleBox()->text().endsWith(QStringLiteral("°")));
 
         typeNumber(inspector->scaleXBox(), QStringLiteral("2"));
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Scale player"));
-        QCOMPARE(entityAt(f.scene(), {1})->transform.scale, (Point{2, 1}));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->transform.scale, (Point{2, 1}));
         const int count = f.document().commands().count();
         typeNumber(inspector->scaleYBox(), QStringLiteral("0"));
         QCOMPARE(inspector->message(), QStringLiteral("A scale can't be zero."));
@@ -871,10 +1028,10 @@ private slots:
         QVERIFY(inspector->flipXBox()->isChecked());  // the player faces left
         inspector->flipXBox()->click();
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Unflip player horizontally"));
-        QVERIFY(!entityAt(f.scene(), {1})->transform.flipX);
+        QVERIFY(!entityAt(f.scene(), PLAYER)->transform.flipX);
         inspector->flipYBox()->click();
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Flip player vertically"));
-        QVERIFY(entityAt(f.scene(), {1})->transform.flipY);
+        QVERIFY(entityAt(f.scene(), PLAYER)->transform.flipY);
 
         // Undo shows the model again, as do edits from the canvas.
         f.document().commands().undo();
@@ -882,7 +1039,7 @@ private slots:
         f.document().commands().undo();
         f.document().commands().undo();
         QCOMPARE(inspector->scaleXBox()->value(), 1.0);
-        f.canvas().commitTransform({1}, 90, Point{1, 1}, QStringLiteral("Rotate"));
+        f.canvas().commitTransform(PLAYER, 90, Point{1, 1}, QStringLiteral("Rotate"));
         QCOMPARE(inspector->angleBox()->value(), 90.0);
     }
 
@@ -901,7 +1058,7 @@ private slots:
         QVERIFY(!trigger->font(ClassesPanel::NAME).italic());
 
         // The uses follow the scenes.
-        f.canvas().select({{1}});
+        f.canvas().select({PLAYER});
         type(f.window.inspector()->classesField(), QStringLiteral("actor trigger"));
         QCOMPARE(panel->classRow(QStringLiteral("trigger"))->text(ClassesPanel::USES),
                  QStringLiteral("1"));
@@ -978,9 +1135,9 @@ private slots:
         const EntityPath path{int(f.scene().entities.size()) - 1};
         const Entity* added = entityAt(f.scene(), path);
         QCOMPARE(added->id, QStringLiteral("camera_2"));  // level_1 has a camera already
-        QCOMPARE(added->type, EntityType::Camera);
+        QCOMPARE(kindOf(*added), QStringLiteral("camera"));
         QCOMPARE(added->classes, QStringList{QStringLiteral("main")});
-        QCOMPARE(added->layer, f.canvas().currentLayer());
+        QCOMPARE(added->size, std::optional(Extent::px({1920, 1080})));
         QVERIFY(std::abs(added->transform.pos.x - 500) <= 0.5);
         QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{path});
         QCOMPARE(f.window.inspector()->idField()->text(), QStringLiteral("camera_2"));
@@ -996,8 +1153,9 @@ private slots:
         QCOMPARE(f.document().commands().index(), 0);
         QCOMPARE(int(f.scene().entities.size()), path.first());
 
-        // Not on a locked layer.
-        f.canvas().setLayerLocked(f.canvas().currentLayer(), true);
+        // Not into a locked parent.
+        f.canvas().setCurrentParent(WORLD);
+        f.canvas().setLocked(WORLD, true);
         QVERIFY(!f.dropOnView(camera.get(), f.at(QPointF(500, 600))));
     }
 
@@ -1008,7 +1166,7 @@ private slots:
         emit panel->list()->itemActivated(panel->presetRow(QStringLiteral("trigger_region")));
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Add Trigger Region"));
         const Entity& added = f.scene().entities.back();
-        QCOMPARE(added.type, EntityType::Region);
+        QCOMPARE(kindOf(added), QStringLiteral("region"));
         QCOMPARE(added.id, QStringLiteral("trigger"));
         const QPointF middle = f.view->visibleCenter();
         QCOMPARE(added.transform.pos, (Point{middle.x(), middle.y()}));
@@ -1021,7 +1179,7 @@ private slots:
         emit browser->tree()->itemActivated(browser->itemRow(IDLE_ANIMATION), 0);
         QCOMPARE(f.document().commands().count(), 1);
         const Entity& added = f.scene().entities.back();
-        QCOMPARE(added.type, EntityType::Animation);
+        QCOMPARE(kindOf(added), QStringLiteral("animation"));
         const QPointF middle = f.view->mapToScene(f.view->viewport()->rect().center());
         QCOMPARE(added.transform.pos, (Point{middle.x(), middle.y()}));
 
@@ -1030,6 +1188,364 @@ private slots:
         emit browser->tree()->itemActivated(browser->itemRow(IDLE_SPRITE), 0);
         QCOMPARE(f.document().commands().count(), 1);
         QVERIFY(f.window.statusBar()->currentMessage().startsWith(QStringLiteral("Open a scene")));
+    }
+
+    // --- parts, in the options scene: a nine-slice panel at (960, 540), 800 x 600 about its
+    // center, that clips and is tinted; its close button, aligned to its top-right corner;
+    // and a slider area aligned to its center. An inventory at (160, 160), 256 x 128, is
+    // a tiled container of 64 x 64 tiles, 4 by 2, its children landing on each tile's
+    // bottom-center: the hero in cell 1, 0, and the bush 8 up from cell 3, 1 ---
+
+    void alignsChildrenToTheirParentsRect()
+    {
+        Fixture f;
+        SceneView* view = f.window.openScene(QStringLiteral("options"));
+        SceneCanvas& canvas = view->canvas();
+        const EntityPath panel{0, 0};
+        const EntityPath close{0, 0, 0};
+        // The panel's rect runs from (-400, -300) to (400, 300) about its origin.
+        QCOMPARE(canvas.item(panel)->rect(), std::optional(QRectF(-400, -300, 800, 600)));
+        QCOMPARE(canvas.item(panel)->scenePos(), QPointF(960, 540));
+        // The close button is 16 in from the top-right corner, its own top-right there.
+        QCOMPARE(canvas.item(close)->pos(), QPointF(384, -284));
+        QCOMPARE(canvas.item(close)->rect(), std::optional(QRectF(-48, 0, 48, 48)));
+        QCOMPARE(canvas.item({0, 0, 1})->pos(), QPointF(0, 40));  // the center, then 40 down
+        QVERIFY(canvas.item(panel)->flags() & QGraphicsItem::ItemClipsChildrenToShape);
+
+        // A drag stores the position from the alignment point.
+        canvas.select({close});
+        canvas.item(close)->setPos(canvas.item(close)->pos() + QPointF(-10, 5));
+        canvas.commitMoves();
+        QCOMPARE(entityAt(*canvas.scene(), close)->transform.pos, (Point{-26, 21}));
+    }
+
+    void changingAUnitOrThePivotKeepsTheEntityInPlace()
+    {
+        Fixture f;
+        SceneView* view = f.window.openScene(QStringLiteral("options"));
+        SceneCanvas& canvas = view->canvas();
+        InspectorPanel* inspector = f.window.inspector();
+        // At the panel's top-right corner: 100%, 0%, 16 in from it; the panel is 800 x 600
+        // about its center, at (960, 540).
+        const EntityPath close{0, 0, 0};
+        const auto corner = [&] {
+            const EntityItem* item = canvas.item(close);
+            return item->mapToScene(item->rect()->topLeft());
+        };
+        const QPointF where = corner();
+        QCOMPARE(where, QPointF(1296, 256));
+        canvas.select({close});
+        QCOMPARE(unitOf(inspector->xUnitBox()), Unit::Percent);
+        QCOMPARE(inspector->xBox()->value(), 100.0);
+        QCOMPARE(inspector->yBox()->value(), 0.0);
+        QVERIFY(inspector->showsOffset());
+        QCOMPARE(inspector->offsetXBox()->value(), -16.0);
+        QCOMPARE(inspector->offsetYBox()->value(), 16.0);
+        // Its parent offers pixels and percentages, not tiles.
+        QVERIFY(offers(inspector->xUnitBox(), Unit::Px));
+        QVERIFY(offers(inspector->xUnitBox(), Unit::Percent));
+        QVERIFY(!offers(inspector->xUnitBox(), Unit::Cell));
+        QVERIFY(inspector->pivotBox()->isChecked());
+
+        // x in pixels: from the panel's origin, its center.
+        choose(inspector->xUnitBox(), Unit::Px);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Measure close in px"));
+        const Entity* entity = entityAt(*canvas.scene(), close);
+        QCOMPARE(entity->at, (Anchor{{}, {0, Unit::Percent}}));
+        QCOMPARE(entity->transform.pos, (Point{384, 16}));
+        QCOMPARE(inspector->xBox()->value(), 384.0);
+        QVERIFY(!inspector->offsetXBox()->isEnabled());
+        QCOMPARE(corner(), where);
+
+        // Its pivot to its top-left: its rect stays where it is.
+        inspector->pivotGrid()->button(0, 0)->click();
+        entity = entityAt(*canvas.scene(), close);
+        QCOMPARE(entity->pivot, std::optional(Point{0, 0}));
+        QCOMPARE(entity->transform.pos, (Point{336, 16}));
+        QCOMPARE(corner(), where);
+
+        // Both in pixels: no offset.
+        choose(inspector->yUnitBox(), Unit::Px);
+        entity = entityAt(*canvas.scene(), close);
+        QCOMPARE(entity->at, Anchor{});
+        QCOMPARE(entity->transform.pos, (Point{336, -284}));
+        QVERIFY(!inspector->showsOffset());
+        QCOMPARE(corner(), where);
+
+        // x in percent again: 92% across, with no offset.
+        choose(inspector->xUnitBox(), Unit::Percent);
+        entity = entityAt(*canvas.scene(), close);
+        QCOMPARE(entity->at.x, (Length{92, Unit::Percent}));
+        QCOMPARE(entity->transform.pos, (Point{0, -284}));
+        QCOMPARE(corner(), where);
+
+        // Typed, a percentage moves it: to the right edge.
+        inspector->xBox()->setValue(100);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Move close"));
+        QCOMPARE(corner(), QPointF(1360, 256));
+        inspector->offsetXBox()->setValue(-48);
+        QCOMPARE(corner(), QPointF(1312, 256));
+
+        for (int i = 0; i < 6; ++i) {
+            f.document().commands().undo();
+        }
+        QCOMPARE(corner(), where);
+        QCOMPARE(entityAt(*canvas.scene(), close)->transform.pos, (Point{-16, 16}));
+    }
+
+    void theInspectorMeasuresSizesInUnits()
+    {
+        Fixture f;
+        SceneView* view = f.window.openScene(QStringLiteral("options"));
+        SceneCanvas& canvas = view->canvas();
+        InspectorPanel* inspector = f.window.inspector();
+        const EntityPath close{0, 0, 0};
+        canvas.select({close});
+        QCOMPARE(unitOf(inspector->widthUnitBox()), Unit::Px);
+        QCOMPARE(inspector->widthBox()->value(), 48.0);
+
+        // In percent of the panel's 800: the same size.
+        choose(inspector->widthUnitBox(), Unit::Percent);
+        QCOMPARE(f.document().commands().undoText(),
+                 QStringLiteral("Measure the size of close in %"));
+        QCOMPARE(entityAt(*canvas.scene(), close)->size,
+                 std::optional(Extent{{6, Unit::Percent}, Length::px(48)}));
+        QCOMPARE(inspector->widthBox()->value(), 6.0);
+        QCOMPARE(canvas.item(close)->rect()->width(), 48.0);
+
+        // It follows the panel.
+        inspector->widthBox()->setValue(10);
+        QCOMPARE(canvas.item(close)->rect()->width(), 80.0);
+        canvas.select({{0, 0}});
+        inspector->widthBox()->setValue(400);
+        QCOMPARE(canvas.item(close)->rect()->width(), 40.0);
+
+        // The scale handle keeps the percentage.
+        canvas.select({close});
+        canvas.commitSize(close, QSizeF(20, 48));
+        QCOMPARE(entityAt(*canvas.scene(), close)->size,
+                 std::optional(Extent{{5, Unit::Percent}, Length::px(48)}));
+    }
+
+    void placesChildrenOnTiles()
+    {
+        Fixture f;
+        SceneView* view = f.window.openScene(QStringLiteral("options"));
+        SceneCanvas& canvas = view->canvas();
+        const EntityPath inventory{2};
+        const EntityPath hero{2, 0};
+        const EntityPath bush{2, 1};
+        QCOMPARE(canvas.item(hero)->pos(), QPointF(96, 64));
+        QCOMPARE(canvas.item(hero)->scenePos(), QPointF(256, 224));
+        QCOMPARE(canvas.item(bush)->pos(), QPointF(224, 120));
+        QVERIFY(canvas.item(hero)->placement().frame.grid);
+        QVERIFY(!canvas.item(inventory)->placement().frame.grid);
+        // Its grid shows when it helps: with it, or one of its children, selected, or as
+        // the current parent.
+        QVERIFY(canvas.item(inventory)->tileGrid());
+        QVERIFY(canvas.gridPaths().isEmpty());
+        canvas.select({hero});
+        QCOMPARE(canvas.gridPaths(), QList<EntityPath>{inventory});
+        canvas.select({inventory});
+        QCOMPARE(canvas.gridPaths(), QList<EntityPath>{inventory});
+        canvas.select({});
+        QVERIFY(canvas.gridPaths().isEmpty());
+        canvas.setCurrentParent(inventory);
+        QCOMPARE(canvas.gridPaths(), QList<EntityPath>{inventory});
+        canvas.setCurrentParent({});
+        QVERIFY(canvas.gridPaths().isEmpty());
+        // It takes no clicks: the child under it is still picked.
+        canvas.select({hero});
+        QCOMPARE(qgraphicsitem_cast<EntityItem*>(canvas.itemAt(QPointF(256, 214), {})),
+                 canvas.item(hero));
+        canvas.select({});
+
+        // A drag goes from tile to tile: 70 right and 60 down is nearest to tile 2, 1.
+        view->resetZoom();
+        view->centerOn(300, 250);
+        const QPoint from = view->mapFromScene(QPointF(256, 214));
+        const QPoint to = view->mapFromScene(QPointF(326, 274));
+        QTest::mousePress(view->viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view->viewport(), from + (to - from) / 2);
+        QTest::mouseMove(view->viewport(), to);
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, {}, to);
+        const Entity* moved = entityAt(*canvas.scene(), hero);
+        QCOMPARE(moved->at, (Anchor{{2, Unit::Cell}, {1, Unit::Cell}}));
+        QCOMPARE(moved->transform.pos, (Point{0, 0}));
+        QCOMPARE(canvas.item(hero)->pos(), QPointF(160, 128));
+        QCOMPARE(f.document().commands().count(), 1);
+
+        // The arrow keys move it a tile, staying in the grid.
+        const auto tile = [&](const EntityPath& path) {
+            const Anchor& at = entityAt(*canvas.scene(), path)->at;
+            return QPoint(int(at.x.value), int(at.y.value));
+        };
+        canvas.select({hero});
+        QTest::keyClick(view, Qt::Key_Left);
+        QCOMPARE(tile(hero), QPoint(1, 1));
+        QTest::keyClick(view, Qt::Key_Down);  // the last row already
+        QTest::keyClick(view, Qt::Key_Left, Qt::ShiftModifier);
+        QCOMPARE(tile(hero), QPoint(0, 1));
+        QCOMPARE(f.document().commands().count(), 3);
+
+        // A sprite dropped in it goes on the tile under the cursor.
+        canvas.setCurrentParent(inventory);
+        const EntityPath placed = view->place(IDLE_SPRITE, QPointF(192, 260));
+        QCOMPARE(placed, (EntityPath{2, 2}));
+        QCOMPARE(entityAt(*canvas.scene(), placed)->at, (Anchor{{0, Unit::Cell}, {1, Unit::Cell}}));
+        QCOMPARE(entityAt(*canvas.scene(), placed)->transform.pos, (Point{0, 0}));
+    }
+
+    void theInspectorEditsContainers()
+    {
+        Fixture f;
+        SceneView* view = f.window.openScene(QStringLiteral("options"));
+        SceneCanvas& canvas = view->canvas();
+        InspectorPanel* inspector = f.window.inspector();
+        const EntityPath inventory{2};
+        const EntityPath hero{2, 0};
+
+        // A child of a tiled container is placed in tiles, which only it is offered.
+        canvas.select({hero});
+        QCOMPARE(unitOf(inspector->xUnitBox()), Unit::Cell);
+        QVERIFY(offers(inspector->xUnitBox(), Unit::Cell));
+        QCOMPARE(inspector->xBox()->value(), 1.0);
+        QCOMPARE(inspector->xBox()->decimals(), 0);
+        inspector->yBox()->setValue(1);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Move slot_hero"));
+        QCOMPARE(entityAt(*canvas.scene(), hero)->at, (Anchor{{1, Unit::Cell}, {1, Unit::Cell}}));
+        canvas.select({{0, 0, 0}});
+        QVERIFY(!offers(inspector->xUnitBox(), Unit::Cell));
+        QVERIFY(!inspector->showsTilePivot());
+
+        // The tiles: the children keep their cells.
+        canvas.select({inventory});
+        QCOMPARE(inspector->containerBox()->currentData().toInt(), int(ContainerType::Tiled));
+        QVERIFY(inspector->showsTilePivot());
+        QVERIFY(inspector->tilePivotGrid()->button(1, 2)->isChecked());  // bottom-center
+        inspector->tileWidthBox()->setValue(32);
+        QCOMPARE(entityAt(*canvas.scene(), inventory)->container->tileSize, (SizeF{32, 64}));
+        QCOMPARE(canvas.item(hero)->pos(), QPointF(48, 128));
+        inspector->tilePivotGrid()->button(0, 0)->click();
+        QCOMPARE(entityAt(*canvas.scene(), inventory)->container->tilePivot, (Point{0, 0}));
+        QCOMPARE(canvas.item(hero)->pos(), QPointF(32, 64));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Set the tiles of inventory"));
+
+        // Freed, its children stay where they are drawn, in pixels.
+        const QPointF where = canvas.item(hero)->scenePos();
+        inspector->setContainer(std::nullopt);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Stop tiling inventory"));
+        QVERIFY(!entityAt(*canvas.scene(), inventory)->container);
+        QCOMPARE(entityAt(*canvas.scene(), hero)->at, Anchor{});
+        QCOMPARE(entityAt(*canvas.scene(), hero)->transform.pos, (Point{32, 64}));
+        QCOMPARE(canvas.item(hero)->scenePos(), where);
+        QVERIFY(!inspector->showsTilePivot());
+        f.document().commands().undo();
+        QCOMPARE(entityAt(*canvas.scene(), hero)->at, (Anchor{{1, Unit::Cell}, {1, Unit::Cell}}));
+
+        // Tiled, an entity without a rect gets one, and its children go on the nearest
+        // tiles where they are: the panel, at (960, 540), on the last of 2 x 2 tiles of 32.
+        canvas.select({{0}});
+        const QPointF panel = canvas.item({0, 0})->scenePos();
+        inspector->setContainer(ContainerType::Tiled);
+        const Entity* backdrop = entityAt(*canvas.scene(), {0});
+        QCOMPARE(backdrop->size, std::optional(Extent::px({64, 64})));
+        QCOMPARE(backdrop->container, std::optional(Container{}));
+        const Entity* tiled = entityAt(*canvas.scene(), {0, 0});
+        QCOMPARE(tiled->at, (Anchor{{1, Unit::Cell}, {1, Unit::Cell}}));
+        QCOMPARE(tiled->transform.pos, (Point{912, 492}));
+        QCOMPARE(canvas.item({0, 0})->scenePos(), panel);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Tile backdrop"));
+    }
+
+    void tintsPassDownTheTree()
+    {
+        Fixture f;
+        SceneView* view = f.window.openScene(QStringLiteral("options"));
+        SceneCanvas& canvas = view->canvas();
+        const Color translucent{255, 255, 255, 192};
+        QCOMPARE(canvas.item({0, 0})->placement().tint, translucent);
+        QCOMPARE(canvas.item({0, 0, 0})->placement().tint, Color{});      // its own only
+        QCOMPARE(canvas.item({0, 0, 1})->placement().tint, translucent);  // mixed
+        QCOMPARE(canvas.item({1})->placement().tint, Color{});  // inherits the top level's
+
+        InspectorPanel* inspector = f.window.inspector();
+        canvas.select({{0}});
+        inspector->setTint(Color{255, 0, 0, 255});
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Tint backdrop"));
+        QCOMPARE(canvas.item({0, 0, 1})->placement().tint, (Color{255, 0, 0, 192}));
+        QCOMPARE(canvas.item({0, 0, 0})->placement().tint, Color{});
+        canvas.select({{0, 0, 0}});
+        QCOMPARE(inspector->tintModeBox()->currentData().toInt(), int(TintMode::Override));
+        inspector->setTintMode(TintMode::Mix);
+        QCOMPARE(canvas.item({0, 0, 0})->placement().tint, (Color{255, 0, 0, 192}));
+        // The atlas it draws is multiplied once per color.
+        const SceneCanvas::SpriteVisual visual =
+            canvas.spriteVisual(QStringLiteral("hero"), QStringLiteral("ui/panel.9.png"));
+        const QImage tinted = canvas.tintedAtlas(visual, Color{255, 0, 0, 255}).toImage();
+        const QImage atlas = visual.atlas.toImage();
+        const QPoint blue = visual.sprite->rect.center();
+        QCOMPARE(qGreen(tinted.pixel(blue)), 0);
+        QCOMPARE(qBlue(tinted.pixel(blue)), 0);
+        QVERIFY(qBlue(atlas.pixel(blue)) > 0);
+    }
+
+    void theInspectorEditsParts()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+
+        // A size of its own keeps the one its sprite gives it, so nothing moves.
+        f.canvas().select({PLAYER});
+        const QRectF drawn = f.canvas().item(PLAYER)->visualRect();
+        inspector->sizeBox()->click();
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Size player"));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->size, std::optional(Extent::px({16, 24})));
+        QCOMPARE(f.canvas().item(PLAYER)->visualRect(), drawn);
+        QVERIFY(inspector->widthBox()->isEnabled());
+        inspector->sizeBox()->click();
+        QVERIFY(!entityAt(f.scene(), PLAYER)->size);
+
+        // The pivot, likewise: the sprite's until set.
+        inspector->pivotBox()->click();
+        QCOMPARE(entityAt(f.scene(), PLAYER)->pivot, std::optional(Point{0.5, 1}));
+        QCOMPARE(f.canvas().item(PLAYER)->visualRect(), drawn);
+        inspector->pivotBox()->click();
+        QVERIFY(!entityAt(f.scene(), PLAYER)->pivot);
+
+        // The image's mode, and taking it away, which leaves its rect where it was.
+        QVERIFY(inspector->showsImage());
+        inspector->setImageMode(ImageMode::NineSlice);
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->mode, ImageMode::NineSlice);
+        inspector->removeImageButton()->click();
+        const Entity* player = entityAt(f.scene(), PLAYER);
+        QVERIFY(!player->image);
+        QCOMPARE(player->size, std::optional(Extent::px({16, 24})));
+        QCOMPARE(player->pivot, std::optional(Point{0.5, 1}));
+        QCOMPARE(kindOf(*player), QStringLiteral("region"));
+        QVERIFY(!inspector->showsImage());
+
+        // A fill gives a mark a rect to fill.
+        f.canvas().select({{1, 2, 0}});
+        inspector->setFill(Color{0, 128, 0, 255});
+        const Entity* mark = entityAt(f.scene(), {1, 2, 0});
+        QCOMPARE(mark->fill, std::optional(Color{0, 128, 0, 255}));
+        QCOMPARE(mark->size, std::optional(Extent::px({64, 64})));
+        QVERIFY(inspector->fillBox()->isChecked());
+
+        // Clipping, space and parallax.
+        f.canvas().select({ALTAR});
+        inspector->clipBox()->click();
+        QVERIFY(entityAt(f.scene(), ALTAR)->clip);
+        f.canvas().select({{0}});
+        QVERIFY(inspector->parallaxBox()->isChecked());
+        QCOMPARE(inspector->parallaxXBox()->value(), 0.5);
+        inspector->setParallax(std::nullopt);
+        QVERIFY(!entityAt(f.scene(), {0})->parallax);
+        inspector->setSpace(Space::Screen);
+        QCOMPARE(entityAt(f.scene(), {0})->space, std::optional(Space::Screen));
+        QVERIFY(!f.canvas().item(BUSH)->isVisible());  // screen space isn't drawn yet
+        QCOMPARE(f.document().commands().count(), 10);
     }
 };
 

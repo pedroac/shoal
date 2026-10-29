@@ -16,15 +16,16 @@ const QString ANIMATION = QStringLiteral("animation");
 
 core::Entity SheetItem::toEntity() const
 {
-    core::Entity entity;
+    core::Image image;
+    image.sheet = sheet;
     if (kind == Kind::Animation) {
-        entity.type = core::EntityType::Animation;
-        entity.animation = core::AnimationRef{sheet, name, {}};
+        image.animation = name;
     }
     else {
-        entity.type = core::EntityType::Sprite;
-        entity.sprite = core::SpriteRef{sheet, name, {}};
+        image.sprite = name;
     }
+    core::Entity entity;
+    entity.image = image;
     return entity;
 }
 

@@ -17,7 +17,7 @@ namespace shoal::editor {
 
 class SceneCanvas;
 
-/// A scene's tab: its canvas, with the scene's rectangle and the grid behind the entities.
+/// A scene's tab: its canvas, with the scene's rectangle behind the entities.
 /// Arrow keys nudge the selection by a unit, or a grid cell when snapping (ten with Shift).
 /// Sprites, animations and presets dragged from their panels drop where the cursor is.
 class SceneView : public CanvasView {

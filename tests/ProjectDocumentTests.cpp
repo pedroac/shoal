@@ -1,3 +1,4 @@
+#include <QFile>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -22,6 +23,37 @@ Project fixtureProject()
 class ProjectDocumentTests : public QObject {
     Q_OBJECT
 private slots:
+    void opensAnOlderProjectUnmodifiedAndSavesItInTodaysFormat()
+    {
+        QTemporaryDir dir;
+        QVERIFY(support::writeTree(
+            dir.path(), support::readTree(support::fixturePath(QStringLiteral("basic_format1")))));
+        ProjectDocument::OpenResult opened = ProjectDocument::open(dir.path());
+        QVERIFY(opened.document);
+        ProjectDocument& document = *opened.document;
+        QVERIFY(document.commands().isClean());  // opening never modifies a project
+
+        // Its first save writes the migrated files, and only those.
+        const SaveResult saved = document.save();
+        QVERIFY(saved.ok());
+        QStringList written = saved.written;
+        written.sort();
+        QCOMPARE(written, (QStringList{QStringLiteral("presets/enemy_grunt.json"),
+                                       QStringLiteral("scenes/level_1/modifiers/earthquake.json"),
+                                       QStringLiteral("scenes/level_1/scene.json"),
+                                       QStringLiteral("scenes/level_2/scene.json"),
+                                       QStringLiteral("scenes/main_menu/scene.json"),
+                                       QStringLiteral("scenes/pause/scene.json")}));
+        const ProjectFiles format2 =
+            support::readTree(support::fixturePath(QStringLiteral("basic")));
+        for (const QString& path : std::as_const(written)) {
+            QFile file(dir.filePath(path));
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            QCOMPARE(QString::fromUtf8(file.readAll()), QString::fromUtf8(format2.at(path)));
+        }
+        QVERIFY(document.save().written.isEmpty());  // and then it's stable
+    }
+
     void addsAScene()
     {
         ProjectDocument document(fixtureProject());

@@ -17,7 +17,9 @@ Project fixtureProject()
 
 QJsonObject spriteEntity()
 {
-    return {{QStringLiteral("type"), QStringLiteral("sprite")}};
+    return {{QStringLiteral("image"),
+             QJsonObject{{QStringLiteral("sheet"), QStringLiteral("hero")},
+                         {QStringLiteral("sprite"), QStringLiteral("hero/idle.png")}}}};
 }
 
 }  // namespace
@@ -32,10 +34,10 @@ private slots:
         const PresetRead read = readPresetDefinition(id, project.presets[id]);
         QVERIFY2(read.definition, qPrintable(read.error));
         QCOMPARE(read.definition->name, id);  // the file has no name
-        QCOMPARE(read.definition->tint, QStringLiteral("#c04040"));
+        QCOMPARE(read.definition->swatch, QStringLiteral("#c04040"));
         QCOMPARE(read.definition->classes, QStringList{QStringLiteral("enemy")});
         QCOMPARE(read.definition->entities.size(), size_t(1));
-        QCOMPARE(read.definition->entities[0].type, EntityType::Sprite);
+        QCOMPARE(read.definition->entities[0].classes, QStringList{QStringLiteral("enemy")});
     }
 
     void reportsWhatItCantRead_data()
@@ -45,24 +47,17 @@ private slots:
 
         QTest::newRow("no entities")
             << QJsonObject{} << QStringLiteral("entities: a preset creates at least one entity");
-        QTest::newRow("a layer")
+        QTest::newRow("bad image")
             << QJsonObject{{QStringLiteral("entities"),
-                            QJsonArray{
-                                QJsonObject{{QStringLiteral("type"), QStringLiteral("mark")},
-                                            {QStringLiteral("layer"), QStringLiteral("world")}}}}}
-            << QStringLiteral("entities[0].layer: it goes on the layer it is placed on");
-        QTest::newRow("bad type")
-            << QJsonObject{{QStringLiteral("entities"),
-                            QJsonArray{
-                                QJsonObject{{QStringLiteral("type"), QStringLiteral("blob")}}}}}
+                            QJsonArray{QJsonObject{
+                                {QStringLiteral("image"),
+                                 QJsonObject{{QStringLiteral("sheet"), QStringLiteral("hero")}}}}}}}
             << QStringLiteral(
-                   "entities[0].type: expected \"empty\", \"group\", \"sprite\", "
-                   "\"animation\", \"nineslice\", \"text\", \"rect\", \"mark\", "
-                   "\"path\", \"region\" or \"camera\", found \"blob\"");
-        QTest::newRow("bad tint")
-            << QJsonObject{{QStringLiteral("tint"), QStringLiteral("red")},
+                   "entities[0].image.sprite: missing (an image names a sprite or an animation)");
+        QTest::newRow("bad swatch")
+            << QJsonObject{{QStringLiteral("swatch"), QStringLiteral("red")},
                            {QStringLiteral("entities"), QJsonArray{spriteEntity()}}}
-            << QStringLiteral("tint: expected a color such as \"#e0a030\", found \"red\"");
+            << QStringLiteral("swatch: expected a color such as \"#e0a030\", found \"red\"");
         QTest::newRow("bad class")
             << QJsonObject{{QStringLiteral("classes"), QJsonArray{QStringLiteral("two words")}},
                            {QStringLiteral("entities"), QJsonArray{spriteEntity()}}}
@@ -81,7 +76,7 @@ private slots:
     void theBuiltInPresetsReadAndTheirClassesAreDeclared()
     {
         const Project project = newProject(QStringLiteral("Game"), ProjectTemplate::Default);
-        const QMap<QString, Preset>& presets = builtInPresets();
+        const QMap<QString, Preset> presets = builtInPresets();
         QCOMPARE(presets.keys(),
                  (QStringList{QStringLiteral("camera"), QStringLiteral("camera_bounds"),
                               QStringLiteral("spawn_mark"), QStringLiteral("trigger_region")}));
@@ -98,6 +93,22 @@ private slots:
                                       presets[QStringLiteral("spawn_mark")])
                      .definition->name,
                  QStringLiteral("Spawn Mark"));
+
+        // What each one is, from its parts; the camera sees the design resolution.
+        const auto first = [&](const char* id) {
+            const QString key = QLatin1StringView(id);
+            return readPresetDefinition(key, presets[key]).definition->entities.at(0);
+        };
+        QCOMPARE(kindOf(first("trigger_region")), QStringLiteral("region"));
+        QCOMPARE(first("trigger_region").pivot, std::optional(Point{0.5, 0.5}));
+        QCOMPARE(kindOf(first("spawn_mark")), QStringLiteral("mark"));
+        QCOMPARE(kindOf(first("camera")), QStringLiteral("camera"));
+        QCOMPARE(first("camera").size, std::optional(Extent::px({1920, 1080})));
+        const Project pixelArt = newProject(QStringLiteral("Tiny"), ProjectTemplate::PixelArt);
+        const Preset camera = availablePresets(pixelArt)[QStringLiteral("camera")];
+        QCOMPARE(
+            readPresetDefinition(QStringLiteral("camera"), camera).definition->entities[0].size,
+            std::optional(Extent::px({640, 360})));
     }
 
     void aProjectPresetWinsOverABuiltInOne()
@@ -121,27 +132,21 @@ private slots:
         preset.classes = {QStringLiteral("enemy")};
         Entity parent;
         parent.id = QStringLiteral("camera");
-        parent.type = EntityType::Group;
         parent.classes = {QStringLiteral("boss"), QStringLiteral("enemy")};
         parent.transform.pos = {10, -5};
         Entity child;
         child.id = QStringLiteral("camera");  // the same base: unique among the new ones too
-        child.type = EntityType::Mark;
         child.transform.pos = {3, 4};
         parent.children.push_back(child);
         preset.entities.push_back(parent);
         Entity plain;
-        plain.type = EntityType::Sprite;
         preset.entities.push_back(plain);
 
-        const std::vector<Entity> created =
-            instantiatePreset(preset, level1, QStringLiteral("bg"), Point{100, 200});
+        const std::vector<Entity> created = instantiatePreset(preset, level1, Point{100, 200});
         QCOMPARE(created.size(), size_t(2));
         QCOMPARE(created[0].id, QStringLiteral("camera_2"));
         QCOMPARE(created[0].children[0].id, QStringLiteral("camera_3"));
         QCOMPARE(created[1].id, QString());  // no id stays without one
-        QCOMPARE(created[0].layer, QStringLiteral("bg"));
-        QCOMPARE(created[0].children[0].layer, QString());  // children inherit it
         QCOMPARE(created[0].transform.pos, (Point{110, 195}));
         QCOMPARE(created[0].children[0].transform.pos, (Point{3, 4}));  // relative to its parent
         QCOMPARE(created[0].classes,

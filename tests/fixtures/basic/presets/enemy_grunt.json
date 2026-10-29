@@ -1,12 +1,11 @@
 {
   "format": "shoal-preset",
-  "version": 1,
+  "version": 3,
   "classes": ["enemy"],
   "entities": [
     {
-      "classes": ["enemy"],
-      "type": "sprite"
+      "classes": ["enemy"]
     }
   ],
-  "tint": "#c04040"
+  "swatch": "#c04040"
 }

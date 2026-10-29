@@ -15,8 +15,8 @@ namespace {
 constexpr double HANDLE_SIZE = 10;    ///< On screen, in pixels.
 constexpr double ROTATE_OFFSET = 24;  ///< How far above the outline the rotate handle sits.
 constexpr double ANGLE_SNAP = 15;
-/// Below this fraction of a nine-slice on the handle's side of its origin, that axis
-/// follows the distance instead, like a scale.
+/// Below this fraction of a rect on the handle's side of its origin, that axis follows the
+/// distance instead, like a scale.
 constexpr double MIN_SIDE = 0.05;
 
 double angleTo(QPointF from, QPointF to)
@@ -83,7 +83,8 @@ void TransformHandle::mousePressEvent(QGraphicsSceneMouseEvent* event)
     m_startDistance = QLineF(m_origin, event->scenePos()).length();
     m_rotation = item->entity().transform.rot;
     m_scale = item->entity().transform.scale;
-    m_startSize = item->nineSliceSize();
+    // An entity with a size of its own is resized; one sized by its sprite is scaled.
+    m_startSize = item->entity().size && item->rect() ? item->rect()->size() : QSizeF();
     m_size = m_startSize;
     m_resize = m_kind == Kind::Scale && !m_startSize.isEmpty();
     if (m_resize) {
@@ -110,9 +111,10 @@ void TransformHandle::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
         m_size = QSizeF(length(local.x(), m_side.x(), m_startSize.width()),
                         length(local.y(), m_side.y(), m_startSize.height()));
         core::Entity resized = item->entity();
-        core::setEntitySize(resized, m_size);
+        resized.size = core::Extent::px({m_size.width(), m_size.height()});
         item->setEntity(resized);
         attach(m_target);
+        m_canvas.updateGrids();
         return;
     }
     const core::Transform start = item->entity().transform;
@@ -134,6 +136,7 @@ void TransformHandle::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
     item->setTransform(QTransform::fromScale(m_scale.x, m_scale.y) *
                        QTransform().rotate(m_rotation));
     attach(m_target);
+    m_canvas.updateGrids();
 }
 
 void TransformHandle::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)

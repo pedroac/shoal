@@ -5,6 +5,12 @@
   "skippable": false,
   "priority": 5,
   "actions": {
-    "seq": []
+    "seq": [
+      {
+        "do": "set_visible",
+        "target": "group(bg)",
+        "visible": false
+      }
+    ]
   }
 }

@@ -159,7 +159,7 @@ void EditEntitiesCommand::undo()
 // --- MoveEntityCommand ---
 
 MoveEntityCommand::MoveEntityCommand(ProjectDocument& document, QString sceneId, EntityPath from,
-                                     EntityPath to)
+                                     EntityPath to, const ImageMetricsFn& metrics)
     : m_document(document),
       m_sceneId(std::move(sceneId)),
       m_from(std::move(from)),
@@ -168,8 +168,9 @@ MoveEntityCommand::MoveEntityCommand(ProjectDocument& document, QString sceneId,
     const Scene& scene = sceneOf(m_document, m_sceneId);
     Q_ASSERT(entityAt(scene, m_from) && !m_to.isEmpty());
     m_name = describe(*entityAt(scene, m_from));
-    m_fromLayer = entityAt(scene, m_from)->layer;
-    m_toLayer = m_to.size() == 1 ? layerOf(scene, m_from) : QString();
+    m_fromFields = *entityAt(scene, m_from);
+    m_fromFields.children.clear();
+    m_toFields = relocatedEntity(scene, m_from, m_to, metrics);
 }
 
 QString MoveEntityCommand::text() const
@@ -180,14 +181,18 @@ QString MoveEntityCommand::text() const
 void MoveEntityCommand::redo()
 {
     Entity entity = m_document.removeEntity(m_sceneId, m_from);
-    entity.layer = m_toLayer;
+    entity.transform = m_toFields.transform;
+    entity.at = m_toFields.at;
+    entity.size = m_toFields.size;
     m_document.insertEntity(m_sceneId, m_to, std::move(entity));
 }
 
 void MoveEntityCommand::undo()
 {
     Entity entity = m_document.removeEntity(m_sceneId, m_to);
-    entity.layer = m_fromLayer;
+    entity.transform = m_fromFields.transform;
+    entity.at = m_fromFields.at;
+    entity.size = m_fromFields.size;
     m_document.insertEntity(m_sceneId, m_from, std::move(entity));
 }
 
@@ -215,131 +220,6 @@ void ReorderEntitiesCommand::undo()
         inverse[m_order[i]] = int(i);
     }
     m_document.reorderEntities(m_sceneId, m_parent, inverse);
-}
-
-// --- AddLayerCommand ---
-
-AddLayerCommand::AddLayerCommand(ProjectDocument& document, QString sceneId, int index, Layer layer)
-    : m_document(document), m_sceneId(std::move(sceneId)), m_index(index), m_layer(std::move(layer))
-{
-}
-
-QString AddLayerCommand::text() const
-{
-    return tr("Add layer %1").arg(m_layer.id);
-}
-
-void AddLayerCommand::redo()
-{
-    m_document.insertLayer(m_sceneId, m_index, m_layer);
-}
-
-void AddLayerCommand::undo()
-{
-    m_document.removeLayer(m_sceneId, m_index);
-}
-
-// --- RemoveLayerCommand ---
-
-RemoveLayerCommand::RemoveLayerCommand(ProjectDocument& document, QString sceneId, int index)
-    : m_document(document), m_sceneId(std::move(sceneId)), m_index(index)
-{
-    const Scene& scene = sceneOf(m_document, m_sceneId);
-    m_layer = scene.layers[size_t(index)];
-    for (size_t i = 0; i < scene.entities.size(); ++i) {
-        if (scene.entities[i].layer == m_layer.id) {
-            m_entities.emplace_back(int(i), scene.entities[i]);
-        }
-    }
-}
-
-QString RemoveLayerCommand::text() const
-{
-    return tr("Remove layer %1").arg(m_layer.id);
-}
-
-void RemoveLayerCommand::redo()
-{
-    for (auto it = m_entities.rbegin(); it != m_entities.rend(); ++it) {
-        m_document.removeEntity(m_sceneId, {it->first});
-    }
-    m_document.removeLayer(m_sceneId, m_index);
-}
-
-void RemoveLayerCommand::undo()
-{
-    m_document.insertLayer(m_sceneId, m_index, m_layer);
-    for (const auto& [index, entity] : m_entities) {
-        m_document.insertEntity(m_sceneId, {index}, entity);
-    }
-}
-
-// --- EditLayerCommand ---
-
-EditLayerCommand::EditLayerCommand(ProjectDocument& document, QString sceneId, int index,
-                                   Layer layer)
-    : m_document(document), m_sceneId(std::move(sceneId)), m_index(index), m_after(std::move(layer))
-{
-    const Scene& scene = sceneOf(m_document, m_sceneId);
-    m_before = scene.layers[size_t(index)];
-    if (m_before.id != m_after.id) {
-        for (size_t i = 0; i < scene.entities.size(); ++i) {
-            if (scene.entities[i].layer == m_before.id) {
-                m_entities << int(i);
-            }
-        }
-    }
-}
-
-QString EditLayerCommand::text() const
-{
-    return m_before.id != m_after.id ? tr("Rename layer %1 to %2").arg(m_before.id, m_after.id)
-                                     : tr("Change layer %1").arg(m_after.id);
-}
-
-void EditLayerCommand::apply(const Layer& layer)
-{
-    const QString& to = layer.id;
-    const Scene& scene = sceneOf(m_document, m_sceneId);
-    for (int index : std::as_const(m_entities)) {
-        Entity entity = withoutChildren(scene.entities[size_t(index)]);
-        entity.layer = to;
-        m_document.setEntityFields(m_sceneId, {index}, entity);
-    }
-    m_document.setLayer(m_sceneId, m_index, layer);
-}
-
-void EditLayerCommand::redo()
-{
-    apply(m_after);
-}
-
-void EditLayerCommand::undo()
-{
-    apply(m_before);
-}
-
-// --- MoveLayerCommand ---
-
-MoveLayerCommand::MoveLayerCommand(ProjectDocument& document, QString sceneId, int from, int to)
-    : m_document(document), m_sceneId(std::move(sceneId)), m_from(from), m_to(to)
-{
-    m_name = sceneOf(m_document, m_sceneId).layers[size_t(from)].id;
-}
-
-QString MoveLayerCommand::text() const
-{
-    return tr("Move layer %1").arg(m_name);
-}
-
-void MoveLayerCommand::redo()
-{
-    m_document.moveLayer(m_sceneId, m_from, m_to);
-}
-
-void MoveLayerCommand::undo()
-{
-    m_document.moveLayer(m_sceneId, m_to, m_from);
 }
 
 }  // namespace shoal::core

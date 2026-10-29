@@ -64,12 +64,14 @@ private:
 };
 
 /// Moves an entity in the tree, to end at `to`, a path in the tree without the entity (see
-/// pathAfterRemoval()): reordering, or a new parent. An entity
-/// that becomes a child gives up its layer; one that becomes top-level keeps the layer it
-/// was drawn on.
+/// pathAfterRemoval()): reordering, or a new parent. It stays where it is drawn, its
+/// transform made relative to the new parent and placed as that parent places its children
+/// (see relocatedEntity(), which `metrics` helps place images with an automatic size or
+/// pivot).
 class MoveEntityCommand : public Command {
 public:
-    MoveEntityCommand(ProjectDocument& document, QString sceneId, EntityPath from, EntityPath to);
+    MoveEntityCommand(ProjectDocument& document, QString sceneId, EntityPath from, EntityPath to,
+                      const ImageMetricsFn& metrics = {});
     QString text() const override;
     void redo() override;
     void undo() override;
@@ -80,8 +82,8 @@ private:
     EntityPath m_from;
     EntityPath m_to;
     QString m_name;
-    QString m_fromLayer;  ///< Its own `layer` before the move.
-    QString m_toLayer;
+    Entity m_fromFields;  ///< Its own fields, without its children.
+    Entity m_toFields;
 };
 
 /// Reorders the children of `parent` (the top level if empty), as arrangedOrders() gives:
@@ -100,71 +102,6 @@ private:
     EntityPath m_parent;
     QList<int> m_order;
     QString m_text;
-};
-
-class AddLayerCommand : public Command {
-public:
-    AddLayerCommand(ProjectDocument& document, QString sceneId, int index, Layer layer);
-    QString text() const override;
-    void redo() override;
-    void undo() override;
-
-private:
-    ProjectDocument& m_document;
-    QString m_sceneId;
-    int m_index;
-    Layer m_layer;
-};
-
-/// Removes a layer and the entities on it.
-class RemoveLayerCommand : public Command {
-public:
-    RemoveLayerCommand(ProjectDocument& document, QString sceneId, int index);
-    QString text() const override;
-    void redo() override;
-    void undo() override;
-
-private:
-    ProjectDocument& m_document;
-    QString m_sceneId;
-    int m_index;
-    Layer m_layer;
-    std::vector<std::pair<int, Entity>> m_entities;  ///< Top-level index -> entity.
-};
-
-/// Changes a layer's settings. A new id is carried to the entities on it.
-class EditLayerCommand : public Command {
-public:
-    EditLayerCommand(ProjectDocument& document, QString sceneId, int index, Layer layer);
-    QString text() const override;
-    void redo() override;
-    void undo() override;
-
-private:
-    /// Sets the layer, and its id on the entities that were on it.
-    void apply(const Layer& layer);
-
-    ProjectDocument& m_document;
-    QString m_sceneId;
-    int m_index;
-    Layer m_before;
-    Layer m_after;
-    QList<int> m_entities;  ///< Top-level entities on the layer.
-};
-
-class MoveLayerCommand : public Command {
-public:
-    MoveLayerCommand(ProjectDocument& document, QString sceneId, int from, int to);
-    QString text() const override;
-    void redo() override;
-    void undo() override;
-
-private:
-    ProjectDocument& m_document;
-    QString m_sceneId;
-    int m_from;
-    int m_to;
-    QString m_name;
 };
 
 }  // namespace shoal::core

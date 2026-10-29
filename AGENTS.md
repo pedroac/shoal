@@ -31,13 +31,19 @@ changes.
   - `Model.h`: plain value types mirroring the source files; unmodeled keys live in
     each object's `extras`, so they survive a save.
   - `JsonReader` / `JsonWriter`: path-named format errors, and the canonical writer.
-  - `ProjectCodec`: files to model and back, pure (no disk access). `ProjectStore`:
-    the disk side, atomic writes, skipping unchanged files, removing stale ones.
+  - `ProjectCodec`: files to model and back, pure (no disk access), migrating older
+    formats as it reads them (scene format 1, with layers and entity types, and
+    format 2, with `align` and `cell`).
+    `ProjectStore`: the disk side, atomic writes, skipping unchanged files, removing
+    stale ones.
   - `CommandStack`: undo history, like `QUndoStack` (which is in QtGui).
     `ProjectDocument`: the open project, its mutators and change signals.
     `FlowCommands`: the commands that change scenes and transitions.
-    `SceneCommands`: the commands that change layers and entities, which
-    `SceneTree` addresses by `EntityPath`.
+    `SceneCommands`: the commands that change entities, which `SceneTree`
+    addresses by `EntityPath`. `SceneTree` also places entities: their rects and
+    pivots, positions and sizes in px, % or tiles against their parent's `Frame`,
+    tiled containers' grids and tints, with `ImageMetricsFn` for what only the
+    sheets know.
   - `ProjectTemplates`: new projects and scenes. `Presets`: the built-in presets, and
     reading a preset into entities with fresh ids (presets stay as written in the
     model). `ClassCommands`: declaring classes in classes.json.
@@ -57,18 +63,23 @@ changes.
   - `SceneCanvas`: one scene's entities (`EntityItem`), likewise following the
     document; it rebuilds its items when the tree's shape changes and updates them
     in place otherwise, since an item may be inside its own mouse handler.
-    `SceneView` is its tab, `SceneTreePanel` its layers-and-entities dock.
+    `SceneView` is its tab, `SceneTreePanel` its entity tree dock.
+    `TileGridOverlay` draws the tiled containers' grids above them, when they help.
     `CanvasView` holds the zoom and pan both views share.
   - `SheetBrowserPanel`: the project's sheets, sprites and animations as thumbnails.
     A drag or a double-click hands a `SheetItem` to `SceneView`, which places it.
     `PresetsPanel` does the same with presets. `InspectorPanel` edits the selected
-    entity, `ClassesPanel` the class registry.
+    entity, with unit boxes for positions and sizes, a `PointGrid` for pivots and a
+    `ColorButton` for tints and fills, or, with none selected, the top level's scene
+    settings (a `SceneSettingsPanel`); `ClassesPanel` edits the class registry.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the
   offscreen platform. `tests/fixtures/basic/` is a project in canonical form: loading
   and saving it must reproduce every byte, so a change to the writer or the format
-  shows up there. A new or changed error message goes in `ProjectCodecTests`' table,
+  shows up there. `tests/fixtures/basic_format1/` is the same project in the formats
+  before (scene format 1); reading it must give `basic`'s bytes, plus the scene format 1
+  can't express. A new or changed error message goes in `ProjectCodecTests`' table,
   exactly. `tests/fixtures/sheets/` is a hand-written sprat sheet and atlas, described
   in its README. Editor tests drive views with real mouse events (`QTest::mousePress`
   and friends on the viewport) where the behavior is about the mouse.
