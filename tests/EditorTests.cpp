@@ -1,12 +1,13 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenuBar>
+#include <QSplitter>
+#include <QStackedWidget>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -17,11 +18,16 @@
 #include "core/ProjectTemplates.h"
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
+#include "editor/InspectorPanel.h"
 #include "editor/MainWindow.h"
+#include "editor/PresetsPanel.h"
 #include "editor/SceneCanvas.h"
 #include "editor/SceneSettingsPanel.h"
+#include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
 #include "editor/ScenesPanel.h"
+#include "editor/SheetBrowserPanel.h"
+#include "editor/WorkspaceTabs.h"
 
 using namespace shoal::core;
 using shoal::editor::FlowView;
@@ -35,22 +41,6 @@ QAction* action(const MainWindow& window, const char* name)
     auto* found = window.findChild<QAction*>(QLatin1StringView(name));
     Q_ASSERT(found);
     return found;
-}
-
-QDockWidget* dock(const MainWindow& window, const char* name)
-{
-    auto* found = window.findChild<QDockWidget*>(QLatin1StringView(name));
-    Q_ASSERT(found);
-    return found;
-}
-
-/// Whether a dock is open, and listed in the View menu.
-bool offered(const MainWindow& window, const char* name)
-{
-    const QDockWidget* found = dock(window, name);
-    const bool listed = found->toggleViewAction()->isVisible();
-    Q_ASSERT(listed || found->isHidden());
-    return listed && !found->isHidden();
 }
 
 /// A copy of the basic fixture, which tests may change and save.
@@ -217,42 +207,68 @@ private slots:
         window.show();
         QVERIFY(window.close());
     }
-    void docksFollowTheCurrentTab()
+    void sidePanelsFollowTheCurrentTab()
     {
         QTemporaryDir dir;
         QVERIFY(copyFixture(dir));
         MainWindow window;
         QVERIFY(window.openProject(dir.path()).isEmpty());
         window.show();
-        const auto onFlow = [&] {
-            return offered(window, "scenesDock") && offered(window, "sceneSettingsDock") &&
-                   !offered(window, "sceneTreeDock") && !offered(window, "presetsDock") &&
-                   !offered(window, "inspectorDock");
-        };
-        const auto onScene = [&] {
-            return !offered(window, "scenesDock") && !offered(window, "sceneSettingsDock") &&
-                   offered(window, "sceneTreeDock") && offered(window, "presetsDock") &&
-                   offered(window, "inspectorDock");
-        };
-        QVERIFY(onFlow());
-        QVERIFY(offered(window, "sheetBrowserDock") && offered(window, "classesDock"));
+        QTabWidget* project = window.projectPanel();
+        QStackedWidget* context = window.contextPanel();
+        // Beside the workspace, under its tabs.
+        QSplitter* splitter = window.tabs()->splitter();
+        QCOMPARE(splitter->widget(0), static_cast<QWidget*>(project));
+        QCOMPARE(splitter->widget(2), static_cast<QWidget*>(context));
+        QCOMPARE(project->count(), 3);
+        QCOMPARE(project->widget(0), static_cast<QWidget*>(window.scenesPanel()));
+        QCOMPARE(project->widget(1), static_cast<QWidget*>(window.presetsPanel()));
+        QCOMPARE(project->widget(2), static_cast<QWidget*>(window.sheetBrowser()));
 
+        const auto shows = [project](QWidget* list) {
+            return project->isTabVisible(project->indexOf(list));
+        };
+
+        // The flow: only the scenes, and the selected scene's settings.
+        QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.scenesPanel()));
+        QVERIFY(shows(window.scenesPanel()));
+        QVERIFY(!shows(window.presetsPanel()));
+        QVERIFY(!shows(window.sheetBrowser()));
+        QCOMPARE(context->currentWidget(), static_cast<QWidget*>(window.sceneSettingsPanel()));
+
+        // A scene: what to place, the sheets first, and the entity tree over the inspector.
         window.openScene(QStringLiteral("level_1"));
-        QVERIFY(onScene());
-        QVERIFY(offered(window, "sheetBrowserDock") && offered(window, "classesDock"));
+        QVERIFY(!shows(window.scenesPanel()));
+        QVERIFY(shows(window.presetsPanel()));
+        QVERIFY(shows(window.sheetBrowser()));
+        QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.sheetBrowser()));
+        QVERIFY(context->currentWidget()->isAncestorOf(window.sceneTreePanel()));
+        QVERIFY(context->currentWidget()->isAncestorOf(window.inspector()));
+        project->setCurrentWidget(window.presetsPanel());
 
-        // A dock the user closes stays closed when they come back to that kind of tab.
-        dock(window, "inspectorDock")->close();
+        // The presets: the same lists, the presets to choose from, and the same context.
+        window.openPresets();
+        QVERIFY(!shows(window.scenesPanel()));
+        QVERIFY(shows(window.sheetBrowser()));
+        QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.presetsPanel()));
+        QVERIFY(context->currentWidget()->isAncestorOf(window.inspector()));
+
+        // Back on a scene, through the flow, the list last chosen on a scene.
         window.tabs()->setCurrentIndex(0);
-        QVERIFY(onFlow());
-        dock(window, "scenesDock")->close();
-        window.openScene(QStringLiteral("level_2"));
-        QVERIFY(dock(window, "inspectorDock")->isHidden());
-        QVERIFY(dock(window, "inspectorDock")->toggleViewAction()->isVisible());
-        QVERIFY(offered(window, "sceneTreeDock"));
+        QVERIFY(shows(window.scenesPanel()));
+        window.openScene(QStringLiteral("level_1"));
+        QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.presetsPanel()));
+
+        // Hidden from the View menu, they stay hidden on every tab, and in the next project.
+        action(window, "projectPanelAction")->trigger();
+        QVERIFY(project->isHidden());
         window.tabs()->setCurrentIndex(0);
-        QVERIFY(dock(window, "scenesDock")->isHidden());
-        QVERIFY(offered(window, "sceneSettingsDock"));
+        QVERIFY(project->isHidden());
+        QVERIFY(window.openProject(dir.path()).isEmpty());
+        QVERIFY(project->isHidden());
+        QVERIFY(!context->isHidden());
+        action(window, "projectPanelAction")->trigger();
+        QVERIFY(!project->isHidden());
     }
 
     void scenesPanelSharesTheFlowSelection()

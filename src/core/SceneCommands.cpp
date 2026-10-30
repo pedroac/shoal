@@ -16,9 +16,9 @@ QString tr(const char* text, int n = -1)
 
 const Scene& sceneOf(const ProjectDocument& document, const QString& sceneId)
 {
-    const auto it = document.project().scenes.find(sceneId);
-    Q_ASSERT(it != document.project().scenes.end());
-    return *it;
+    const Scene* scene = document.entityTree(sceneId);
+    Q_ASSERT(scene);
+    return *scene;
 }
 
 Entity withoutChildren(Entity entity)

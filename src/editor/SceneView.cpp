@@ -14,6 +14,10 @@
 
 namespace shoal::editor {
 
+namespace {
+constexpr double PRESET_CROSS = 24;  ///< On screen, in pixels.
+}  // namespace
+
 SceneView::SceneView(core::ProjectDocument& document, assets::SheetCache& sheets,
                      const QString& sceneId, QWidget* parent)
     : CanvasView(nullptr, parent),
@@ -77,6 +81,14 @@ QRectF SceneView::contentRect() const
 void SceneView::drawBackground(QPainter* painter, const QRectF& rect)
 {
     painter->fillRect(rect, palette().color(QPalette::Dark));
+    if (m_canvas->presetId()) {
+        // A preset has no rect: a cross where it is placed.
+        const double arm = PRESET_CROSS / zoom();
+        painter->setPen(QPen(palette().color(QPalette::Midlight), 0));
+        painter->drawLine(QPointF(-arm, 0), QPointF(arm, 0));
+        painter->drawLine(QPointF(0, -arm), QPointF(0, arm));
+        return;
+    }
     const QRectF bounds = m_canvas->sceneBounds();
     painter->fillRect(bounds, palette().color(QPalette::Base));
 
@@ -127,6 +139,7 @@ void SceneView::contextMenuEvent(QContextMenuEvent* event)
     QMenu menu(this);
     m_canvas->addArrangeActions(menu);
     menu.addSeparator();
+    menu.addAction(tr("Make Preset"), m_canvas.get(), &SceneCanvas::makePresetFromSelection);
     menu.addAction(tr("Remove"), m_canvas.get(), &SceneCanvas::removeSelection);
     menu.exec(event->globalPos());
 }

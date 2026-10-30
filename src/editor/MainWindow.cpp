@@ -3,7 +3,6 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDir>
-#include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGraphicsItem>
@@ -11,6 +10,8 @@
 #include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
@@ -21,18 +22,19 @@
 #include "core/ProjectTemplates.h"
 #include "core/SheetCommands.h"
 #include "core/Version.h"
-#include "editor/ClassesPanel.h"
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
 #include "editor/InspectorPanel.h"
 #include "editor/NewProjectDialog.h"
 #include "editor/PresetsPanel.h"
+#include "editor/PresetsView.h"
 #include "editor/SceneCanvas.h"
 #include "editor/SceneSettingsPanel.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
 #include "editor/ScenesPanel.h"
 #include "editor/SheetBrowserPanel.h"
+#include "editor/WorkspaceTabs.h"
 
 namespace shoal::editor {
 
@@ -40,6 +42,8 @@ namespace {
 constexpr int DEFAULT_WIDTH = 1280;
 constexpr int DEFAULT_HEIGHT = 800;
 constexpr int STATUS_TIMEOUT_MS = 4000;
+constexpr int PROJECT_PANEL_WIDTH = 240;
+constexpr int CONTEXT_PANEL_WIDTH = 300;
 
 QString describeErrors(const QList<core::FileError>& errors)
 {
@@ -64,39 +68,44 @@ QAction* makeAction(QObject* parent, const QString& objectName, const QString& t
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
     resize(DEFAULT_WIDTH, DEFAULT_HEIGHT);
-    // On the left, the scenes (flow) or the scene tree (a scene), and under it what to
-    // place: sheets and presets. On the right, the selected scene (flow) or entity (a
-    // scene), and the classes.
+    // On the left, the project's scenes, presets and sheets; on the right, what is
+    // selected in the current tab. Both go beside each project's tabs.
     m_scenes = new ScenesPanel(this);
-    m_scenesDock =
-        addDock(m_scenes, tr("Scenes"), QStringLiteral("scenesDock"), Qt::LeftDockWidgetArea);
-    m_sceneTree = new SceneTreePanel(this);
-    m_sceneTreeDock = addDock(m_sceneTree, tr("Entities"), QStringLiteral("sceneTreeDock"),
-                              Qt::LeftDockWidgetArea);
-    m_sheetBrowser = new SheetBrowserPanel(m_sheets, this);
-    m_sheetBrowserDock = addDock(m_sheetBrowser, tr("Sheets"), QStringLiteral("sheetBrowserDock"),
-                                 Qt::LeftDockWidgetArea);
     m_presets = new PresetsPanel(this);
-    m_presetsDock =
-        addDock(m_presets, tr("Presets"), QStringLiteral("presetsDock"), Qt::LeftDockWidgetArea);
-    tabifyDockWidget(m_sheetBrowserDock, m_presetsDock);
-    m_sheetBrowserDock->raise();
+    m_sheetBrowser = new SheetBrowserPanel(m_sheets, this);
+    m_projectPanel = new QTabWidget(this);
+    m_projectPanel->setObjectName(QStringLiteral("projectPanel"));
+    m_projectPanel->setDocumentMode(true);
+    m_projectPanel->addTab(m_scenes, tr("Scenes"));
+    m_projectPanel->addTab(m_presets, tr("Presets"));
+    m_projectPanel->addTab(m_sheetBrowser, tr("Sheets"));
     m_sceneSettings = new SceneSettingsPanel(this);
-    m_sceneSettingsDock = addDock(m_sceneSettings, tr("Scene"), QStringLiteral("sceneSettingsDock"),
-                                  Qt::RightDockWidgetArea);
+    m_sceneTree = new SceneTreePanel(this);
     m_inspector = new InspectorPanel(this);
-    m_inspectorDock = addDock(m_inspector, tr("Inspector"), QStringLiteral("inspectorDock"),
-                              Qt::RightDockWidgetArea);
-    m_classes = new ClassesPanel(this);
-    m_classesDock =
-        addDock(m_classes, tr("Classes"), QStringLiteral("classesDock"), Qt::RightDockWidgetArea);
-    m_tabDocks = {{m_scenesDock, false},
-                  {m_sceneSettingsDock, false},
-                  {m_sceneTreeDock, true},
-                  {m_presetsDock, true},
-                  {m_inspectorDock, true}};
+    m_entityPanel = new QSplitter(Qt::Vertical, this);
+    m_entityPanel->setObjectName(QStringLiteral("entityPanel"));
+    m_entityPanel->addWidget(m_sceneTree);
+    m_entityPanel->addWidget(m_inspector);
+    m_entityPanel->setStretchFactor(0, 2);
+    m_entityPanel->setStretchFactor(1, 3);
+    m_contextPanel = new QStackedWidget(this);
+    m_contextPanel->setObjectName(QStringLiteral("contextPanel"));
+    m_contextPanel->addWidget(m_sceneSettings);
+    m_contextPanel->addWidget(m_entityPanel);
+    m_sideWidths = {PROJECT_PANEL_WIDTH, CONTEXT_PANEL_WIDTH};
+    connect(m_presets, &PresetsPanel::currentPresetChanged, this, [this](const QString& id) {
+        if (m_presetsView) {
+            m_presetsView->showPreset(id);
+        }
+    });
+    connect(m_presets, &PresetsPanel::editRequested, this,
+            [this](const QString& id) { openPresets(id); });
     connect(m_scenes, &ScenesPanel::sceneActivated, this, &MainWindow::openScene);
     connect(m_sheetBrowser, &SheetBrowserPanel::placeRequested, this, &MainWindow::placeSheetItem);
+    connect(m_sheetBrowser, &SheetBrowserPanel::chosen, this,
+            [this](const std::optional<SheetItem>& item) {
+                m_inspector->setImage(item ? std::optional(item->toImage()) : std::nullopt);
+            });
     connect(m_presets, &PresetsPanel::placeRequested, this, &MainWindow::placePreset);
     connect(m_sheetBrowser, &SheetBrowserPanel::sheetFilesDropped, this, &MainWindow::addSheets);
     createActions();
@@ -163,7 +172,7 @@ void MainWindow::createActions()
         if (SceneView* view = currentSceneView()) {
             view->canvas().removeSelection();
         }
-        else if (m_flowScene) {
+        else if (m_flowScene && m_tabs->currentWidget() == m_flowView) {
             m_flowScene->removeSelection();
         }
     });
@@ -240,9 +249,29 @@ void MainWindow::createActions()
     m_snapAction = makeAction(this, QStringLiteral("snapAction"), tr("&Snap to Grid"),
                               {QKeySequence(Qt::CTRL | Qt::Key_Apostrophe)});
     m_snapAction->setCheckable(true);
+    m_projectPanelAction =
+        makeAction(this, QStringLiteral("projectPanelAction"), tr("&Project Panel"),
+                   {QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_1)});
+    m_contextPanelAction =
+        makeAction(this, QStringLiteral("contextPanelAction"), tr("&Context Panel"),
+                   {QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_2)});
+    for (auto [action, panel] :
+         {std::pair<QAction*, QWidget*>{m_projectPanelAction, m_projectPanel},
+          {m_contextPanelAction, m_contextPanel}}) {
+        action->setCheckable(true);
+        action->setChecked(true);
+        connect(action, &QAction::toggled, this, [this, panel = panel](bool shown) {
+            if (m_tabs) {
+                panel->setVisible(shown);
+            }
+        });
+    }
     connect(m_snapAction, &QAction::toggled, this, [this](bool snapping) {
-        for (int i = 1; m_tabs && i < m_tabs->count(); ++i) {
-            static_cast<SceneView*>(m_tabs->widget(i))->canvas().setSnapping(snapping);
+        for (SceneView* view : sceneViews()) {
+            view->canvas().setSnapping(snapping);
+        }
+        if (m_presetsView) {
+            m_presetsView->setSnapping(snapping);
         }
     });
 }
@@ -283,13 +312,8 @@ void MainWindow::createMenus()
     viewMenu->addSeparator();
     viewMenu->addAction(m_snapAction);
     viewMenu->addSeparator();
-    viewMenu->addAction(m_scenesDock->toggleViewAction());
-    viewMenu->addAction(m_sceneSettingsDock->toggleViewAction());
-    viewMenu->addAction(m_sceneTreeDock->toggleViewAction());
-    viewMenu->addAction(m_sheetBrowserDock->toggleViewAction());
-    viewMenu->addAction(m_presetsDock->toggleViewAction());
-    viewMenu->addAction(m_inspectorDock->toggleViewAction());
-    viewMenu->addAction(m_classesDock->toggleViewAction());
+    viewMenu->addAction(m_projectPanelAction);
+    viewMenu->addAction(m_contextPanelAction);
 
     QMenu* helpMenu = menuBar()->addMenu(tr("&Help"));
     helpMenu->addAction(tr("&About Shoal"), this, &MainWindow::showAbout);
@@ -304,25 +328,39 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     m_scenes->setFlowScene(nullptr);
     m_sceneSettings->setFlowScene(nullptr);
     m_inspector->setFlowScene(nullptr);
-    m_classes->setDocument(nullptr);
     m_presets->setDocument(nullptr);
     if (m_tabs) {
         disconnect(m_tabs, nullptr, this, nullptr);
-        for (int i = 1; i < m_tabs->count(); ++i) {
-            disconnect(&static_cast<SceneView*>(m_tabs->widget(i))->canvas(), nullptr, this,
-                       nullptr);
+        for (SceneView* view : sceneViews()) {
+            disconnect(&view->canvas(), nullptr, this, nullptr);
+        }
+        if (m_presetsView) {
+            disconnect(m_presetsView, nullptr, this, nullptr);
+        }
+        if (m_presetCanvas) {
+            disconnect(m_presetCanvas, nullptr, this, nullptr);
+        }
+    }
+    if (m_tabs) {
+        // The side panels outlive the project's tabs.
+        m_sideWidths = m_tabs->sideWidths();
+        for (QWidget* panel :
+             {static_cast<QWidget*>(m_projectPanel), static_cast<QWidget*>(m_contextPanel)}) {
+            panel->hide();
+            panel->setParent(this);
         }
     }
     delete takeCentralWidget();
     m_tabs = nullptr;
+    m_panelsFor.reset();
     m_flowView = nullptr;
+    m_presetsView = nullptr;
     if (m_flowScene) {
         disconnect(m_flowScene.get(), nullptr, this, nullptr);
     }
     m_flowScene.reset();
     m_document = std::move(document);
     updateSheets();
-    m_classes->setDocument(m_document.get());
     m_presets->setDocument(m_document.get());
 
     if (m_document) {
@@ -330,19 +368,44 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         m_scenes->setFlowScene(m_flowScene.get());
         m_sceneSettings->setFlowScene(m_flowScene.get());
         m_inspector->setFlowScene(m_flowScene.get());
-        m_tabs = new QTabWidget(this);
+        m_tabs = new WorkspaceTabs(this);
         m_tabs->setObjectName(QStringLiteral("workspaceTabs"));
-        m_tabs->setDocumentMode(true);
-        m_tabs->setTabsClosable(true);
-        m_tabs->setMovable(true);
+        m_tabs->tabBar()->setTabsClosable(true);
+        m_tabs->tabBar()->setMovable(true);
+        m_tabs->setSidePanels(m_projectPanel, m_contextPanel, m_sideWidths);
+        m_projectPanel->setVisible(m_projectPanelAction->isChecked());
+        m_contextPanel->setVisible(m_contextPanelAction->isChecked());
         m_flowView = new FlowView(*m_flowScene, m_tabs);
         m_flowView->setObjectName(QStringLiteral("flowView"));
         m_tabs->addTab(m_flowView, tr("Flow"));
-        m_tabs->tabBar()->setTabButton(0, QTabBar::RightSide, nullptr);  // not closable
-        m_tabs->tabBar()->setTabButton(0, QTabBar::LeftSide, nullptr);
+        m_presetsView = new PresetsView(*m_document, m_sheets, m_tabs);
+        m_presetsView->setObjectName(QStringLiteral("presetsView"));
+        m_presetsView->setSnapping(m_snapAction->isChecked());
+        m_tabs->addTab(m_presetsView, tr("Presets"));
+        for (int i = 0; i < 2; ++i) {  // neither is closable
+            m_tabs->tabBar()->setTabButton(i, QTabBar::RightSide, nullptr);
+            m_tabs->tabBar()->setTabButton(i, QTabBar::LeftSide, nullptr);
+        }
+        connect(m_presetsView, &PresetsView::viewChanged, this, [this] {
+            if (m_tabs->currentWidget() == m_presetsView) {
+                onCurrentTabChanged();
+            }
+            // The canvas it replaced may still be going.
+            if (m_presetCanvas) {
+                disconnect(m_presetCanvas, nullptr, this, nullptr);
+            }
+            m_presetCanvas = m_presetsView->view() ? &m_presetsView->view()->canvas() : nullptr;
+            if (m_presetCanvas) {
+                connect(m_presetCanvas, &QGraphicsScene::selectionChanged, this,
+                        &MainWindow::updateActions);
+                connect(m_presetCanvas, &SceneCanvas::presetMade, this,
+                        [this](const QString& id) { openPresets(id); });
+            }
+        });
+        m_presetsView->showPreset(m_presets->currentPreset());
         setCentralWidget(m_tabs);
-        connect(m_tabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeSceneTab);
-        connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onCurrentTabChanged);
+        connect(m_tabs, &WorkspaceTabs::tabCloseRequested, this, &MainWindow::closeSceneTab);
+        connect(m_tabs, &WorkspaceTabs::currentChanged, this, &MainWindow::onCurrentTabChanged);
 
         core::CommandStack& commands = m_document->commands();
         connect(&commands, &core::CommandStack::indexChanged, this, &MainWindow::updateActions);
@@ -355,21 +418,20 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         connect(m_flowScene.get(), &FlowScene::sceneActivated, this, &MainWindow::openScene);
         connect(m_document.get(), &core::ProjectDocument::sceneRemoved, this,
                 [this](const QString& id) {
-                    for (int i = m_tabs->count() - 1; i >= 1; --i) {
-                        if (static_cast<SceneView*>(m_tabs->widget(i))->canvas().sceneId() == id) {
-                            closeSceneTab(i);
+                    for (SceneView* view : sceneViews()) {
+                        if (view->canvas().sceneId() == id) {
+                            closeSceneTab(m_tabs->indexOf(view));
                         }
                     }
                 });
-        connect(
-            m_document.get(), &core::ProjectDocument::sceneRenamed, this,
-            [this](const QString& from, const QString& to) {
-                for (int i = 1; i < m_tabs->count(); ++i) {
-                    if (static_cast<SceneView*>(m_tabs->widget(i))->canvas().sceneId() == from) {
-                        m_tabs->setTabText(i, to);
+        connect(m_document.get(), &core::ProjectDocument::sceneRenamed, this,
+                [this](const QString& from, const QString& to) {
+                    for (SceneView* view : sceneViews()) {
+                        if (view->canvas().sceneId() == from) {
+                            m_tabs->setTabText(m_tabs->indexOf(view), to);
+                        }
                     }
-                }
-            });
+                });
         // Once the window has its final size.
         QTimer::singleShot(0, m_flowView, &FlowView::fitAll);
     }
@@ -381,18 +443,55 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     }
     updateTitle();
     updateActions();
-    updateDocks();
+    updatePanels();
 }
 
 SceneView* MainWindow::currentSceneView() const
 {
-    return m_tabs && m_tabs->currentIndex() > 0 ? static_cast<SceneView*>(m_tabs->currentWidget())
-                                                : nullptr;
+    if (!m_tabs) {
+        return nullptr;
+    }
+    if (m_tabs->currentWidget() == m_presetsView) {
+        return m_presetsView->view();
+    }
+    return qobject_cast<SceneView*>(m_tabs->currentWidget());
 }
 
 CanvasView* MainWindow::currentCanvasView() const
 {
-    return m_tabs ? static_cast<CanvasView*>(m_tabs->currentWidget()) : nullptr;
+    if (SceneView* view = currentSceneView()) {
+        return view;
+    }
+    return m_tabs ? qobject_cast<CanvasView*>(m_tabs->currentWidget()) : nullptr;
+}
+
+QList<SceneView*> MainWindow::sceneViews() const
+{
+    QList<SceneView*> views;
+    for (int i = 0; m_tabs && i < m_tabs->count(); ++i) {
+        if (auto* view = qobject_cast<SceneView*>(m_tabs->widget(i))) {
+            views << view;
+        }
+    }
+    return views;
+}
+
+PresetsView* MainWindow::openPresets(const QString& presetId)
+{
+    if (!m_presetsView) {
+        return nullptr;
+    }
+    m_tabs->setCurrentWidget(m_presetsView);
+    if (!presetId.isEmpty()) {
+        m_presets->setCurrentPreset(presetId);  // which the tab shows
+    }
+    return m_presetsView;
+}
+
+QString MainWindow::makePresetFromSelection()
+{
+    SceneView* view = currentSceneView();
+    return view ? view->canvas().makePresetFromSelection() : QString();  // shown on presetMade
 }
 
 SceneView* MainWindow::openScene(const QString& sceneId)
@@ -400,10 +499,9 @@ SceneView* MainWindow::openScene(const QString& sceneId)
     if (!m_document || !m_document->project().scenes.contains(sceneId)) {
         return nullptr;
     }
-    for (int i = 1; i < m_tabs->count(); ++i) {
-        auto* view = static_cast<SceneView*>(m_tabs->widget(i));
+    for (SceneView* view : sceneViews()) {
         if (view->canvas().sceneId() == sceneId) {
-            m_tabs->setCurrentIndex(i);
+            m_tabs->setCurrentWidget(view);
             return view;
         }
     }
@@ -411,6 +509,8 @@ SceneView* MainWindow::openScene(const QString& sceneId)
     view->setObjectName(QStringLiteral("sceneView"));
     view->canvas().setSnapping(m_snapAction->isChecked());
     connect(&view->canvas(), &QGraphicsScene::selectionChanged, this, &MainWindow::updateActions);
+    connect(&view->canvas(), &SceneCanvas::presetMade, this,
+            [this](const QString& id) { openPresets(id); });
     m_tabs->setCurrentIndex(m_tabs->addTab(view, sceneId));
     QTimer::singleShot(0, view, &CanvasView::fitAll);
     return view;
@@ -418,10 +518,10 @@ SceneView* MainWindow::openScene(const QString& sceneId)
 
 void MainWindow::closeSceneTab(int index)
 {
-    if (!m_tabs || index <= 0) {
-        return;  // the flow tab stays
+    auto* view = m_tabs ? qobject_cast<SceneView*>(m_tabs->widget(index)) : nullptr;
+    if (!view) {
+        return;  // the flow and presets tabs stay
     }
-    auto* view = static_cast<SceneView*>(m_tabs->widget(index));
     disconnect(&view->canvas(), nullptr, this, nullptr);
     if (m_sceneTree->canvas() == &view->canvas()) {
         setPanelCanvas(nullptr);
@@ -434,7 +534,7 @@ void MainWindow::onCurrentTabChanged()
 {
     setPanelCanvas(currentSceneView());
     updateActions();
-    updateDocks();
+    updatePanels();
 }
 
 void MainWindow::setPanelCanvas(SceneView* view)
@@ -444,32 +544,37 @@ void MainWindow::setPanelCanvas(SceneView* view)
     m_inspector->setCanvas(canvas);
 }
 
-void MainWindow::updateDocks()
+void MainWindow::updatePanels()
 {
-    const bool forScene = currentSceneView() != nullptr;
-    if (m_docksForScene == forScene) {
+    if (!m_tabs) {
         return;
     }
-    for (TabDock& tabDock : m_tabDocks) {
-        // Leaving its kind of tab: remember it as the user left it, before hiding it.
-        if (m_docksForScene && tabDock.forScene == *m_docksForScene) {
-            tabDock.wanted = !tabDock.dock->isHidden();
-        }
-        const bool shown = tabDock.forScene == forScene;
-        tabDock.dock->toggleViewAction()->setVisible(shown);
-        tabDock.dock->setVisible(shown && tabDock.wanted);
+    // The presets tab is edited as a scene is, with or without a preset.
+    const TabKind kind = m_tabs->currentWidget() == m_flowView      ? TabKind::Flow
+                         : m_tabs->currentWidget() == m_presetsView ? TabKind::Presets
+                                                                    : TabKind::Scene;
+    if (m_panelsFor == kind) {
+        return;
     }
-    m_docksForScene = forScene;
-}
-
-QDockWidget* MainWindow::addDock(QWidget* panel, const QString& title, const QString& objectName,
-                                 Qt::DockWidgetArea area)
-{
-    auto* dock = new QDockWidget(title, this);
-    dock->setObjectName(objectName);
-    dock->setWidget(panel);
-    addDockWidget(area, dock);
-    return dock;
+    if (m_panelsFor == TabKind::Scene) {
+        m_sceneList = m_projectPanel->currentWidget();
+    }
+    m_panelsFor = kind;
+    m_contextPanel->setCurrentWidget(kind == TabKind::Flow ? static_cast<QWidget*>(m_sceneSettings)
+                                                           : m_entityPanel);
+    // The lists the tab works with: the scenes on the flow, what to place on a scene or a
+    // preset. A scene comes back to the one the user chose last on a scene.
+    QWidget* current = kind == TabKind::Flow      ? static_cast<QWidget*>(m_scenes)
+                       : kind == TabKind::Presets ? static_cast<QWidget*>(m_presets)
+                       : m_sceneList              ? m_sceneList.data()
+                                                  : m_sheetBrowser;
+    // Shown before the others are hidden, so hiding the current one doesn't pick another.
+    m_projectPanel->setTabVisible(m_projectPanel->indexOf(current), true);
+    m_projectPanel->setCurrentWidget(current);
+    const bool flow = kind == TabKind::Flow;
+    m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_scenes), flow);
+    m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_presets), !flow);
+    m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_sheetBrowser), !flow);
 }
 
 void MainWindow::updateSheets()
@@ -539,6 +644,9 @@ void MainWindow::placeSheetItem(const SheetItem& item)
 
 void MainWindow::placePreset(const QString& presetId)
 {
+    if (m_tabs && m_tabs->currentWidget() == m_presetsView) {
+        return;  // there, choosing a preset edits it; dragging one places it
+    }
     SceneView* view = currentSceneView();
     if (!view) {
         statusBar()->showMessage(tr("Open a scene to place %1 in it.").arg(presetId),
@@ -729,7 +837,7 @@ void MainWindow::updateActions()
     m_redoAction->setEnabled(canRedo);
     m_redoAction->setText(canRedo ? tr("&Redo %1").arg(commands->redoText()) : tr("&Redo"));
 
-    const bool flow = open && !currentSceneView();
+    const bool flow = open && m_tabs && m_tabs->currentWidget() == m_flowView;
     m_addSceneAction->setEnabled(flow);
     const QStringList scenes = flow ? m_flowScene->selectedSceneIds() : QStringList();
     const QStringList transitions = flow ? m_flowScene->selectedTransitionIds() : QStringList();
@@ -750,6 +858,25 @@ void MainWindow::updateActions()
     else {
         m_deleteAction->setEnabled(!scenes.isEmpty() || !transitions.isEmpty());
     }
+    updateSheetChoice();
+}
+
+void MainWindow::updateSheetChoice()
+{
+    // One entity selected, that can be changed: its image, or none.
+    SceneView* view = currentSceneView();
+    const QList<core::EntityPath> selected =
+        view ? view->canvas().selectedPaths() : QList<core::EntityPath>();
+    const core::Scene* scene = view ? view->canvas().scene() : nullptr;
+    const core::Entity* entity = scene && selected.size() == 1 && view->canvas().isEditable()
+                                     ? core::entityAt(*scene, selected.first())
+                                     : nullptr;
+    if (!entity) {
+        m_sheetBrowser->setChoice(false, std::nullopt);
+        return;
+    }
+    m_sheetBrowser->setChoice(
+        true, entity->image ? std::optional(SheetItem::fromImage(*entity->image)) : std::nullopt);
 }
 
 void MainWindow::showAbout()

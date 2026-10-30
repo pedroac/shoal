@@ -28,11 +28,12 @@ class ColorButton;
 class FlowScene;
 class PointGrid;
 class SceneCanvas;
+class PresetSettingsPanel;
 class SceneSettingsPanel;
 
 /// The selected entity of the current scene, or, with none selected, its top level: the
 /// scene itself, with its settings (see SceneSettingsPanel), the rect its top-level
-/// entities measure against.
+/// entities measure against; or, for a preset, the preset's (see PresetSettingsPanel).
 ///
 /// An entity shows its id, its classes, whether it is active and
 /// visible, its position (with an offset, when it is relative), angle, scale and flips, then
@@ -60,7 +61,10 @@ public:
     /// What edits the top level's settings, as the flow's Scene panel does.
     void setFlowScene(FlowScene* flow);
     SceneSettingsPanel* topLevel() const { return m_topLevel; }
-    /// Whether it shows the top level, nothing being selected, in place of an entity.
+    /// A preset's top level: the preset's settings.
+    PresetSettingsPanel* presetTopLevel() const { return m_presetTopLevel; }
+    /// Whether it shows the top level, nothing being selected, in place of an entity: the
+    /// scene's settings, or the preset's.
     bool showsTopLevel() const;
 
     QLabel* summary() const { return m_summary; }
@@ -154,6 +158,9 @@ public slots:
     void applyPivot(std::optional<core::Point> pivot);
     void setImageMode(core::ImageMode mode);
     void removeImage();
+    /// Gives the entity `image`, as the sheets pick it, or none (see removeImage()). Its
+    /// mode stays for another sprite; a size of its own stays.
+    void setImage(const std::optional<core::Image>& image);
     void setFill(std::optional<core::Color> fill);
     void setTint(const core::Color& tint);
     void setTintMode(core::TintMode mode);
@@ -189,6 +196,9 @@ private:
     core::Frame frameOf(const core::EntityPath& path) const;
     void completeClass(const QString& text);
     void insertClass(const QString& name);
+    /// The section's form holding the row of `field`.
+    QFormLayout* formOf(const QWidget* field) const;
+    void setRowVisible(QWidget* field, bool visible);
 
     QPointer<SceneCanvas> m_canvas;
     QPointer<core::ProjectDocument> m_document;
@@ -236,9 +246,9 @@ private:
     QDoubleSpinBox* m_parallaxXBox;
     QDoubleSpinBox* m_parallaxYBox;
     QLabel* m_message;
-    QFormLayout* m_form;
     QWidget* m_entityForm;
     SceneSettingsPanel* m_topLevel;
+    PresetSettingsPanel* m_presetTopLevel;
     /// The entity's form or the top level's, as big as the bigger, so nothing jumps.
     QStackedWidget* m_pages;
     QWidget* m_scaleRow;

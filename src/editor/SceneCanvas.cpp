@@ -10,6 +10,7 @@
 #include "assets/SheetCache.h"
 #include "assets/SpriteSheet.h"
 #include "core/CommandStack.h"
+#include "core/PresetCommands.h"
 #include "core/Presets.h"
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
@@ -89,6 +90,12 @@ SceneCanvas::SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sh
                     m_sceneId = to;
                 }
             });
+    connect(&m_document, &core::ProjectDocument::presetRenamed, this,
+            [this](const QString& from, const QString& to) {
+                if (m_sceneId == core::presetTreeId(from)) {
+                    m_sceneId = core::presetTreeId(to);
+                }
+            });
     connect(&m_document, &core::ProjectDocument::sceneRemoved, this, [this](const QString& id) {
         if (id == m_sceneId) {
             m_sceneId.clear();
@@ -117,9 +124,12 @@ SceneCanvas::~SceneCanvas()
 
 const core::Scene* SceneCanvas::scene() const
 {
-    const auto& scenes = m_document.project().scenes;
-    const auto it = scenes.find(m_sceneId);
-    return it == scenes.end() ? nullptr : &*it;
+    return m_sceneId.isEmpty() ? nullptr : m_document.entityTree(m_sceneId);
+}
+
+bool SceneCanvas::isEditable() const
+{
+    return !m_sceneId.isEmpty() && m_document.isTreeEditable(m_sceneId);
 }
 
 QRectF SceneCanvas::sceneBounds() const
@@ -276,7 +286,7 @@ bool SceneCanvas::canAddEntities() const
 {
     const core::Scene* current = scene();
     return current && (m_currentParent.isEmpty() || core::entityAt(*current, m_currentParent)) &&
-           !isHiddenOrLocked(m_currentParent) && !isInScreenSpace(m_currentParent);
+           !isHiddenOrLocked(m_currentParent) && !isInScreenSpace(m_currentParent) && isEditable();
 }
 
 EntityPath SceneCanvas::addEntity(Entity entity, QPointF scenePosition)
@@ -362,9 +372,56 @@ void SceneCanvas::removeSelection()
     if (paths.isEmpty()) {
         return;
     }
+    // A preset creates at least one entity.
+    if (presetId()) {
+        const qsizetype topLevel = std::count_if(paths.begin(), paths.end(),
+                                                 [](const EntityPath& p) { return p.size() == 1; });
+        if (scene() && size_t(topLevel) >= scene()->entities.size()) {
+            return;
+        }
+    }
     clearSelection();  // the paths will name other entities afterwards
     m_document.commands().push(
         std::make_unique<core::RemoveEntitiesCommand>(m_document, m_sceneId, paths));
+}
+
+QString SceneCanvas::makePresetFromSelection()
+{
+    const core::Scene* current = scene();
+    const QList<EntityPath> paths = core::outermost(selectedPaths());
+    if (!current || paths.isEmpty()) {
+        return {};
+    }
+    // Around the center of what they draw, their descendants too.
+    QRectF bounds;
+    for (const EntityPath& path : paths) {
+        const EntityItem* entityItem = item(path);
+        bounds = bounds.united(entityItem->mapRectToScene(
+            entityItem->boundingRect().united(entityItem->childrenBoundingRect())));
+    }
+    const core::ImageMetricsFn metrics = imageMetrics();
+    const core::Point center{bounds.center().x(), bounds.center().y()};
+    const EntityPath topLevel{int(current->entities.size())};
+    std::vector<Entity> entities;
+    for (const EntityPath& path : paths) {
+        // As it would be at the top level, then in pixels, as a preset has no rect.
+        Entity entity = core::relocatedEntity(*current, path, topLevel, metrics);
+        entity = core::placedInContainer(core::sceneFrame(*current), core::Frame{},
+                                         std::move(entity), metrics);
+        entity.transform.pos.x -= center.x;
+        entity.transform.pos.y -= center.y;
+        entity.children = core::entityAt(*current, path)->children;
+        entities.push_back(std::move(entity));
+    }
+    const Entity& first = *core::entityAt(*current, paths.first());
+    const QString id = core::uniquePresetId(
+        m_document.project(), first.id.isEmpty() ? QStringLiteral("preset") : first.id);
+    const QString name =
+        paths.size() == 1 ? core::describe(first) : tr("%n entities", nullptr, int(paths.size()));
+    m_document.commands().push(std::make_unique<core::SetPresetCommand>(
+        m_document, id, core::presetOf(name, entities), tr("Make preset %1").arg(id)));
+    emit presetMade(id);
+    return id;
 }
 
 void SceneCanvas::arrangeSelection(core::Arrange arrange)
@@ -766,7 +823,7 @@ void SceneCanvas::rebuild()
     // started the drag is still handling its mouse event.
     const QStringList shape = treeShape(*current);
     EntityPath path;
-    if (shape == m_treeShape) {
+    if (shape == m_treeShape && isEditable() == m_editable) {
         placeItems(current->entities, path, core::sceneFrame(*current), nullptr, core::Color{},
                    false, false, false);
         updateHandles();
@@ -778,8 +835,10 @@ void SceneCanvas::rebuild()
     const QList<EntityPath> selected = selectedPaths();
     clearItems();
     createHandles();
+    // Nothing of a built-in preset can be picked.
+    m_editable = isEditable();
     placeItems(current->entities, path, core::sceneFrame(*current), nullptr, core::Color{}, false,
-               false, true);
+               !m_editable, true);
     select(selected);
     emit contentChanged();
 }

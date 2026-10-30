@@ -161,14 +161,17 @@ void SceneTreePanel::rebuild()
     if (scene) {
         // The top level: the scene, holding the top-level entities. It can't be dragged,
         // hidden or locked.
-        auto* root = new QTreeWidgetItem(m_tree, {m_canvas->sceneId()});
+        auto* root = new QTreeWidgetItem(m_tree, {m_canvas->title()});
         root->setData(NAME, PATH, QVariant::fromValue(EntityPath{}));
         root->setFlags(root->flags() & ~Qt::ItemIsDragEnabled);
         root->setIcon(NAME, style()->standardIcon(QStyle::SP_DirHomeIcon));
-        QString rootTip = tr("The top level: the scene, %1 × %2, which its entities measure "
-                             "against")
-                              .arg(scene->size.width)
-                              .arg(scene->size.height);
+        QString rootTip = m_canvas->presetId()
+                              ? tr("The top level: the preset, placed in the parent new "
+                                   "entities go into")
+                              : tr("The top level: the scene, %1 × %2, which its entities "
+                                   "measure against")
+                                    .arg(scene->size.width)
+                                    .arg(scene->size.height);
         if (m_canvas->currentParent().isEmpty()) {
             QFont font = root->font(NAME);
             font.setBold(true);
@@ -368,6 +371,7 @@ void SceneTreePanel::showContextMenu(const QPoint& position)
     top->setEnabled(!m_canvas->currentParent().isEmpty());
     if (row) {
         menu.addSeparator();
+        menu.addAction(tr("Make Preset"), m_canvas.data(), &SceneCanvas::makePresetFromSelection);
         menu.addAction(tr("Remove"), m_canvas.data(), &SceneCanvas::removeSelection);
     }
     menu.exec(m_tree->viewport()->mapToGlobal(position));

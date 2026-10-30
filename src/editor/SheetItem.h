@@ -23,6 +23,10 @@ struct SheetItem {
 
     /// A new `sprite` or `animation` entity drawing this item, with no id or layer yet.
     core::Entity toEntity() const;
+    /// The image drawing this item, stretched.
+    core::Image toImage() const;
+    /// What `image` draws.
+    static SheetItem fromImage(const core::Image& image);
     QMimeData* toMimeData() const;
     /// The item a drag carries, or nothing if it carries none.
     static std::optional<SheetItem> fromMimeData(const QMimeData* data);

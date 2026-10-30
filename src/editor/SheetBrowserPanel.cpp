@@ -3,15 +3,18 @@
 #include <QDir>
 #include <QDropEvent>
 #include <QFileInfo>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QMimeData>
 #include <QPainter>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <algorithm>
 
 #include "assets/SheetCache.h"
+#include "editor/ClickOrDragView.h"
 
 namespace shoal::editor {
 
@@ -58,11 +61,11 @@ QTreeWidgetItem* groupRow(QTreeWidgetItem* sheetRow, const QString& text)
 
 }  // namespace
 
-/// Drags the selected sprite or animation, never a sheet or a group, and takes drops of
-/// .sprat files only.
-class SheetBrowserPanel::Tree : public QTreeWidget {
+/// Drags a sprite or an animation, never a sheet or a group, without making it current
+/// (see ClickOrDragView), and takes drops of .sprat files only.
+class SheetBrowserPanel::Tree : public ClickOrDragView<QTreeWidget> {
 public:
-    explicit Tree(SheetBrowserPanel* panel) : QTreeWidget(panel), m_panel(panel) {}
+    explicit Tree(SheetBrowserPanel* panel) : ClickOrDragView(panel), m_panel(panel) {}
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override { dragMoveEvent(event); }
@@ -119,8 +122,16 @@ private:
 };
 
 SheetBrowserPanel::SheetBrowserPanel(assets::SheetCache& sheets, QWidget* parent)
-    : QWidget(parent), m_sheets(sheets), m_tree(new Tree(this)), m_filter(new QLineEdit(this))
+    : QWidget(parent),
+      m_sheets(sheets),
+      m_tree(new Tree(this)),
+      m_filter(new QLineEdit(this)),
+      m_noneButton(new QToolButton(this))
 {
+    m_noneButton->setObjectName(QStringLiteral("noImageButton"));
+    m_noneButton->setText(tr("None"));
+    m_noneButton->setToolTip(tr("No image for the selected entity"));
+    m_noneButton->setCheckable(true);
     m_filter->setObjectName(QStringLiteral("sheetFilter"));
     m_filter->setPlaceholderText(tr("Filter sprites and animations"));
     m_filter->setClearButtonEnabled(true);
@@ -134,17 +145,32 @@ SheetBrowserPanel::SheetBrowserPanel(assets::SheetCache& sheets, QWidget* parent
     m_tree->setAcceptDrops(true);  // .sprat files; Tree refuses everything else
     m_tree->viewport()->setAcceptDrops(true);
 
+    auto* top = new QHBoxLayout;
+    top->addWidget(m_filter);
+    top->addWidget(m_noneButton);
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(m_filter);
+    layout->addLayout(top);
     layout->addWidget(m_tree);
 
     connect(m_filter, &QLineEdit::textChanged, this, &SheetBrowserPanel::applyFilter);
     connect(m_tree, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* row) {
-        if (const std::optional<SheetItem> item = itemOf(row)) {
+        if (const std::optional<SheetItem> item = itemOf(row); item && !m_picking) {
             emit placeRequested(*item);
         }
     });
+    connect(m_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* row) {
+        if (const std::optional<SheetItem> item = itemOf(row); item && m_picking && !m_syncing) {
+            emit chosen(item);
+        }
+    });
+    connect(m_noneButton, &QToolButton::clicked, this, [this] {
+        if (m_picking) {
+            emit chosen(std::nullopt);
+        }
+        m_noneButton->setChecked(m_picking);  // it shows; the entity decides
+    });
+    setChoice(false, std::nullopt);
     connect(&m_sheets, &assets::SheetCache::sheetChanged, this, &SheetBrowserPanel::onSheetChanged);
     for (const QString& alias : m_sheets.aliases()) {
         onSheetChanged(alias);
@@ -189,6 +215,23 @@ std::optional<SheetItem> SheetBrowserPanel::itemOf(const QTreeWidgetItem* row)
     }
     return SheetItem{kind == ANIMATION_ROW ? SheetItem::Kind::Animation : SheetItem::Kind::Sprite,
                      row->data(0, SHEET).toString(), row->data(0, NAME).toString()};
+}
+
+void SheetBrowserPanel::setChoice(bool picking, const std::optional<SheetItem>& current)
+{
+    m_picking = picking;
+    m_syncing = true;
+    m_noneButton->setEnabled(picking);
+    m_noneButton->setChecked(picking && !current);
+    QTreeWidgetItem* row = picking && current ? itemRow(*current) : nullptr;
+    if (row) {
+        m_tree->setCurrentItem(row);
+        m_tree->scrollToItem(row);
+    }
+    else if (picking) {
+        m_tree->setCurrentItem(nullptr);
+    }
+    m_syncing = false;
 }
 
 void SheetBrowserPanel::setFilter(const QString& text)

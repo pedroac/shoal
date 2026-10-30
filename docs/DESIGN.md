@@ -789,6 +789,11 @@ Problems panel warns.
     1920×1080 rect), Spawn Mark (`#spawn`, `.spawn`) and Camera (`#camera`,
     `.main`, a view of the design resolution, its pivot at the center). A project
     preset with the same id replaces one.
+  - **Presets are edited as scenes are**, in the Presets workspace (section 13):
+    their entities are a tree with no rect, placed at a point, and each edit to
+    them writes the preset's `entities` back, one undo step. A built-in preset is
+    read-only until it is customized, which copies it into the project under the
+    same id; reverting removes the copy.
 
 ## 13. The editor
 
@@ -814,14 +819,45 @@ Problems panel warns.
     selected scene: its id (renaming it as the context menu does), whether the game
     starts there, its size and its fit (the project's, or its own), each one undo
     step.
-- **Docks follow the current tab**, and show only where they can be used: the
-  scenes and the scene panel on the flow; the scene tree, the presets and the
-  inspector on a scene; the sheets and the classes on both. The View menu lists
-  only the current tab's, and a dock the user closes stays closed the next time
-  that kind of tab is current.
+- **Three workspaces**, as tabs: the flow, the presets, then each open scene. The
+  flow's and the presets' can't be closed.
+- **Side panels, under the tabs:** the tab bar runs across the window, and under it
+  the current workspace sits between two panels, shared by every tab.
+  - On the left, the **project panel**: the project's own data, a tab for each list
+    the workspace works with. The flow has the scenes; a scene and the presets have
+    the presets and the sheets, to place from. Coming to the presets shows the
+    presets, the list that tab edits; a scene shows the list last chosen on a scene,
+    the sheets at first.
+  - On the right, the **context panel**: what is selected in the current tab. On the
+    flow, the selected scene's settings; on a scene or the presets, the entity tree
+    over the inspector.
+  - They start narrow (240 px on the left, 300 px on the right) and the workspace
+    takes the rest; they keep the widths the user gives them, from one project to
+    the next. The View menu hides or shows each one.
 - **Files:** a new project starts from a template, in memory; its folder is asked
   on the first save. Opening takes a project folder or its `project.shoal.json`,
   also from the command line. Closing or replacing a modified project asks first.
+- **Presets workspace:** the preset current in the project panel's Presets list
+  (every preset the project can create entities from, the built-in ones too), its
+  entities on a canvas, around a cross where it is placed. The scene tree, the
+  inspector and the sheets work on it as on a scene; presets are dragged from the
+  list onto it to nest them, while choosing one there edits it rather than placing
+  it. The tree's top level is the preset, and the
+  inspector's top level its settings: its id (its file's name; a customized one
+  keeps the built-in's), name, classes, color and description, each one undo step.
+  - A built-in preset's entities can't be picked or changed; its settings show
+    Customize. A customized one shows Revert to Built-in.
+  - Under the list, New adds a preset creating one mark and Duplicate copies the
+    current one, built-in or not, as a project preset, each shown in the Presets
+    tab; Remove removes a project preset, or reverts a
+    customized one. Renaming refuses an id another preset has, built-in ones
+    included.
+  - A preset creates one entity at least: removing all of its top-level entities is
+    refused.
+  - **Make Preset**, in the context menus of a scene's canvas and tree, makes a
+    preset of the selected entities and their descendants, as drawn, in pixels,
+    around the center of what they draw, and shows it. Its id is the first
+    entity's, made unique, or `preset`.
 - **Scene view (micro):** the canvas, with the scene tree, an inspector,
   a sprat sheet browser (drag sprites onto the canvas), selection and
   move/rotate/scale gizmos, and snapping.
@@ -885,7 +921,11 @@ Problems panel warns.
     flags, position, angle (degrees), scale and flips, then its parts: its size
     and pivot, its image (its mode, or removing it), its fill, its tint and tint mode,
     whether it clips, its container, its space and its parallax. A check box adds or removes each part that can be absent. Each change
-    is one undo step; a scale can't be zero. An entity with a size of its own shows
+    is one undo step. The fields are in sections, under the id, classes and flags:
+    Transform (position, offset, angle, scale, flips), Rect (size, pivot), Look
+    (image, fill, tint), Children (clip, container, tile pivot) and Camera (space,
+    parallax). A position's or a size's axes are a line each, with their units, so
+    the inspector fits a narrow panel, and it scrolls when the panel is shorter than it; a scale can't be zero. An entity with a size of its own shows
     its scale only when it isn't 1.
   - Size and pivot each have an "Own" check box, off for an entity placed from a
     sprite: while it is off, the fields show the sprite's values, read-only, and the
@@ -908,17 +948,27 @@ Problems panel warns.
     transitions, and one a transition names can't be removed. Classes are typed
     separated by spaces or commas, with an optional leading dot; they complete from
     the class registry and show their declarations' docs as a tooltip.
-  - The classes panel is the class registry: every class declared or in use, with
-    its color, its number of uses across the scenes and its doc. Classes in use
-    but not declared are in italics. Editing a doc or a color declares the class,
-    creating `classes.json` if needed; undeclaring keeps the entities' classes.
+  - Class declarations (`classes.json`) have no panel for now: they are edited by
+    hand, and the inspector completes classes from them and shows their docs.
   - The presets panel lists the built-in and project presets; dropping one on the
     canvas, or double-clicking it, places it as a sprite is placed, in one undo
     step.
+  - **The presets and the sheets tell a click from a drag.** A row becomes current
+    when the mouse is released on it, not when it is pressed, so dragging a row away
+    leaves the current one as it was: dragging a sprite onto a scene doesn't change
+    the selected entity's image, and dragging a preset into the one being edited
+    doesn't change which one that is. A double-click makes the row current too.
   - The sheet browser lists each declared sheet with its sprites (by path, in the
     sheet's order) and animations, as thumbnails, and filters them by name. A sheet
     that didn't load says why. It follows the sheet cache, so a sheet written again
     by sprat shows up at once.
+  - **It picks the selected entity's image.** With one entity selected that can be
+    changed, its sprite or animation is the current row, or None is checked;
+    clicking another row, or None, sets it, one undo step. A nine-slice stays one
+    with another sprite, and a size of its own stays; None keeps the size and pivot
+    the image gave it. Dragging a row still places a new entity, and leaves the
+    picked image as it was; double-clicking one places it only when no entity is
+    picked for.
   - Dropping `.sprat` files on the sheet browser declares them in the manifest, in
     one undo step, each under an alias made from its file name (characters an id
     can't have become `_`, and `_2`, `_3`, ... avoids a clash). The path is relative

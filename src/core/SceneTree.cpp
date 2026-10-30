@@ -119,6 +119,23 @@ void visitAll(const std::vector<Entity>& entities, EntityPath& path,
 
 }  // namespace
 
+namespace {
+const QString PRESET_TREE_PREFIX = QStringLiteral("preset:");
+}  // namespace
+
+QString presetTreeId(const QString& presetId)
+{
+    return PRESET_TREE_PREFIX + presetId;
+}
+
+std::optional<QString> presetOfTree(QStringView treeId)
+{
+    if (!treeId.startsWith(PRESET_TREE_PREFIX)) {
+        return std::nullopt;
+    }
+    return treeId.mid(PRESET_TREE_PREFIX.size()).toString();
+}
+
 const Entity* entityAt(const Scene& scene, const EntityPath& path)
 {
     return find<const Scene, const Entity>(scene, path);

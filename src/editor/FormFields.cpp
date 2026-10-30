@@ -16,6 +16,11 @@ QDoubleSpinBox* numberBox(QWidget* parent, const QString& name, double range, in
     box->setSingleStep(step);
     box->setKeyboardTracking(false);
     box->setAccelerated(true);
+    // Sized for everyday values, not for the range's widest, so panels stay narrow: the
+    // box shrinks to that and grows with its row.
+    box->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    box->setMinimumWidth(box->fontMetrics().horizontalAdvance(QStringLiteral("x -0000.00")) +
+                         box->fontMetrics().height());
     return box;
 }
 

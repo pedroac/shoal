@@ -43,6 +43,14 @@ public:
 
     // --- queries ---
 
+    /// The entities of a scene, or of a preset (see presetTreeId()), a built-in one too,
+    /// as a scene of size 0 at the point it is placed at. Null when there is no such scene
+    /// or preset, or the preset can't be read.
+    const Scene* entityTree(const QString& treeId) const;
+    /// Whether the entity mutators may change it: a scene, or a project's own preset. A
+    /// built-in preset is read-only until a project preset customizes it.
+    bool isTreeEditable(const QString& treeId) const;
+
     /// Whether `id` can name a new scene: a valid id that no other scene uses, ignoring case
     /// (scene ids are folder names). `ignoring` is the scene being renamed, if any.
     bool isSceneIdAvailable(QStringView id, QStringView ignoring = {}) const;
@@ -92,6 +100,11 @@ public:
     void reorderEntities(const QString& sceneId, const EntityPath& parent, const QList<int>& order);
     /// Replaces an entity's own fields; its children stay.
     void setEntityFields(const QString& sceneId, const EntityPath& path, const Entity& fields);
+    /// Adds, replaces or removes (null) a project preset; a built-in one with the same id
+    /// is then customized, or back as it ships.
+    void setPreset(const QString& id, std::optional<Preset> preset);
+    /// Gives a project preset another id.
+    void renamePreset(const QString& from, const QString& to);
     /// Declares a sprat sheet in the manifest, or changes its file; a null `file` removes it.
     void setSheet(const QString& alias, std::optional<QString> file);
     /// Replaces classes.json; null removes it.
@@ -108,8 +121,12 @@ signals:
     void transitionAdded(const QString& id);
     void transitionRemoved(const QString& id);
     void transitionChanged(const QString& id);
-    /// A scene's entities changed.
+    /// A scene's entities changed, or a preset's (by presetTreeId()).
     void sceneContentChanged(const QString& sceneId);
+    /// A project preset was added, changed or removed, its entities included.
+    void presetChanged(const QString& id);
+    /// Before presetChanged() for each.
+    void presetRenamed(const QString& from, const QString& to);
     /// A sheet was declared in the manifest, or its file changed, or it was removed.
     void sheetsChanged();
     /// A class was declared, or its declaration changed or was removed.
@@ -118,10 +135,13 @@ signals:
 
 private:
     ProjectDocument(Project project, QString directory, QStringList files);
+    /// A scene, or an editable preset's tree.
     Scene& sceneForEdit(const QString& sceneId);
     void emitSceneContentChanged(const QString& sceneId);
 
     Project m_project;
+    /// Presets' entities as trees, made when first asked for, by preset id.
+    mutable QMap<QString, Scene> m_presetTrees;
     QString m_directory;
     QStringList m_files;  ///< The project files on disk after the last load or save.
     CommandStack m_commands;

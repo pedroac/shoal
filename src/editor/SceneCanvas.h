@@ -29,8 +29,10 @@ class EntityItem;
 class TileGridOverlay;
 class TransformHandle;
 
-/// One scene's entities, drawn with their parts. It follows the document, so undo and redo
-/// show up here, and turns what the user does into commands.
+/// One scene's entities, drawn with their parts, or a preset's (see core::presetTreeId()),
+/// around the point it is placed at. It follows the document, so undo and redo show up
+/// here, and turns what the user does into commands. A built-in preset is shown, but its
+/// entities can't be picked or changed (see isEditable()).
 ///
 /// Which entities are hidden or locked, the current parent and the grid are the editor's
 /// own state; none of it changes the project. Screen-space entities are laid out in a later
@@ -44,10 +46,16 @@ public:
 
     core::ProjectDocument& document() const { return m_document; }
     assets::SheetCache& sheets() const { return m_sheets; }
-    /// Follows renames. Empty once the scene is removed.
+    /// Follows renames. Empty once the scene is removed. For a preset, its tree's id.
     QString sceneId() const { return m_sceneId; }
-    /// The scene, or null once it is removed.
+    /// The preset it shows, or null for a scene.
+    std::optional<QString> presetId() const { return core::presetOfTree(m_sceneId); }
+    /// The scene's id, or the preset's.
+    QString title() const { return presetId().value_or(m_sceneId); }
+    /// The scene, or the preset's entities as one; null once it is removed.
     const core::Scene* scene() const;
+    /// Whether its entities can be changed: false for a built-in preset.
+    bool isEditable() const;
     /// The scene's own rectangle, from the origin to its size.
     QRectF sceneBounds() const;
 
@@ -94,6 +102,10 @@ public:
     QList<core::EntityPath> addPreset(const QString& presetId, QPointF scenePosition,
                                       QString* error = nullptr);
     void removeSelection();
+    /// Makes a project preset of the selected entities, with their descendants, placed
+    /// around the center of what they draw, in pixels, as they are drawn; one undo step.
+    /// Emits presetMade(); returns the preset's id, or empty if nothing is selected.
+    QString makePresetFromSelection();
     /// Moves the selected entities in draw order among their siblings, keeping them
     /// selected. Nothing if none would move.
     void arrangeSelection(core::Arrange arrange);
@@ -167,6 +179,8 @@ public:
 
 signals:
     void currentParentChanged();
+    /// makePresetFromSelection() made the preset `presetId`.
+    void presetMade(const QString& presetId);
     /// Entities were hidden, shown, locked or unlocked in the editor.
     void entityStateChanged();
     /// The scene's entities changed, and the items were rebuilt or updated.
@@ -196,6 +210,7 @@ private:
     bool m_snapping = false;
     double m_gridSize = 16;
     bool m_dragging = false;
+    bool m_editable = false;  ///< As the items were built.
     TransformHandle* m_rotateHandle = nullptr;
     TransformHandle* m_scaleHandle = nullptr;
     TileGridOverlay* m_gridOverlay = nullptr;

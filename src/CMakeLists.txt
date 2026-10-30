@@ -18,6 +18,8 @@ add_library(shoal_core STATIC
     core/ProjectDocument.h
     core/ProjectStore.cpp
     core/ProjectStore.h
+    core/PresetCommands.cpp
+    core/PresetCommands.h
     core/Presets.cpp
     core/Presets.h
     core/ProjectTemplates.cpp
@@ -55,9 +57,8 @@ shoal_set_warnings(shoal_assets)
 add_library(shoal_editor STATIC
     editor/CanvasView.cpp
     editor/CanvasView.h
-    editor/ClassesPanel.cpp
-    editor/ClassesPanel.h
     editor/ColorButton.cpp
+    editor/ClickOrDragView.h
     editor/ColorButton.h
     editor/EntityItem.cpp
     editor/EntityItem.h
@@ -75,8 +76,12 @@ add_library(shoal_editor STATIC
     editor/NewProjectDialog.h
     editor/PointGrid.cpp
     editor/PointGrid.h
+    editor/PresetSettingsPanel.cpp
+    editor/PresetSettingsPanel.h
     editor/PresetsPanel.cpp
     editor/PresetsPanel.h
+    editor/PresetsView.cpp
+    editor/PresetsView.h
     editor/SceneCanvas.cpp
     editor/SceneCanvas.h
     editor/SceneTreePanel.cpp
@@ -99,6 +104,8 @@ add_library(shoal_editor STATIC
     editor/TransformHandle.h
     editor/TransitionEdgeItem.cpp
     editor/TransitionEdgeItem.h
+    editor/WorkspaceTabs.cpp
+    editor/WorkspaceTabs.h
 )
 add_library(shoal::editor ALIAS shoal_editor)
 target_include_directories(shoal_editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

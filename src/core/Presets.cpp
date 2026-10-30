@@ -109,6 +109,45 @@ QMap<QString, Preset> builtInPresets(Size designResolution)
     };
 }
 
+bool isPresetIdAvailable(const Project& project, QStringView id, QStringView ignoring)
+{
+    if (!isValidId(id)) {
+        return false;
+    }
+    if (id == ignoring) {
+        return true;
+    }
+    return !availablePresets(project).contains(id.toString());
+}
+
+QString uniquePresetId(const Project& project, const QString& base)
+{
+    if (isPresetIdAvailable(project, base)) {
+        return base;
+    }
+    for (int n = 2;; ++n) {
+        const QString candidate = QStringLiteral("%1_%2").arg(base).arg(n);
+        if (isPresetIdAvailable(project, candidate)) {
+            return candidate;
+        }
+    }
+}
+
+Preset presetOf(const QString& name, const std::vector<Entity>& entities)
+{
+    QJsonArray array;
+    for (const Entity& entity : entities) {
+        array.append(entityToJson(entity));
+    }
+    return Preset{QJsonObject{{QStringLiteral("name"), name}, {QStringLiteral("entities"), array}}};
+}
+
+bool isBuiltInPreset(const Project& project, const QString& id)
+{
+    return !project.presets.contains(id) &&
+           builtInPresets(project.manifest.designResolution).contains(id);
+}
+
 QMap<QString, Preset> availablePresets(const Project& project)
 {
     QMap<QString, Preset> presets = builtInPresets(project.manifest.designResolution);

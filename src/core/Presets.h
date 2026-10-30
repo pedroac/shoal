@@ -38,6 +38,16 @@ QMap<QString, Preset> builtInPresets(Size designResolution = {1920, 1080});
 /// own, which win over a built-in one with the same id.
 QMap<QString, Preset> availablePresets(const Project& project);
 
+/// Whether `id` can name a new project preset: a valid id no preset, built-in or not, has.
+/// `ignoring` is the preset being renamed, if any.
+bool isPresetIdAvailable(const Project& project, QStringView id, QStringView ignoring = {});
+/// `base` if it can name a new preset, otherwise `base_2`, `base_3`, ...
+QString uniquePresetId(const Project& project, const QString& base);
+/// A preset named `name` creating `entities`, as a preset file says it.
+Preset presetOf(const QString& name, const std::vector<Entity>& entities);
+/// Whether a preset is one of Shoal's own: built in, and not customized by the project.
+bool isBuiltInPreset(const Project& project, const QString& id);
+
 /// The entities `preset` creates in `scene`, around `position` in the coordinates of the
 /// parent they go into: copies with fresh ids, unique in the scene, nothing linked to the
 /// preset.

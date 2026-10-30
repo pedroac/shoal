@@ -1,6 +1,10 @@
 #include "core/ProjectDocument.h"
 
+#include <QJsonArray>
 #include <algorithm>
+
+#include "core/Presets.h"
+#include "core/ProjectCodec.h"
 
 namespace shoal::core {
 
@@ -118,11 +122,43 @@ QStringList ProjectDocument::transitionsTouching(QStringView sceneId) const
     return ids;
 }
 
+const Scene* ProjectDocument::entityTree(const QString& treeId) const
+{
+    const std::optional<QString> presetId = presetOfTree(treeId);
+    if (!presetId) {
+        const auto scene = m_project.scenes.find(treeId);
+        return scene == m_project.scenes.end() ? nullptr : &*scene;
+    }
+    if (const auto tree = m_presetTrees.constFind(*presetId); tree != m_presetTrees.cend()) {
+        return &*tree;
+    }
+    const QMap<QString, Preset> presets = availablePresets(m_project);
+    if (!presets.contains(*presetId)) {
+        return nullptr;
+    }
+    const PresetRead read = readPresetDefinition(*presetId, presets.value(*presetId));
+    if (!read.definition) {
+        return nullptr;
+    }
+    Scene tree;
+    tree.entities = read.definition->entities;
+    return &*m_presetTrees.insert(*presetId, std::move(tree));
+}
+
+bool ProjectDocument::isTreeEditable(const QString& treeId) const
+{
+    const std::optional<QString> presetId = presetOfTree(treeId);
+    if (!presetId) {
+        return m_project.scenes.contains(treeId);
+    }
+    return m_project.presets.contains(*presetId) && entityTree(treeId);
+}
+
 bool ProjectDocument::isEntityIdAvailable(const QString& sceneId, QStringView id,
                                           const EntityPath& ignoring) const
 {
-    const auto scene = m_project.scenes.find(sceneId);
-    if (!isValidId(id) || scene == m_project.scenes.end()) {
+    const Scene* scene = entityTree(sceneId);
+    if (!isValidId(id) || !scene) {
         return false;
     }
     const EntityPath found = findEntity(*scene, id);
@@ -297,6 +333,10 @@ void ProjectDocument::setTransition(Transition transition)
 
 Scene& ProjectDocument::sceneForEdit(const QString& sceneId)
 {
+    if (const std::optional<QString> presetId = presetOfTree(sceneId)) {
+        Q_ASSERT(isTreeEditable(sceneId));
+        return m_presetTrees[*presetId];
+    }
     const auto it = m_project.scenes.find(sceneId);
     Q_ASSERT(it != m_project.scenes.end());
     return *it;
@@ -304,7 +344,47 @@ Scene& ProjectDocument::sceneForEdit(const QString& sceneId)
 
 void ProjectDocument::emitSceneContentChanged(const QString& sceneId)
 {
+    // A preset's entities go back into its file as they are now.
+    const std::optional<QString> presetId = presetOfTree(sceneId);
+    if (presetId) {
+        QJsonArray entities;
+        for (const Entity& entity : m_presetTrees.value(*presetId).entities) {
+            entities.append(entityToJson(entity));
+        }
+        m_project.presets[*presetId].content.insert(QStringLiteral("entities"), entities);
+    }
     emit sceneContentChanged(sceneId);
+    if (presetId) {
+        emit presetChanged(*presetId);
+    }
+    emit changed();
+}
+
+void ProjectDocument::renamePreset(const QString& from, const QString& to)
+{
+    Q_ASSERT(m_project.presets.contains(from) && !m_project.presets.contains(to));
+    m_project.presets.insert(to, m_project.presets.take(from));
+    m_presetTrees.remove(from);
+    m_presetTrees.remove(to);
+    emit presetRenamed(from, to);
+    emit sceneContentChanged(presetTreeId(from));
+    emit sceneContentChanged(presetTreeId(to));
+    emit presetChanged(from);
+    emit presetChanged(to);
+    emit changed();
+}
+
+void ProjectDocument::setPreset(const QString& id, std::optional<Preset> preset)
+{
+    if (preset) {
+        m_project.presets.insert(id, std::move(*preset));
+    }
+    else {
+        m_project.presets.remove(id);
+    }
+    m_presetTrees.remove(id);  // made again from the file
+    emit sceneContentChanged(presetTreeId(id));
+    emit presetChanged(id);
     emit changed();
 }
 

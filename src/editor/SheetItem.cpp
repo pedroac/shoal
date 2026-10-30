@@ -16,6 +16,13 @@ const QString ANIMATION = QStringLiteral("animation");
 
 core::Entity SheetItem::toEntity() const
 {
+    core::Entity entity;
+    entity.image = toImage();
+    return entity;
+}
+
+core::Image SheetItem::toImage() const
+{
     core::Image image;
     image.sheet = sheet;
     if (kind == Kind::Animation) {
@@ -24,9 +31,13 @@ core::Entity SheetItem::toEntity() const
     else {
         image.sprite = name;
     }
-    core::Entity entity;
-    entity.image = image;
-    return entity;
+    return image;
+}
+
+SheetItem SheetItem::fromImage(const core::Image& image)
+{
+    return image.isAnimation() ? SheetItem{Kind::Animation, image.sheet, image.animation}
+                               : SheetItem{Kind::Sprite, image.sheet, image.sprite};
 }
 
 QMimeData* SheetItem::toMimeData() const

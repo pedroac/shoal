@@ -4,11 +4,15 @@
 #include <QCompleter>
 #include <QDoubleSpinBox>
 #include <QDropEvent>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMimeData>
+#include <QPushButton>
+#include <QScrollArea>
 #include <QScrollBar>
+#include <QStackedWidget>
 #include <QStandardItemModel>
 #include <QStatusBar>
 #include <QStringListModel>
@@ -22,21 +26,24 @@
 
 #include "Support.h"
 #include "assets/SpriteSheet.h"
+#include "core/Presets.h"
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
-#include "editor/ClassesPanel.h"
 #include "editor/EntityItem.h"
 #include "editor/FlowScene.h"
 #include "editor/InspectorPanel.h"
 #include "editor/MainWindow.h"
 #include "editor/PointGrid.h"
+#include "editor/PresetSettingsPanel.h"
 #include "editor/PresetsPanel.h"
+#include "editor/PresetsView.h"
 #include "editor/SceneCanvas.h"
 #include "editor/SceneSettingsPanel.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
 #include "editor/SheetBrowserPanel.h"
 #include "editor/TransformHandle.h"
+#include "editor/WorkspaceTabs.h"
 
 using namespace shoal::core;
 using namespace shoal::editor;
@@ -172,30 +179,32 @@ private slots:
     {
         Fixture f;
         QVERIFY(f.view);
-        QTabWidget* tabs = f.window.tabs();
-        QCOMPARE(tabs->count(), 2);
-        QCOMPARE(tabs->tabText(1), LEVEL_1);
+        WorkspaceTabs* tabs = f.window.tabs();
+        // After the flow and the presets.
+        QCOMPARE(tabs->count(), 3);
+        QCOMPARE(tabs->tabText(1), QStringLiteral("Presets"));
+        QCOMPARE(tabs->tabText(2), LEVEL_1);
         QCOMPARE(f.window.currentSceneView(), f.view);
         QCOMPARE(f.window.openScene(LEVEL_1), f.view);  // the same tab again
-        QCOMPARE(tabs->count(), 2);
+        QCOMPARE(tabs->count(), 3);
 
         // Double-clicking a node in the flow opens its scene too.
         emit f.window.flowScene()->sceneActivated(QStringLiteral("pause"));
-        QCOMPARE(tabs->count(), 3);
-        QCOMPARE(tabs->tabText(2), QStringLiteral("pause"));
+        QCOMPARE(tabs->count(), 4);
+        QCOMPARE(tabs->tabText(3), QStringLiteral("pause"));
     }
 
     void tabsFollowRenamesAndRemovals()
     {
         Fixture f;
         QVERIFY(f.window.flowScene()->renameScene(LEVEL_1, QStringLiteral("forest")));
-        QCOMPARE(f.window.tabs()->tabText(1), QStringLiteral("forest"));
+        QCOMPARE(f.window.tabs()->tabText(2), QStringLiteral("forest"));
         QCOMPARE(f.canvas().sceneId(), QStringLiteral("forest"));
         QVERIFY(f.canvas().item(PLAYER));
 
         f.window.flowScene()->select({QStringLiteral("forest")});
         f.window.flowScene()->removeSelection();
-        QCOMPARE(f.window.tabs()->count(), 1);
+        QCOMPARE(f.window.tabs()->count(), 2);
     }
 
     void drawsEntitiesWithTheirSprites()
@@ -263,6 +272,29 @@ private slots:
         QTest::mouseRelease(f.view->viewport(), Qt::LeftButton, {}, player);
         QCOMPARE(f.document().commands().count(), 0);
         QCOMPARE(f.canvas().item(PLAYER)->pos(), QPointF(320, 640));
+    }
+
+    void theInspectorFitsANarrowPanel()
+    {
+        Fixture f;
+        QVERIFY(f.view);
+        // Its sections take no more than the panel's width, with an image and a tiled
+        // container's rows showing too.
+        f.canvas().select({PLAYER});
+        QApplication::processEvents();
+        const auto* scroll =
+            f.window.inspector()->findChild<QScrollArea*>(QStringLiteral("inspectorScroll"));
+        QVERIFY(scroll);
+        QVERIFY2(scroll->widget()->minimumSizeHint().width() <= 300,
+                 qPrintable(QString::number(scroll->widget()->minimumSizeHint().width())));
+        QVERIFY(f.window.inspector()->showsImage());
+        f.window.inspector()->containerBox()->setCurrentIndex(1);
+        emit f.window.inspector()->containerBox()->activated(1);
+        QVERIFY(f.window.inspector()->showsTilePivot());
+        QVERIFY(scroll->widget()->minimumSizeHint().width() <= 300);
+        // The side panels start narrow, and the canvas takes the rest.
+        QVERIFY(f.window.contextPanel()->width() <= 300);
+        QVERIFY(f.view->width() > f.window.contextPanel()->width() * 2);
     }
 
     void snapsToTheGrid()
@@ -845,6 +877,249 @@ private slots:
         QVERIFY(!inspector->showsTopLevel());
     }
 
+    void theSheetsPickTheSelectedEntitysImage()
+    {
+        Fixture f;
+        SheetBrowserPanel* sheets = f.window.sheetBrowser();
+        QTreeWidget* tree = sheets->tree();
+        // Nothing selected: they only browse, and a double-click places.
+        QVERIFY(!sheets->isPicking());
+        QVERIFY(!sheets->noneButton()->isEnabled());
+
+        // The player's sprite is the current row.
+        f.canvas().select({PLAYER});
+        QVERIFY(sheets->isPicking());
+        QCOMPARE(tree->currentItem(), sheets->itemRow(IDLE_SPRITE));
+        QVERIFY(!sheets->noneButton()->isChecked());
+
+        // Another row is its image now, one undo step.
+        const SheetItem bush{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+                             QStringLiteral("props/bush.png")};
+        tree->setCurrentItem(sheets->itemRow(bush));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Set the image of player"));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, bush.name);
+        tree->setCurrentItem(sheets->itemRow(IDLE_ANIMATION));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->animation, IDLE_ANIMATION.name);
+        // Activating a row while picking places nothing.
+        const size_t count = f.scene().entities.size();
+        emit tree->itemActivated(sheets->itemRow(IDLE_SPRITE), 0);
+        QCOMPARE(f.scene().entities.size(), count);
+
+        // None takes it away, its size kept.
+        sheets->noneButton()->click();
+        QVERIFY(!entityAt(f.scene(), PLAYER)->image);
+        QVERIFY(entityAt(f.scene(), PLAYER)->size);
+        QVERIFY(sheets->noneButton()->isChecked());
+        QVERIFY(!tree->currentItem());
+        f.document().commands().undo();
+        QCOMPARE(tree->currentItem(), sheets->itemRow(IDLE_ANIMATION));
+
+        // A nine-slice stays one with another sprite.
+        Entity panel = IDLE_SPRITE.toEntity();
+        panel.image->sprite = QStringLiteral("ui/panel.9.png");
+        panel.image->mode = ImageMode::NineSlice;
+        panel.size = Extent::px({30, 30});
+        const EntityPath path = f.canvas().addEntity(panel, QPointF(100, 100));
+        tree->setCurrentItem(sheets->itemRow(bush));
+        QCOMPARE(entityAt(f.scene(), path)->image->mode, ImageMode::NineSlice);
+
+        // Several selected: browsing again.
+        f.canvas().select({PLAYER, DOOR});
+        QVERIFY(!sheets->isPicking());
+    }
+
+    void theSheetsTellAClickFromADrag()
+    {
+        Fixture f;
+        f.window.show();
+        f.window.projectPanel()->setCurrentWidget(f.window.sheetBrowser());
+        SheetBrowserPanel* sheets = f.window.sheetBrowser();
+        QTreeWidget* tree = sheets->tree();
+        const auto centerOf = [&](const SheetItem& item) {
+            QTreeWidgetItem* row = sheets->itemRow(item);
+            tree->scrollToItem(row);
+            return tree->visualItemRect(row).center();
+        };
+        f.canvas().select({PLAYER});
+        const QPoint animation = centerOf(IDLE_ANIMATION);
+
+        // Pressed, to drag it away: the player keeps its image.
+        QTest::mousePress(tree->viewport(), Qt::LeftButton, {}, animation);
+        QCOMPARE(tree->currentItem(), sheets->itemRow(IDLE_SPRITE));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, IDLE_SPRITE.name);
+        // Released where it was pressed, a click: its image now.
+        QTest::mouseRelease(tree->viewport(), Qt::LeftButton, {}, animation);
+        QCOMPARE(tree->currentItem(), sheets->itemRow(IDLE_ANIMATION));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->animation, IDLE_ANIMATION.name);
+
+        // With nothing selected, a double-click places it.
+        f.canvas().select({});
+        const size_t count = f.scene().entities.size();
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, centerOf(IDLE_SPRITE));
+        QCOMPARE(f.scene().entities.size(), count + 1);
+    }
+
+    void thePresetsTellAClickFromADrag()
+    {
+        Fixture f;
+        f.window.show();
+        PresetsPanel* presets = f.window.presetsPanel();
+        f.window.projectPanel()->setCurrentWidget(presets);
+        QListWidget* list = presets->list();
+        const auto centerOf = [&](const QString& id) {
+            QListWidgetItem* row = presets->presetRow(id);
+            list->scrollToItem(row);
+            return list->visualItemRect(row).center();
+        };
+        presets->setCurrentPreset(QStringLiteral("camera"));
+        const int commands = f.document().commands().count();
+        const QPoint trigger = centerOf(QStringLiteral("trigger_region"));
+
+        // Pressed, to drag it away: the current preset stays, the one the Presets tab edits.
+        QTest::mousePress(list->viewport(), Qt::LeftButton, {}, trigger);
+        QCOMPARE(presets->currentPreset(), QStringLiteral("camera"));
+        QTest::mouseRelease(list->viewport(), Qt::LeftButton, {}, trigger);
+        QCOMPARE(presets->currentPreset(), QStringLiteral("trigger_region"));
+        QCOMPARE(f.document().commands().count(), commands);
+
+        // A double-click places it.
+        QTest::mouseDClick(list->viewport(), Qt::LeftButton, {}, trigger);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Add Trigger Region"));
+    }
+
+    void thePresetsTabShowsBuiltInPresetsReadOnly()
+    {
+        Fixture f;
+        const QString camera = QStringLiteral("camera");
+        PresetsView* presets = f.window.openPresets(camera);
+        QCOMPARE(f.window.tabs()->currentWidget(), presets);
+        SceneView* view = presets->view();
+        QVERIFY(view);
+        QCOMPARE(f.window.currentSceneView(), view);
+        SceneCanvas& canvas = view->canvas();
+        QCOMPARE(canvas.presetId(), std::optional(camera));
+        QCOMPARE(f.window.sceneTreePanel()->canvas(), &canvas);
+        QCOMPARE(f.window.sceneTreePanel()->topLevelRow()->text(0), camera);
+
+        // Built in: shown, but nothing can be picked or added.
+        QVERIFY(!canvas.isEditable());
+        QVERIFY(canvas.item({0}));
+        QVERIFY(!(canvas.item({0})->flags() & QGraphicsItem::ItemIsSelectable));
+        QVERIFY(!canvas.canAddEntities());
+        QVERIFY(!f.window.presetsPanel()->removeButton()->isEnabled());
+        InspectorPanel* inspector = f.window.inspector();
+        QVERIFY(inspector->showsTopLevel());
+        PresetSettingsPanel* settings = inspector->presetTopLevel();
+        QCOMPARE(settings->preset(), camera);
+        QVERIFY(!settings->customizeButton()->isHidden());
+        QVERIFY(settings->revertButton()->isHidden());
+        QVERIFY(!settings->nameField()->isEnabled());
+
+        // Customized, it is the project's to change.
+        settings->customizeButton()->click();
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Customize preset camera"));
+        QVERIFY(canvas.isEditable());
+        QVERIFY(canvas.item({0})->flags() & QGraphicsItem::ItemIsSelectable);
+        QVERIFY(settings->nameField()->isEnabled());
+        QVERIFY(!settings->idField()->isEnabled());  // it customizes the built-in by its id
+        settings->nameField()->setText(QStringLiteral("Main Camera"));
+        settings->applyName();
+        QCOMPARE(f.document().project().presets[camera].content.value(QStringLiteral("name")),
+                 QJsonValue(QStringLiteral("Main Camera")));
+        QCOMPARE(f.window.presetsPanel()->presetRow(camera)->text(), QStringLiteral("Main Camera"));
+        QCOMPARE(f.window.presetsPanel()->removeButton()->text(), QStringLiteral("Revert"));
+        settings->setSwatch(Color{16, 32, 48, 100});
+        QCOMPARE(f.document().project().presets[camera].content.value(QStringLiteral("swatch")),
+                 QJsonValue(QStringLiteral("#102030")));  // opaque
+
+        // Reverted, Shoal's comes back.
+        settings->revertButton()->click();
+        QVERIFY(isBuiltInPreset(f.document().project(), camera));
+        QVERIFY(!canvas.isEditable());
+        QCOMPARE(f.window.presetsPanel()->presetRow(camera)->text(), QStringLiteral("Camera"));
+    }
+
+    void thePresetsTabAddsRenamesAndRemovesPresets()
+    {
+        Fixture f;
+        PresetsView* presets = f.window.openPresets();
+        QVERIFY(!presets->view());
+        const QString id = f.window.presetsPanel()->newPreset();
+        QCOMPARE(id, QStringLiteral("preset"));
+        QCOMPARE(f.window.presetsPanel()->currentPreset(), id);
+        QCOMPARE(presets->view()->canvas().presetId(), std::optional(id));
+        QVERIFY(presets->view()->canvas().isEditable());
+
+        // Sprites go in as they go in a scene.
+        const EntityPath placed = presets->view()->place(IDLE_SPRITE, QPointF(10, 0));
+        QCOMPARE(placed, (EntityPath{1}));
+        QCOMPARE(f.document()
+                     .project()
+                     .presets[id]
+                     .content.value(QStringLiteral("entities"))
+                     .toArray()
+                     .size(),
+                 2);
+
+        // Renamed, the canvas and the list follow.
+        presets->view()->canvas().select({});
+        PresetSettingsPanel* settings = f.window.inspector()->presetTopLevel();
+        settings->idField()->setText(QStringLiteral("camera"));
+        QVERIFY(!settings->applyId());  // a built-in one's
+        QCOMPARE(settings->message(), QStringLiteral("Another preset is already “camera”."));
+        settings->idField()->setText(QStringLiteral("pickup"));
+        QVERIFY(settings->applyId());
+        QCOMPARE(f.window.presetsPanel()->currentPreset(), QStringLiteral("pickup"));
+        QCOMPARE(presets->view()->canvas().presetId(), std::optional(QStringLiteral("pickup")));
+        QVERIFY(presets->view()->canvas().item(placed));
+
+        // A preset keeps one entity at least.
+        SceneCanvas& canvas = presets->view()->canvas();
+        canvas.select({{0}, {1}});
+        canvas.removeSelection();
+        QCOMPARE(canvas.scene()->entities.size(), size_t(2));
+
+        // Duplicated, then removed.
+        const QString copy = f.window.presetsPanel()->duplicatePreset();
+        QCOMPARE(copy, QStringLiteral("pickup_2"));
+        QCOMPARE(f.document().project().presets[copy].content.value(QStringLiteral("name")),
+                 QJsonValue(QStringLiteral("New Preset Copy")));
+        QCOMPARE(f.window.presetsPanel()->currentPreset(), copy);
+        f.window.presetsPanel()->removePreset();
+        QVERIFY(!f.document().project().presets.contains(copy));
+        QVERIFY(!presets->view());
+        f.document().commands().undo();
+        QVERIFY(f.document().project().presets.contains(copy));
+    }
+
+    void makesAPresetOfTheSelection()
+    {
+        Fixture f;
+        const Entity player = *entityAt(f.scene(), PLAYER);
+        f.canvas().select({PLAYER});
+        const QString id = f.window.makePresetFromSelection();
+        QCOMPARE(id, QStringLiteral("player"));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Make preset player"));
+        PresetsView* presets = f.window.presetsView();
+        QCOMPARE(f.window.tabs()->currentWidget(), presets);
+        QCOMPARE(presets->view()->canvas().presetId(), std::optional(id));
+
+        // As drawn, around the center of what it draws.
+        const Scene* tree = f.document().entityTree(presetTreeId(id));
+        QCOMPARE(tree->entities.size(), size_t(1));
+        const Entity& made = tree->entities[0];
+        QCOMPARE(made.id, player.id);
+        QCOMPARE(made.image, player.image);
+        QCOMPARE(made.transform.flipX, player.transform.flipX);
+        const EntityItem* item = presets->view()->canvas().item({0});
+        const QPointF center = item->mapRectToScene(item->boundingRect()).center();
+        QVERIFY(std::abs(center.x()) < 1e-6 && std::abs(center.y()) < 1e-6);
+        // Placing it brings the player back, a fresh id given.
+        f.window.tabs()->setCurrentWidget(f.view);
+        const QList<EntityPath> paths = f.view->placePreset(id, QPointF(100, 100));
+        QCOMPARE(entityAt(f.scene(), paths.first())->id, QStringLiteral("player_2"));
+    }
+
     void theTopLevelEditsTheScene()
     {
         Fixture f;
@@ -1041,60 +1316,6 @@ private slots:
         QCOMPARE(inspector->scaleXBox()->value(), 1.0);
         f.canvas().commitTransform(PLAYER, 90, Point{1, 1}, QStringLiteral("Rotate"));
         QCOMPARE(inspector->angleBox()->value(), 90.0);
-    }
-
-    void theClassesPanelListsTheRegistry()
-    {
-        Fixture f;
-        ClassesPanel* panel = f.window.classesPanel();
-        QTreeWidgetItem* main = panel->classRow(QStringLiteral("main"));
-        QVERIFY(main);
-        QCOMPARE(main->text(ClassesPanel::USES), QStringLiteral("2"));
-        QTreeWidgetItem* trigger = panel->classRow(QStringLiteral("trigger"));
-        QCOMPARE(trigger->text(ClassesPanel::USES), QStringLiteral("0"));  // declared, unused
-        QCOMPARE(trigger->text(ClassesPanel::DOC),
-                 QStringLiteral("Region; the engine fires an event on enter/exit"));
-        QVERIFY(panel->classRow(QStringLiteral("button"))->font(ClassesPanel::NAME).italic());
-        QVERIFY(!trigger->font(ClassesPanel::NAME).italic());
-
-        // The uses follow the scenes.
-        f.canvas().select({PLAYER});
-        type(f.window.inspector()->classesField(), QStringLiteral("actor trigger"));
-        QCOMPARE(panel->classRow(QStringLiteral("trigger"))->text(ClassesPanel::USES),
-                 QStringLiteral("1"));
-    }
-
-    void theClassesPanelEditsDeclarations()
-    {
-        Fixture f;
-        ClassesPanel* panel = f.window.classesPanel();
-        // Editing a doc in place declares the class.
-        panel->classRow(QStringLiteral("button"))
-            ->setText(ClassesPanel::DOC, QStringLiteral("Clickable "));
-        QTRY_COMPARE(f.document().commands().count(), 1);
-        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Declare class button"));
-        QCOMPARE(f.document().project().classes->classes[QStringLiteral("button")].doc,
-                 QStringLiteral("Clickable"));
-        QVERIFY(!panel->classRow(QStringLiteral("button"))->font(ClassesPanel::NAME).italic());
-
-        // A new color shows on the canvas: the room bounds are a camera_bounds region.
-        QVERIFY(
-            panel->setColor(QStringLiteral("camera_bounds"), QColor(QStringLiteral("#112233"))));
-        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Edit class camera_bounds"));
-        QCOMPARE(f.canvas().classColor({QStringLiteral("camera_bounds")}, Qt::black),
-                 QColor(QStringLiteral("#112233")));
-        QVERIFY(
-            !panel->setColor(QStringLiteral("camera_bounds"), QColor(QStringLiteral("#112233"))));
-
-        QVERIFY(panel->declare(QStringLiteral("hazard")));
-        QVERIFY(panel->classRow(QStringLiteral("hazard")));
-        QVERIFY(!panel->declare(QStringLiteral("hazard")));
-        QVERIFY(panel->undeclare(QStringLiteral("hazard")));
-        QVERIFY(!panel->classRow(QStringLiteral("hazard")));  // neither declared nor used
-        QVERIFY(panel->undeclare(QStringLiteral("enemy")));
-        QVERIFY(!panel->classRow(QStringLiteral("enemy")));
-        f.document().commands().undo();
-        QVERIFY(panel->classRow(QStringLiteral("enemy")));
     }
 
     void thePresetsPanelListsBuiltInAndProjectPresets()

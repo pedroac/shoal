@@ -16,6 +16,12 @@ namespace shoal::core {
 /// each parent's children. Entities need no id, so this is how the editor names them.
 using EntityPath = QList<int>;
 
+/// The id a preset's entities are edited by, as a tree of their own: the entity mutators
+/// and commands take a scene's id or this. Ids have no colon, so the two never meet.
+QString presetTreeId(const QString& presetId);
+/// The preset `treeId` names, or null for a scene's id.
+std::optional<QString> presetOfTree(QStringView treeId);
+
 /// The entity at `path`, or null.
 const Entity* entityAt(const Scene& scene, const EntityPath& path);
 Entity* entityAt(Scene& scene, const EntityPath& path);

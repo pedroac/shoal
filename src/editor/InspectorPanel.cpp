@@ -6,11 +6,14 @@
 #include <QCompleter>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QRegularExpression>
+#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QStandardItemModel>
@@ -24,6 +27,7 @@
 #include "editor/ColorButton.h"
 #include "editor/FormFields.h"
 #include "editor/PointGrid.h"
+#include "editor/PresetSettingsPanel.h"
 #include "editor/SceneCanvas.h"
 #include "editor/SceneSettingsPanel.h"
 
@@ -60,6 +64,7 @@ QComboBox* unitBox(QWidget* parent, const QString& name)
 {
     auto* box = new QComboBox(parent);
     box->setObjectName(name);
+    box->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     for (const core::Unit unit : UNITS) {
         box->addItem(unitName(unit), int(unit));
     }
@@ -101,16 +106,42 @@ void showLength(QDoubleSpinBox* box, const core::Length& length, bool position)
     showValue(box, length.value);
 }
 
-QWidget* row(QWidget* parent, std::initializer_list<QWidget*> widgets)
+/// `widgets` side by side, at their size, or sharing the row's width.
+QWidget* row(QWidget* parent, std::initializer_list<QWidget*> widgets, bool packed = true)
 {
     auto* widget = new QWidget(parent);
     auto* layout = new QHBoxLayout(widget);
     layout->setContentsMargins({});
     for (QWidget* item : widgets) {
-        layout->addWidget(item);
+        layout->addWidget(item, packed ? 0 : 1);
     }
-    layout->addStretch();
+    if (packed) {
+        layout->addStretch();
+    }
     return widget;
+}
+
+/// A titled section of `layout`, and the form for its rows; untitled, just the form.
+QFormLayout* addSection(QVBoxLayout* layout, const QString& title)
+{
+    if (!title.isEmpty()) {
+        auto* heading = new QLabel(title);
+        QFont font = heading->font();
+        font.setBold(true);
+        heading->setFont(font);
+        auto* line = new QFrame;
+        line->setFrameShape(QFrame::HLine);
+        line->setFrameShadow(QFrame::Sunken);
+        auto* header = new QHBoxLayout;
+        header->setContentsMargins(0, heading->fontMetrics().height() / 2, 0, 0);
+        header->addWidget(heading);
+        header->addWidget(line, 1);
+        layout->addLayout(header);
+    }
+    auto* form = new QFormLayout;
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    layout->addLayout(form);
+    return form;
 }
 
 template <typename E>
@@ -183,9 +214,9 @@ InspectorPanel::InspectorPanel(QWidget* parent)
       m_parallaxXBox(numberBox(this, QStringLiteral("parallaxXBox"), MAX_FRACTION, 3, 0.1)),
       m_parallaxYBox(numberBox(this, QStringLiteral("parallaxYBox"), MAX_FRACTION, 3, 0.1)),
       m_message(messageLabel(this, QStringLiteral("inspectorMessage"))),
-      m_form(new QFormLayout),
       m_entityForm(new QWidget(this)),
       m_topLevel(new SceneSettingsPanel(this)),
+      m_presetTopLevel(new PresetSettingsPanel(this)),
       m_pages(new QStackedWidget(this)),
       m_scaleRow(new QWidget(this)),
       m_sizeRow(new QWidget(this)),
@@ -274,64 +305,100 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     m_completer->setCaseSensitivity(Qt::CaseInsensitive);
     m_completer->setCompletionMode(QCompleter::PopupCompletion);
 
-    m_form->addRow(tr("Id"), m_idField);
-    m_form->addRow(tr("Classes"), m_classesField);
-    m_form->addRow(QString(), m_activeBox);
-    m_form->addRow(QString(), m_visibleBox);
-    auto* position = new QHBoxLayout;
-    position->addWidget(m_xBox);
-    position->addWidget(m_xUnitBox);
-    position->addWidget(m_yBox);
-    position->addWidget(m_yUnitBox);
-    m_form->addRow(tr("Position"), position);
-    m_form->labelForField(position)->setToolTip(
+    // The entity's fields, in sections: what it is, then where, its rect, how it looks, how
+    // it places its children, and how it moves with the camera.
+    auto* entityLayout = new QVBoxLayout(m_entityForm);
+    entityLayout->setContentsMargins({});
+    QFormLayout* form = addSection(entityLayout, {});
+    form->addRow(tr("Id"), m_idField);
+    form->addRow(tr("Classes"), m_classesField);
+    form->addRow(QString(), row(this, {m_activeBox, m_visibleBox}));
+
+    form = addSection(entityLayout, tr("Transform"));
+    // An axis a line, with its unit.
+    auto* position = new QGridLayout;
+    position->addWidget(m_xBox, 0, 0);
+    position->addWidget(m_xUnitBox, 0, 1);
+    position->addWidget(m_yBox, 1, 0);
+    position->addWidget(m_yUnitBox, 1, 1);
+    position->setColumnStretch(0, 1);
+    form->addRow(tr("Position"), position);
+    form->labelForField(position)->setToolTip(
         tr("In its parent's coordinates: pixels from its parent's origin, a percentage of its "
            "parent's rect from its top-left corner, or a tile of its parent's grid"));
-    m_offsetRow = row(this, {m_offsetXBox, m_offsetYBox});
+    m_offsetRow = row(this, {m_offsetXBox, m_offsetYBox}, false);
     m_offsetRow->setToolTip(tr("Pixels added to a position in percent or in tiles"));
-    m_form->addRow(tr("Offset"), m_offsetRow);
-    m_form->addRow(tr("Angle"), m_angleBox);
-    auto* size = new QHBoxLayout(m_sizeRow);
-    size->setContentsMargins({});
-    size->addWidget(m_sizeBox);
-    size->addWidget(m_widthBox);
-    size->addWidget(m_widthUnitBox);
-    size->addWidget(m_heightBox);
-    size->addWidget(m_heightUnitBox);
-    m_form->addRow(tr("Size"), m_sizeRow);
-    m_form->addRow(tr("Pivot"), row(this, {m_pivotBox, m_pivotGrid, m_pivotXBox, m_pivotYBox}));
+    form->addRow(tr("Offset"), m_offsetRow);
+    form->addRow(tr("Angle"), m_angleBox);
     auto* scale = new QHBoxLayout(m_scaleRow);
     scale->setContentsMargins({});
     scale->addWidget(m_scaleXBox);
     scale->addWidget(m_scaleYBox);
-    m_form->addRow(tr("Scale"), m_scaleRow);
-    auto* flip = new QHBoxLayout;
-    flip->addWidget(m_flipXBox);
-    flip->addWidget(m_flipYBox);
-    flip->addStretch();
-    m_form->addRow(tr("Flip"), flip);
+    form->addRow(tr("Scale"), m_scaleRow);
+    form->addRow(tr("Flip"), row(this, {m_flipXBox, m_flipYBox}));
+
+    // A checkbox to have one, beside the fields it enables.
+    form = addSection(entityLayout, tr("Rect"));
+    auto* size = new QGridLayout(m_sizeRow);
+    size->setContentsMargins({});
+    size->addWidget(m_widthBox, 0, 0);
+    size->addWidget(m_widthUnitBox, 0, 1);
+    size->addWidget(m_sizeBox, 0, 2);
+    size->addWidget(m_heightBox, 1, 0);
+    size->addWidget(m_heightUnitBox, 1, 1);
+    size->setColumnStretch(0, 1);
+    form->addRow(tr("Size"), m_sizeRow);
+    auto* pivotRow = new QWidget(this);
+    auto* pivot = new QGridLayout(pivotRow);
+    pivot->setContentsMargins({});
+    pivot->addWidget(m_pivotGrid, 0, 0, 2, 1);
+    pivot->addWidget(m_pivotBox, 0, 1, 1, 2);
+    pivot->addWidget(m_pivotXBox, 1, 1);
+    pivot->addWidget(m_pivotYBox, 1, 2);
+    pivot->setColumnStretch(1, 1);
+    pivot->setColumnStretch(2, 1);
+    form->addRow(tr("Pivot"), pivotRow);
+
+    form = addSection(entityLayout, tr("Look"));
     m_imageRow = row(this, {m_imageLabel, m_imageModeBox, m_removeImageButton});
-    m_form->addRow(tr("Image"), m_imageRow);
-    m_form->addRow(tr("Fill"), row(this, {m_fillBox, m_fillButton}));
-    m_form->addRow(tr("Tint"), row(this, {m_tintButton, m_tintModeBox}));
-    m_form->addRow(tr("Clip"), m_clipBox);
-    m_form->addRow(tr("Container"), row(this, {m_containerBox, m_tileWidthBox, m_tileHeightBox}));
+    form->addRow(tr("Image"), m_imageRow);
+    form->addRow(tr("Fill"), row(this, {m_fillBox, m_fillButton}));
+    form->addRow(tr("Tint"), row(this, {m_tintButton, m_tintModeBox}));
+
+    form = addSection(entityLayout, tr("Children"));
+    form->addRow(tr("Clip"), m_clipBox);
+    form->addRow(tr("Container"), row(this, {m_containerBox, m_tileWidthBox, m_tileHeightBox}));
     m_tilePivotRow = row(this, {m_tilePivotGrid, m_tilePivotXBox, m_tilePivotYBox});
     m_tilePivotRow->setToolTip(tr("The point of each tile its children's pivots land on"));
-    m_form->addRow(tr("Tile pivot"), m_tilePivotRow);
-    m_form->addRow(tr("Space"), m_spaceBox);
-    m_form->addRow(tr("Parallax"), row(this, {m_parallaxBox, m_parallaxXBox, m_parallaxYBox}));
-    m_entityForm->setLayout(m_form);
-    m_form->setContentsMargins({});
+    form->addRow(tr("Tile pivot"), m_tilePivotRow);
+
+    form = addSection(entityLayout, tr("Camera"));
+    form->addRow(tr("Space"), m_spaceBox);
+    form->addRow(tr("Parallax"), row(this, {m_parallaxBox, m_parallaxXBox, m_parallaxYBox}));
+
     m_topLevel->setObjectName(QStringLiteral("topLevelSettings"));
     m_topLevel->layout()->setContentsMargins({});
     m_pages->addWidget(m_entityForm);
     m_pages->addWidget(m_topLevel);
+    m_presetTopLevel->setObjectName(QStringLiteral("presetTopLevelSettings"));
+    m_presetTopLevel->layout()->setContentsMargins({});
+    m_pages->addWidget(m_presetTopLevel);
+    // Scrolled when the panel is shorter than the form, never wider than the panel.
+    auto* content = new QWidget;
+    auto* contentLayout = new QVBoxLayout(content);
+    contentLayout->addWidget(m_summary);
+    contentLayout->addWidget(m_pages);
+    contentLayout->addWidget(m_message);
+    contentLayout->addStretch();
+    auto* scroll = new QScrollArea(this);
+    scroll->setObjectName(QStringLiteral("inspectorScroll"));
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setWidget(content);
     auto* layout = new QVBoxLayout(this);
-    layout->addWidget(m_summary);
-    layout->addWidget(m_pages);
-    layout->addWidget(m_message);
-    layout->addStretch();
+    layout->setContentsMargins({});
+    layout->addWidget(scroll);
 
     m_activeBox->setToolTip(
         tr("An inactive entity is authored but not present until an action "
@@ -453,7 +520,7 @@ void InspectorPanel::setFlowScene(FlowScene* flow)
 
 bool InspectorPanel::showsTopLevel() const
 {
-    return m_pages->currentWidget() == m_topLevel;
+    return m_pages->currentWidget() != m_entityForm;
 }
 
 QString InspectorPanel::message() const
@@ -731,6 +798,29 @@ void InspectorPanel::setImageMode(core::ImageMode mode)
              : tr("Stretch %1").arg(core::describe(*entity)));
 }
 
+void InspectorPanel::setImage(const std::optional<core::Image>& image)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!image) {
+        removeImage();
+        return;
+    }
+    if (!entity) {
+        return;
+    }
+    core::Image changedImage = *image;
+    if (entity->image && !entity->image->isAnimation() && !image->isAnimation()) {
+        changedImage.mode = entity->image->mode;  // a nine-slice stays one
+    }
+    if (entity->image == changedImage) {
+        return;
+    }
+    Entity changed = *entity;
+    changed.image = changedImage;
+    push(path, std::move(changed), tr("Set the image of %1").arg(core::describe(*entity)));
+}
+
 void InspectorPanel::removeImage()
 {
     EntityPath path;
@@ -889,29 +979,45 @@ void InspectorPanel::setParallax(std::optional<core::Point> parallax)
     }
 }
 
+QFormLayout* InspectorPanel::formOf(const QWidget* field) const
+{
+    for (QFormLayout* form : m_entityForm->findChildren<QFormLayout*>()) {
+        if (form->indexOf(field) >= 0) {
+            return form;
+        }
+    }
+    Q_ASSERT(false);
+    return nullptr;
+}
+
+void InspectorPanel::setRowVisible(QWidget* field, bool visible)
+{
+    formOf(field)->setRowVisible(field, visible);
+}
+
 bool InspectorPanel::showsScale() const
 {
-    return m_form->isRowVisible(m_scaleRow);
+    return formOf(m_scaleRow)->isRowVisible(m_scaleRow);
 }
 
 bool InspectorPanel::showsSize() const
 {
-    return m_form->isRowVisible(m_sizeRow);
+    return formOf(m_sizeRow)->isRowVisible(m_sizeRow);
 }
 
 bool InspectorPanel::showsImage() const
 {
-    return m_form->isRowVisible(m_imageRow);
+    return formOf(m_imageRow)->isRowVisible(m_imageRow);
 }
 
 bool InspectorPanel::showsOffset() const
 {
-    return m_form->isRowVisible(m_offsetRow);
+    return formOf(m_offsetRow)->isRowVisible(m_offsetRow);
 }
 
 bool InspectorPanel::showsTilePivot() const
 {
-    return m_form->isRowVisible(m_tilePivotRow);
+    return formOf(m_tilePivotRow)->isRowVisible(m_tilePivotRow);
 }
 
 bool InspectorPanel::eventFilter(QObject* watched, QEvent* event)
@@ -935,8 +1041,12 @@ void InspectorPanel::refresh()
     const Entity* entity = selected(&path);
     // Nothing selected: the top level, the scene itself.
     const bool topLevel = m_canvas && m_canvas->scene() && paths.isEmpty();
-    m_pages->setCurrentWidget(topLevel ? static_cast<QWidget*>(m_topLevel) : m_entityForm);
-    m_topLevel->setScene(topLevel ? std::optional(m_canvas->sceneId()) : std::nullopt);
+    const std::optional<QString> preset = m_canvas ? m_canvas->presetId() : std::nullopt;
+    m_pages->setCurrentWidget(!topLevel ? m_entityForm
+                              : preset  ? static_cast<QWidget*>(m_presetTopLevel)
+                                        : m_topLevel);
+    m_topLevel->setScene(topLevel && !preset ? std::optional(m_canvas->sceneId()) : std::nullopt);
+    m_presetTopLevel->setPreset(m_document, topLevel && preset ? *preset : QString());
     for (QWidget* field : std::initializer_list<QWidget*>{m_idField,       m_classesField,
                                                           m_activeBox,     m_visibleBox,
                                                           m_xBox,          m_yBox,
@@ -963,6 +1073,10 @@ void InspectorPanel::refresh()
     if (!entity) {
         m_summary->setText(
             !m_canvas || !m_canvas->scene() ? tr("Open a scene to inspect its entities.")
+            : topLevel && preset
+                ? tr("The top level: the preset %1, placed in the parent new entities go "
+                     "into.")
+                      .arg(*preset)
             : topLevel ? tr("The top level: the scene %1, whose rect its entities measure "
                             "against.")
                              .arg(m_canvas->sceneId())
@@ -992,11 +1106,11 @@ void InspectorPanel::refresh()
         m_pivotGrid->setPoint(std::nullopt);
         m_sizeBox->setText(tr("Own"));  // as wide as with an entity, so nothing jumps
         m_tintButton->setColor(core::Color{});
-        m_form->setRowVisible(m_sizeRow, true);
-        m_form->setRowVisible(m_scaleRow, true);
-        m_form->setRowVisible(m_imageRow, false);
-        m_form->setRowVisible(m_offsetRow, false);
-        m_form->setRowVisible(m_tilePivotRow, false);
+        setRowVisible(m_sizeRow, true);
+        setRowVisible(m_scaleRow, true);
+        setRowVisible(m_imageRow, false);
+        setRowVisible(m_offsetRow, false);
+        setRowVisible(m_tilePivotRow, false);
         m_containerBox->setCurrentIndex(0);
         m_tileWidthBox->setVisible(false);
         m_tileHeightBox->setVisible(false);
@@ -1034,7 +1148,7 @@ void InspectorPanel::refresh()
         showValue(offset, px ? 0 : pos);
         offset->setEnabled(!px);
     }
-    m_form->setRowVisible(m_offsetRow, !entity->at.isPx());
+    setRowVisible(m_offsetRow, !entity->at.isPx());
     showValue(m_angleBox, entity->transform.rot);
     showValue(m_scaleXBox, entity->transform.scale.x);
     showValue(m_scaleYBox, entity->transform.scale.y);
@@ -1059,8 +1173,7 @@ void InspectorPanel::refresh()
                                                           m_heightUnitBox}) {
         field->setEnabled(entity->size.has_value());
     }
-    m_form->setRowVisible(m_scaleRow,
-                          !entity->size || entity->transform.scale != core::Point{1, 1});
+    setRowVisible(m_scaleRow, !entity->size || entity->transform.scale != core::Point{1, 1});
 
     const core::Point pivot = core::entityPivot(*entity, metrics);
     m_pivotBox->setChecked(entity->pivot.has_value());
@@ -1070,7 +1183,7 @@ void InspectorPanel::refresh()
     m_pivotXBox->setEnabled(entity->pivot.has_value() || !entity->image);
     m_pivotYBox->setEnabled(entity->pivot.has_value() || !entity->image);
 
-    m_form->setRowVisible(m_imageRow, entity->image.has_value());
+    setRowVisible(m_imageRow, entity->image.has_value());
     if (entity->image) {
         m_imageLabel->setText(entity->image->isAnimation() ? tr("Animation") : tr("Sprite"));
         m_imageModeBox->setCurrentIndex(m_imageModeBox->findData(int(entity->image->mode)));
@@ -1085,7 +1198,7 @@ void InspectorPanel::refresh()
         m_containerBox->findData(container ? int(container->type) : -1));
     m_tileWidthBox->setVisible(container.has_value());
     m_tileHeightBox->setVisible(container.has_value());
-    m_form->setRowVisible(m_tilePivotRow, container.has_value());
+    setRowVisible(m_tilePivotRow, container.has_value());
     const core::Container shown = container.value_or(core::Container{});
     showValue(m_tileWidthBox, shown.tileSize.width);
     showValue(m_tileHeightBox, shown.tileSize.height);

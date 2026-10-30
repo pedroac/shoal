@@ -46,7 +46,10 @@ changes.
     sheets know.
   - `ProjectTemplates`: new projects and scenes. `Presets`: the built-in presets, and
     reading a preset into entities with fresh ids (presets stay as written in the
-    model). `ClassCommands`: declaring classes in classes.json.
+    model). `ClassCommands`: declaring classes in classes.json. `PresetCommands`:
+    adding, customizing, renaming and removing presets; the document edits a
+    preset's entities as a tree of their own (`entityTree()`, `presetTreeId()`), so
+    the entity commands work on presets too.
 - `src/assets/`: sprat sheets and atlases, through sprat-lib. The only place that
   includes `<sprat/sprat.h>`.
   - `SpriteSheet`: `loadSheet()` copies a sheet into Qt types, and `placeSprite()`
@@ -54,24 +57,32 @@ changes.
     hot reload.
 - `src/editor/`: the Qt Widgets application, built as a library (`shoal_editor`)
   so tests can create its windows. `main.cpp` is the executable's only source.
-  - `MainWindow`: one open `ProjectDocument`, the menus, New/Open/Save. Methods
-    that take a path and don't show dialogs (`openProject`, `saveProjectAs`) are
-    what tests call; the slots wrap them with dialogs.
+  - `MainWindow`: one open `ProjectDocument`, the menus, New/Open/Save, and the
+    tabs (`WorkspaceTabs`: the tab bar over the project panel, the workspace and the
+    context panel): the flow, the presets (`PresetsView`: a `SceneView` of the preset
+    current in `PresetsPanel`), then the scenes. The project panel holds the scenes list
+    on the flow, the presets and sheets lists elsewhere; the context panel the scene
+    settings on the flow, or the entity tree over the inspector. Methods that take a path
+    and don't show dialogs (`openProject`, `saveProjectAs`) are what tests call; the
+    slots wrap them with dialogs.
   - `FlowScene`: the flow graph's items, kept in line with the document by its
     signals, and the edits as commands. `FlowView` shows it (zoom, pan, context
     menus). `SceneNodeItem` and `TransitionEdgeItem` are its items.
   - `SceneCanvas`: one scene's entities (`EntityItem`), likewise following the
     document; it rebuilds its items when the tree's shape changes and updates them
     in place otherwise, since an item may be inside its own mouse handler.
-    `SceneView` is its tab, `SceneTreePanel` its entity tree dock.
+    `SceneView` is its tab, `SceneTreePanel` its entity tree.
     `TileGridOverlay` draws the tiled containers' grids above them, when they help.
     `CanvasView` holds the zoom and pan both views share.
   - `SheetBrowserPanel`: the project's sheets, sprites and animations as thumbnails.
     A drag or a double-click hands a `SheetItem` to `SceneView`, which places it.
-    `PresetsPanel` does the same with presets. `InspectorPanel` edits the selected
+    `PresetsPanel` does the same with presets, and adds, duplicates and removes them.
+    Both tell a click from a drag (`ClickOrDragView`), so a drag leaves the current
+    row. `InspectorPanel` edits the selected
     entity, with unit boxes for positions and sizes, a `PointGrid` for pivots and a
     `ColorButton` for tints and fills, or, with none selected, the top level's scene
-    settings (a `SceneSettingsPanel`); `ClassesPanel` edits the class registry.
+    settings (a `SceneSettingsPanel`), or a preset's (a `PresetSettingsPanel`). The
+    sheet browser also picks the selected entity's image (`setChoice()`).
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the
