@@ -9,19 +9,19 @@ class QMimeData;
 
 namespace shoal::editor {
 
-/// A sprite or an animation of a sprat sheet, as the sheet browser hands it to a canvas:
-/// dragged, or activated to place at the middle of the view.
+/// A sprite or an animation of a sprat sheet, or a standalone image, as the asset browser
+/// hands it to a canvas: dragged, or activated to place at the middle of the view.
 struct SheetItem {
-    enum class Kind { Sprite, Animation };
+    enum class Kind { Sprite, Animation, Image };
 
     Kind kind = Kind::Sprite;
-    QString sheet;  ///< The sheet's alias.
-    QString name;   ///< A sprite's path, or an animation's name.
+    QString sheet;  ///< The sheet's alias, or the standalone image's.
+    QString name;   ///< A sprite's path, or an animation's name; empty for an image.
 
     /// The MIME type of a drag from the sheet browser.
     static constexpr const char* MIME_TYPE = "application/x-shoal-sheet-item";
 
-    /// A new `sprite` or `animation` entity drawing this item, with no id or layer yet.
+    /// A new entity drawing this item, with no id yet.
     core::Entity toEntity() const;
     /// The image drawing this item, stretched.
     core::Image toImage() const;

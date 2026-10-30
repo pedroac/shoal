@@ -1,6 +1,8 @@
 #include "core/Model.h"
 
 #include <QLocale>
+#include <algorithm>
+#include <utility>
 
 namespace shoal::core {
 
@@ -48,6 +50,11 @@ constexpr EnumName<TintMode> TINT_MODE_NAMES[] = {
     {TintMode::Inherit, "inherit"},
     {TintMode::Override, "override"},
 };
+constexpr EnumName<AssetKind> ASSET_KIND_NAMES[] = {
+    {AssetKind::Sheet, "sheets"}, {AssetKind::Image, "images"}, {AssetKind::Font, "fonts"},
+    {AssetKind::Audio, "audio"},  {AssetKind::Video, "video"},
+};
+
 constexpr EnumName<ContainerType> CONTAINER_TYPE_NAMES[] = {
     {ContainerType::Tiled, "tiled"},
 };
@@ -183,6 +190,79 @@ std::span<const EnumName<Underlying>> enumNames(Underlying)
 std::span<const EnumName<RestoreMode>> enumNames(RestoreMode)
 {
     return RESTORE_MODE_NAMES;
+}
+std::span<const EnumName<AssetKind>> enumNames(AssetKind)
+{
+    return ASSET_KIND_NAMES;
+}
+
+QMap<QString, QString>& Assets::of(AssetKind kind)
+{
+    return const_cast<QMap<QString, QString>&>(std::as_const(*this).of(kind));
+}
+
+const QMap<QString, QString>& Assets::of(AssetKind kind) const
+{
+    switch (kind) {
+        case AssetKind::Sheet:
+            return sheets;
+        case AssetKind::Image:
+            return images;
+        case AssetKind::Font:
+            return fonts;
+        case AssetKind::Audio:
+            return audio;
+        case AssetKind::Video:
+            return video;
+    }
+    return sheets;
+}
+
+std::optional<AssetKind> Assets::kindOf(const QString& alias) const
+{
+    for (AssetKind kind : KINDS) {
+        if (of(kind).contains(alias)) {
+            return kind;
+        }
+    }
+    return std::nullopt;
+}
+
+QStringList Assets::aliases() const
+{
+    QStringList all;
+    for (AssetKind kind : KINDS) {
+        all << of(kind).keys();
+    }
+    return all;
+}
+
+std::optional<AssetKind> assetKindForFile(QStringView path)
+{
+    static const struct {
+        AssetKind kind;
+        const char* extensions[6];
+    } KNOWN[] = {
+        {AssetKind::Sheet, {"sprat"}},
+        {AssetKind::Image, {"png", "jpg", "jpeg", "bmp", "gif", "webp"}},
+        {AssetKind::Font, {"ttf", "otf"}},
+        {AssetKind::Audio, {"wav", "ogg", "mp3", "flac"}},
+        {AssetKind::Video, {"webm", "mp4", "ogv"}},
+    };
+    const qsizetype dot = path.lastIndexOf(u'.');
+    const qsizetype slash = std::max(path.lastIndexOf(u'/'), path.lastIndexOf(u'\\'));
+    if (dot < 0 || dot < slash) {
+        return std::nullopt;
+    }
+    const QStringView extension = path.mid(dot + 1);
+    for (const auto& known : KNOWN) {
+        for (const char* name : known.extensions) {
+            if (name && extension.compare(QLatin1StringView(name), Qt::CaseInsensitive) == 0) {
+                return known.kind;
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 QString Length::toString() const

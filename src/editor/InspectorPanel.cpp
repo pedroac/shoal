@@ -1118,11 +1118,13 @@ void InspectorPanel::refresh()
     }
 
     QString summary = core::kindOf(*entity);
-    if (entity->image) {
-        summary +=
-            QStringLiteral(" · %1 · %2")
-                .arg(entity->image->sheet, entity->image->isAnimation() ? entity->image->animation
-                                                                        : entity->image->sprite);
+    if (const core::Image* image = entity->image ? &*entity->image : nullptr;
+        image && image->isStandalone()) {
+        summary += QStringLiteral(" · %1").arg(image->asset);
+    }
+    else if (image) {
+        summary += QStringLiteral(" · %1 · %2")
+                       .arg(image->sheet, image->isAnimation() ? image->animation : image->sprite);
     }
     m_summary->setText(summary);
     // Keep what is being typed; anything else shows the model.

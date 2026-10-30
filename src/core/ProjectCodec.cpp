@@ -43,9 +43,33 @@ void checkIds(ObjectReader& reader, const QString& key, const QStringList& ids)
     }
 }
 
+/// Format 2's `assets`, each kind by alias, every alias unique across the kinds.
+Assets readAssets(ObjectReader& reader)
+{
+    Assets assets;
+    QMap<QString, AssetKind> seen;
+    for (AssetKind kind : Assets::KINDS) {
+        const QString key = enumName(kind);
+        QMap<QString, QString>& declared = assets.of(kind);
+        declared = reader.stringMap(key);
+        checkIds(reader, key, declared.keys());
+        for (const QString& alias : declared.keys()) {
+            if (const auto other = seen.constFind(alias); other != seen.cend()) {
+                reader.failMessage(QStringLiteral("%1.%2").arg(key, alias),
+                                   QStringLiteral("%1 is already an alias in %2; an alias is "
+                                                  "unique across all kinds of asset")
+                                       .arg(describeJson(alias), enumName(*other)));
+            }
+            seen.insert(alias, kind);
+        }
+    }
+    assets.extras = reader.extras();
+    return assets;
+}
+
 Manifest readManifest(ObjectReader& reader)
 {
-    readHeader(reader, FORMAT_PROJECT);
+    const int version = readHeader(reader, FORMAT_PROJECT, MANIFEST_FORMAT_VERSION);
     Manifest manifest;
     manifest.name = reader.string(QStringLiteral("name"));
     manifest.designResolution = reader.size(QStringLiteral("design_resolution"));
@@ -53,9 +77,15 @@ Manifest readManifest(ObjectReader& reader)
     manifest.integerScale = reader.boolean(QStringLiteral("integer_scale"), false);
     manifest.start = reader.optionalId(QStringLiteral("start"));
 
-    const QString sheetsKey = QStringLiteral("sheets");
-    manifest.sheets = reader.stringMap(sheetsKey);
-    checkIds(reader, sheetsKey, manifest.sheets.keys());
+    if (version == 1) {
+        const QString sheetsKey = QStringLiteral("sheets");
+        manifest.assets.sheets = reader.stringMap(sheetsKey);
+        checkIds(reader, sheetsKey, manifest.assets.sheets.keys());
+    }
+    else {
+        ObjectReader assetsReader = reader.child(QStringLiteral("assets"));
+        manifest.assets = readAssets(assetsReader);
+    }
 
     ObjectReader exportReader = reader.child(QStringLiteral("export"));
     ExportSettings& settings = manifest.exportSettings;
@@ -247,10 +277,24 @@ Transform readTransform(ObjectReader& reader)
 
 Image readImage(ObjectReader& reader)
 {
+    const QString sheetKey = QStringLiteral("sheet");
     const QString spriteKey = QStringLiteral("sprite");
     const QString animationKey = QStringLiteral("animation");
+    const QString assetKey = QStringLiteral("asset");
     Image image;
-    image.sheet = reader.id(QStringLiteral("sheet"));
+    if (reader.has(assetKey)) {
+        image.asset = reader.id(assetKey);
+        for (const QString& key : {sheetKey, spriteKey, animationKey}) {
+            if (reader.has(key)) {
+                reader.failMessage(key, QStringLiteral("an image is a sheet's sprite or "
+                                                       "animation, or an image asset, not both"));
+            }
+        }
+        image.mode = reader.enumValue(QStringLiteral("mode"), ImageMode::Stretch);
+        image.extras = reader.extras();
+        return image;
+    }
+    image.sheet = reader.id(sheetKey);
     if (reader.has(spriteKey) && reader.has(animationKey)) {
         reader.failMessage(animationKey,
                            QStringLiteral("an image is a sprite or an animation, not both"));
@@ -835,7 +879,7 @@ QByteArray writeManifest(const Manifest& manifest)
 {
     JsonWriter writer;
     writer.beginObject();
-    writeHeader(writer, FORMAT_PROJECT);
+    writeHeader(writer, FORMAT_PROJECT, MANIFEST_FORMAT_VERSION);
     writer.key(u"name");
     writer.string(manifest.name);
     writer.key(u"design_resolution");
@@ -849,8 +893,16 @@ QByteArray writeManifest(const Manifest& manifest)
         writer.key(u"start");
         writer.string(manifest.start);
     }
-    writer.key(u"sheets");
-    writeStringMap(writer, manifest.sheets);
+    writer.key(u"assets");
+    writer.beginObject();
+    for (AssetKind kind : Assets::KINDS) {
+        if (!manifest.assets.of(kind).isEmpty()) {
+            writer.key(enumName(kind));
+            writeStringMap(writer, manifest.assets.of(kind));
+        }
+    }
+    writeExtras(writer, manifest.assets.extras);
+    writer.endObject();
 
     const ExportSettings& settings = manifest.exportSettings;
     writer.key(u"export");
@@ -1128,15 +1180,15 @@ void writeEntity(JsonWriter& writer, const Entity& entity)
         const Image& image = *entity.image;
         writer.key(u"image");
         writer.beginObject();
-        writer.key(u"sheet");
-        writer.string(image.sheet);
-        if (image.isAnimation()) {
-            writer.key(u"animation");
-            writer.string(image.animation);
+        if (image.isStandalone()) {
+            writer.key(u"asset");
+            writer.string(image.asset);
         }
         else {
-            writer.key(u"sprite");
-            writer.string(image.sprite);
+            writer.key(u"sheet");
+            writer.string(image.sheet);
+            writer.key(image.isAnimation() ? u"animation" : u"sprite");
+            writer.string(image.isAnimation() ? image.animation : image.sprite);
         }
         if (image.mode != ImageMode::Stretch) {
             writer.key(u"mode");

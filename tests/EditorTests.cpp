@@ -16,6 +16,7 @@
 #include "assets/SpratLibrary.h"
 #include "core/ProjectDocument.h"
 #include "core/ProjectTemplates.h"
+#include "editor/AssetBrowserPanel.h"
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
 #include "editor/InspectorPanel.h"
@@ -26,7 +27,6 @@
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
 #include "editor/ScenesPanel.h"
-#include "editor/SheetBrowserPanel.h"
 #include "editor/WorkspaceTabs.h"
 
 using namespace shoal::core;
@@ -223,7 +223,7 @@ private slots:
         QCOMPARE(project->count(), 3);
         QCOMPARE(project->widget(0), static_cast<QWidget*>(window.scenesPanel()));
         QCOMPARE(project->widget(1), static_cast<QWidget*>(window.presetsPanel()));
-        QCOMPARE(project->widget(2), static_cast<QWidget*>(window.sheetBrowser()));
+        QCOMPARE(project->widget(2), static_cast<QWidget*>(window.assetBrowser()));
 
         const auto shows = [project](QWidget* list) {
             return project->isTabVisible(project->indexOf(list));
@@ -233,15 +233,15 @@ private slots:
         QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.scenesPanel()));
         QVERIFY(shows(window.scenesPanel()));
         QVERIFY(!shows(window.presetsPanel()));
-        QVERIFY(!shows(window.sheetBrowser()));
+        QVERIFY(!shows(window.assetBrowser()));
         QCOMPARE(context->currentWidget(), static_cast<QWidget*>(window.sceneSettingsPanel()));
 
         // A scene: what to place, the sheets first, and the entity tree over the inspector.
         window.openScene(QStringLiteral("level_1"));
         QVERIFY(!shows(window.scenesPanel()));
         QVERIFY(shows(window.presetsPanel()));
-        QVERIFY(shows(window.sheetBrowser()));
-        QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.sheetBrowser()));
+        QVERIFY(shows(window.assetBrowser()));
+        QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.assetBrowser()));
         QVERIFY(context->currentWidget()->isAncestorOf(window.sceneTreePanel()));
         QVERIFY(context->currentWidget()->isAncestorOf(window.inspector()));
         project->setCurrentWidget(window.presetsPanel());
@@ -249,7 +249,7 @@ private slots:
         // The presets: the same lists, the presets to choose from, and the same context.
         window.openPresets();
         QVERIFY(!shows(window.scenesPanel()));
-        QVERIFY(shows(window.sheetBrowser()));
+        QVERIFY(shows(window.assetBrowser()));
         QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.presetsPanel()));
         QVERIFY(context->currentWidget()->isAncestorOf(window.inspector()));
 

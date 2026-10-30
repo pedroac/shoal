@@ -100,7 +100,7 @@ private slots:
         const Project& project = *parsed.project;
 
         QCOMPARE(project.manifest.start, QStringLiteral("main_menu"));
-        QCOMPARE(project.manifest.sheets.value(QStringLiteral("hero")),
+        QCOMPARE(project.manifest.assets.sheets.value(QStringLiteral("hero")),
                  QStringLiteral("art/hero.sprat"));
         QCOMPARE(project.scenes.keys(),
                  (QStringList{QStringLiteral("level_1"), QStringLiteral("level_2"),
@@ -187,6 +187,108 @@ private slots:
         QCOMPARE(inventory.children[0].at, (Anchor{{1, Unit::Cell}, {0, Unit::Cell}}));
         QCOMPARE(inventory.children[1].at, (Anchor{{3, Unit::Cell}, {1, Unit::Cell}}));
         QCOMPARE(overlay.at, Anchor{});
+    }
+
+    void readsAndWritesAssets()
+    {
+        // Each kind under `assets`, in the manifest's order of kinds, only those it has.
+        ProjectFiles files = minimalProject();
+        files[paths::MANIFEST] = R"({"format": "shoal-project", "version": 2, "name": "T",
+            "design_resolution": [640, 360],
+            "assets": {"video": {"intro": "v/intro.webm"}, "images": {"title": "art/t.png"},
+                       "fonts": {"body": "f/body.ttf"}, "audio": {"door": "a/door.ogg"},
+                       "sheets": {"hero": "art/hero.sprat"}, "packs": {"keep": true}}})";
+        files[paths::scene(QStringLiteral("a"))] = sceneWithEntity(R"({"image": {"asset": "title"}},
+                               {"image": {"asset": "title", "mode": "nineslice"}})");
+        const ParseResult parsed = parseProject(files);
+        QVERIFY2(parsed.project, qPrintable(errorStrings(parsed.errors).join(u'\n')));
+        const Assets& assets = parsed.project->manifest.assets;
+        QCOMPARE(assets.sheets.value(QStringLiteral("hero")), QStringLiteral("art/hero.sprat"));
+        QCOMPARE(assets.images.value(QStringLiteral("title")), QStringLiteral("art/t.png"));
+        QCOMPARE(assets.fonts.value(QStringLiteral("body")), QStringLiteral("f/body.ttf"));
+        QCOMPARE(assets.audio.value(QStringLiteral("door")), QStringLiteral("a/door.ogg"));
+        QCOMPARE(assets.video.value(QStringLiteral("intro")), QStringLiteral("v/intro.webm"));
+        QCOMPARE(assets.kindOf(QStringLiteral("door")), AssetKind::Audio);
+        QVERIFY(!assets.kindOf(QStringLiteral("nope")));
+        QVERIFY(assets.extras.contains(QStringLiteral("packs")));  // kept as written
+
+        const Scene& scene = parsed.project->scenes.value(QStringLiteral("a"));
+        const Image& image = *scene.entities[0].image;
+        QVERIFY(image.isStandalone());
+        QCOMPARE(image.source(), QStringLiteral("title"));
+        QCOMPARE(kindOf(scene.entities[0]), QStringLiteral("image"));
+        QCOMPARE(scene.entities[1].image->mode, ImageMode::NineSlice);
+
+        const ProjectFiles written = serializeProject(*parsed.project);
+        QCOMPARE(QString::fromUtf8(written.at(paths::MANIFEST)), QStringLiteral(R"({
+  "format": "shoal-project",
+  "version": 2,
+  "name": "T",
+  "design_resolution": [640, 360],
+  "fit": "expand",
+  "integer_scale": false,
+  "assets": {
+    "sheets": {
+      "hero": "art/hero.sprat"
+    },
+    "images": {
+      "title": "art/t.png"
+    },
+    "fonts": {
+      "body": "f/body.ttf"
+    },
+    "audio": {
+      "door": "a/door.ogg"
+    },
+    "video": {
+      "intro": "v/intro.webm"
+    },
+    "packs": {
+      "keep": true
+    }
+  },
+  "export": {
+    "dir": "export",
+    "targets": ["raw", "json"],
+    "bundle": false
+  }
+}
+)"));
+        QVERIFY(written.at(paths::scene(QStringLiteral("a"))).contains(R"("image": {
+        "asset": "title"
+      })"));
+        const ParseResult again = parseProject(written);
+        QVERIFY(again.project);
+        QCOMPARE(*again.project, *parsed.project);
+    }
+
+    void migratesManifestFormat1Sheets()
+    {
+        // Format 1 declared sheets at the top level; an `assets` key there is someone else's.
+        ProjectFiles files = minimalProject();
+        files[paths::MANIFEST] = R"({"format": "shoal-project", "version": 1, "name": "T",
+            "design_resolution": [640, 360], "sheets": {"hero": "art/hero.sprat"},
+            "assets": "theirs"})";
+        const ParseResult parsed = parseProject(files);
+        QVERIFY2(parsed.project, qPrintable(errorStrings(parsed.errors).join(u'\n')));
+        const Manifest& manifest = parsed.project->manifest;
+        QCOMPARE(manifest.assets.sheets.value(QStringLiteral("hero")),
+                 QStringLiteral("art/hero.sprat"));
+        QCOMPARE(manifest.extras.value(QStringLiteral("assets")).toString(),
+                 QStringLiteral("theirs"));
+    }
+
+    void knowsTheKindOfAFile()
+    {
+        QCOMPARE(assetKindForFile(u"art/hero.sprat"), AssetKind::Sheet);
+        QCOMPARE(assetKindForFile(u"C:\\art\\Title.PNG"), AssetKind::Image);
+        QCOMPARE(assetKindForFile(u"a.jpeg"), AssetKind::Image);
+        QCOMPARE(assetKindForFile(u"fonts/Inter.otf"), AssetKind::Font);
+        QCOMPARE(assetKindForFile(u"door.ogg"), AssetKind::Audio);
+        QCOMPARE(assetKindForFile(u"intro.webm"), AssetKind::Video);
+        QVERIFY(!assetKindForFile(u"notes.txt"));
+        QVERIFY(!assetKindForFile(u"png"));
+        QVERIFY(!assetKindForFile(u"art.png/readme"));
     }
 
     void format1FixtureMigratesToTheBasicOne()
@@ -293,6 +395,26 @@ private slots:
             << "flow.json: version: expected 1, found 0";
         QTest::newRow("top level") << paths::FLOW << QByteArray("[]")
                                    << "flow.json: expected a JSON object at the top level";
+        QTest::newRow("asset alias in two kinds")
+            << paths::MANIFEST
+            << QByteArray(R"({"format": "shoal-project", "version": 2, "name": "T",
+                             "design_resolution": [640, 360],
+                             "assets": {"sheets": {"hero": "a.sprat"},
+                                        "audio": {"hero": "hero.ogg"}}})")
+            << R"(project.shoal.json: assets.audio.hero: "hero" is already an alias in sheets; )"
+               "an alias is unique across all kinds of asset";
+        QTest::newRow("asset alias")
+            << paths::MANIFEST
+            << QByteArray(R"({"format": "shoal-project", "version": 2, "name": "T",
+                             "design_resolution": [640, 360],
+                             "assets": {"fonts": {"my font": "a.ttf"}}})")
+            << R"(project.shoal.json: assets.fonts[0]: "my font" is not a valid id)";
+        QTest::newRow("newer manifest")
+            << paths::MANIFEST
+            << QByteArray(R"({"format": "shoal-project", "version": 3, "name": "T",
+                             "design_resolution": [640, 360]})")
+            << "project.shoal.json: version: 3 is newer than this Shoal reads (2); update "
+               "Shoal to open this project";
         QTest::newRow("fit")
             << paths::MANIFEST
             << QByteArray(R"({"format": "shoal-project", "version": 1, "name": "T",
@@ -412,6 +534,16 @@ private slots:
             << scene +
                    ": entities[0].image.animation: an image is a sprite or an animation, not "
                    "both";
+        QTest::newRow("image asset with a sheet")
+            << scene << sceneWithEntity(R"({"image": {"asset": "title", "sheet": "hero"}})")
+            << scene +
+                   ": entities[0].image.sheet: an image is a sheet's sprite or animation, or an "
+                   "image asset, not both";
+        QTest::newRow("image asset id")
+            << scene << sceneWithEntity(R"({"image": {"asset": "2d"}})")
+            << scene +
+                   R"(: entities[0].image.asset: "2d" is not a valid id (use letters, digits, _ )"
+                   "and -, starting with a letter or _)";
         QTest::newRow("empty sprite")
             << scene << sceneWithEntity(R"({"image": {"sheet": "hero", "sprite": ""}})")
             << scene + ": entities[0].image.sprite: must not be empty";

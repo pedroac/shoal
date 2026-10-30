@@ -12,6 +12,7 @@ const QString SHEET = QStringLiteral("sheet");
 const QString NAME = QStringLiteral("name");
 const QString SPRITE = QStringLiteral("sprite");
 const QString ANIMATION = QStringLiteral("animation");
+const QString IMAGE = QStringLiteral("image");
 }  // namespace
 
 core::Entity SheetItem::toEntity() const
@@ -24,6 +25,10 @@ core::Entity SheetItem::toEntity() const
 core::Image SheetItem::toImage() const
 {
     core::Image image;
+    if (kind == Kind::Image) {
+        image.asset = sheet;
+        return image;
+    }
     image.sheet = sheet;
     if (kind == Kind::Animation) {
         image.animation = name;
@@ -36,21 +41,24 @@ core::Image SheetItem::toImage() const
 
 SheetItem SheetItem::fromImage(const core::Image& image)
 {
-    return image.isAnimation() ? SheetItem{Kind::Animation, image.sheet, image.animation}
-                               : SheetItem{Kind::Sprite, image.sheet, image.sprite};
+    return image.isStandalone()  ? SheetItem{Kind::Image, image.asset, {}}
+           : image.isAnimation() ? SheetItem{Kind::Animation, image.sheet, image.animation}
+                                 : SheetItem{Kind::Sprite, image.sheet, image.sprite};
 }
 
 QMimeData* SheetItem::toMimeData() const
 {
     const QJsonObject object{
-        {KIND, kind == Kind::Animation ? ANIMATION : SPRITE},
+        {KIND, kind == Kind::Animation ? ANIMATION
+               : kind == Kind::Image   ? IMAGE
+                                       : SPRITE},
         {SHEET, sheet},
         {NAME, name},
     };
     auto* data = new QMimeData;
     data->setData(QLatin1StringView(MIME_TYPE),
                   QJsonDocument(object).toJson(QJsonDocument::Compact));
-    data->setText(name);
+    data->setText(kind == Kind::Image ? sheet : name);
     return data;
 }
 
@@ -63,10 +71,11 @@ std::optional<SheetItem> SheetItem::fromMimeData(const QMimeData* data)
         QJsonDocument::fromJson(data->data(QLatin1StringView(MIME_TYPE))).object();
     const QString kind = object.value(KIND).toString();
     SheetItem item;
-    item.kind = kind == ANIMATION ? Kind::Animation : Kind::Sprite;
+    item.kind = kind == ANIMATION ? Kind::Animation : kind == IMAGE ? Kind::Image : Kind::Sprite;
     item.sheet = object.value(SHEET).toString();
     item.name = object.value(NAME).toString();
-    if ((kind != SPRITE && kind != ANIMATION) || item.sheet.isEmpty() || item.name.isEmpty()) {
+    if ((kind != SPRITE && kind != ANIMATION && kind != IMAGE) || item.sheet.isEmpty() ||
+        item.name.isEmpty() != (item.kind == Kind::Image)) {
         return std::nullopt;
     }
     return item;

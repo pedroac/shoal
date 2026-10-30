@@ -15,24 +15,35 @@ SheetCache::SheetCache(QObject* parent) : QObject(parent)
             &SheetCache::onDirectoryChanged);
 }
 
-void SheetCache::setSheets(const QMap<QString, QString>& sheets, const QString& baseDirectory)
+void SheetCache::setSheets(const QMap<QString, QString>& sheets, const QString& baseDirectory,
+                           const QMap<QString, QString>& images)
 {
     const QDir base(baseDirectory);
     for (const QString& alias : m_entries.keys()) {
-        if (!sheets.contains(alias)) {
+        if (!sheets.contains(alias) && !images.contains(alias)) {
             m_entries.remove(alias);
             emit sheetChanged(alias);
         }
     }
-    for (auto it = sheets.cbegin(); it != sheets.cend(); ++it) {
-        const QString file = QDir::cleanPath(base.filePath(*it));
-        if (m_entries.contains(it.key()) && m_entries[it.key()].file == file) {
-            continue;
+    for (const bool image : {false, true}) {
+        const QMap<QString, QString>& declared = image ? images : sheets;
+        for (auto it = declared.cbegin(); it != declared.cend(); ++it) {
+            const QString file = QDir::cleanPath(base.filePath(*it));
+            const auto entry = m_entries.constFind(it.key());
+            if (entry != m_entries.cend() && entry->file == file && entry->image == image) {
+                continue;
+            }
+            m_entries[it.key()] = Entry{file, image, nullptr, {}};
+            load(it.key());
         }
-        m_entries[it.key()] = Entry{file, nullptr, {}};
-        load(it.key());
     }
     updateWatches();
+}
+
+bool SheetCache::isImage(const QString& alias) const
+{
+    const auto it = m_entries.find(alias);
+    return it != m_entries.end() && it->image;
 }
 
 std::shared_ptr<const Sheet> SheetCache::sheet(const QString& alias) const
@@ -58,7 +69,7 @@ void SheetCache::reloadAll()
 void SheetCache::load(const QString& alias)
 {
     Entry& entry = m_entries[alias];
-    SheetLoad loaded = loadSheet(entry.file);
+    SheetLoad loaded = entry.image ? loadImageAsSheet(entry.file) : loadSheet(entry.file);
     if (loaded.sheet) {
         entry.sheet = std::move(loaded.sheet);
         entry.error.clear();

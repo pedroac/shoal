@@ -89,7 +89,7 @@ private slots:
         };
         const Frame none;
         Entity sprite;
-        sprite.image = Image{QStringLiteral("hero"), QStringLiteral("a.png"), {}, {}, {}};
+        sprite.image = Image{QStringLiteral("hero"), QStringLiteral("a.png"), {}, {}, {}, {}};
         QCOMPARE(entityRect(sprite, none, metrics), std::optional(RectF{-10, -20, 40, 20}));
         QVERIFY(!entityRect(sprite, none));  // with no sheets to read
         sprite.size = Extent::px({80, 40});

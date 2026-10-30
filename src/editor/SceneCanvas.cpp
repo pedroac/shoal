@@ -672,8 +672,9 @@ void SceneCanvas::updateGrids()
 
 SceneCanvas::SpriteVisual SceneCanvas::visualOf(const core::Image& image) const
 {
-    return image.isAnimation() ? animationVisual(image.sheet, image.animation)
-                               : spriteVisual(image.sheet, image.sprite);
+    return image.isStandalone()  ? spriteVisual(image.asset, assets::IMAGE_SPRITE)
+           : image.isAnimation() ? animationVisual(image.sheet, image.animation)
+                                 : spriteVisual(image.sheet, image.sprite);
 }
 
 core::ImageMetricsFn SceneCanvas::imageMetrics() const

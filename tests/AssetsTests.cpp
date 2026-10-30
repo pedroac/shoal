@@ -303,6 +303,59 @@ private slots:
         QTRY_VERIFY(cache.sheet(QStringLiteral("hero")));
     }
 
+    void loadsAStandaloneImageAsASheetOfOneSprite()
+    {
+        const QString file = support::fixturePath(QStringLiteral("sheets/hero.png"));
+        const QImage original(file);
+        QVERIFY(!original.isNull());
+        const SheetLoad loaded = loadImageAsSheet(file);
+        QVERIFY2(loaded.sheet, qPrintable(loaded.error));
+        const Sheet& sheet = *loaded.sheet;
+        QCOMPARE(sheet.scale, 1.0);
+        QCOMPARE(sheet.sprites.size(), size_t(1));
+        const Sprite* sprite = sheet.sprite(IMAGE_SPRITE);
+        QVERIFY(sprite);
+        QCOMPARE(sprite->name, QStringLiteral("hero.png"));
+        QCOMPARE(sprite->sourceSize, original.size());
+        QCOMPARE(sprite->rect, original.rect());
+        QCOMPARE(sprite->pivot, QPoint(0, 0));
+        QVERIFY(!sprite->hasSlice);
+        QCOMPARE(sheet.atlases.front(), original);
+        // Placed with its top-left corner on the origin, at its own size.
+        QCOMPARE(placeSprite(*sprite, 1, false, false).bounds, QRectF(original.rect()));
+
+        QTemporaryDir dir;
+        QVERIFY(loadImageAsSheet(dir.filePath(QStringLiteral("nope.png"))).error ==
+                QStringLiteral("the file doesn't exist"));
+        QVERIFY(writeFile(dir.filePath(QStringLiteral("bad.png")), "not an image"));
+        QCOMPARE(loadImageAsSheet(dir.filePath(QStringLiteral("bad.png"))).error,
+                 QStringLiteral("cannot read the image"));
+    }
+
+    void reloadsAnImageWhenItIsWrittenAgain()
+    {
+        QTemporaryDir dir;
+        const QString file = dir.filePath(QStringLiteral("title.png"));
+        QImage image(4, 2, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(file));
+
+        SheetCache cache;
+        cache.setSheets({}, dir.path(), {{QStringLiteral("title"), QStringLiteral("title.png")}});
+        QVERIFY(cache.isImage(QStringLiteral("title")));
+        QCOMPARE(cache.sheet(QStringLiteral("title"))->sprites.front().sourceSize, QSize(4, 2));
+
+        QImage bigger(8, 8, QImage::Format_ARGB32);
+        bigger.fill(Qt::blue);
+        QVERIFY(bigger.save(file));
+        QTRY_COMPARE(cache.sheet(QStringLiteral("title"))->sprites.front().sourceSize, QSize(8, 8));
+
+        // Declared as a sheet now: loaded again, as one.
+        cache.setSheets({{QStringLiteral("title"), QStringLiteral("title.png")}}, dir.path());
+        QVERIFY(!cache.isImage(QStringLiteral("title")));
+        QVERIFY(!cache.sheet(QStringLiteral("title")));  // not a .sprat file
+    }
+
     void forgetsSheetsNoLongerDeclared()
     {
         SheetCache cache;

@@ -4,22 +4,25 @@
 #include <optional>
 
 #include "core/CommandStack.h"
+#include "core/Model.h"
 
 namespace shoal::core {
 
 class ProjectDocument;
 
-/// Declares a sprat sheet in the manifest under `alias`, points it at another file, or
-/// removes it (null). Entities keep referring to the alias either way.
-class SetSheetCommand : public Command {
+/// Declares an asset of `kind` in the manifest under `alias`, points it at another file,
+/// or removes it (null). Entities keep referring to the alias either way.
+class SetAssetCommand : public Command {
 public:
-    SetSheetCommand(ProjectDocument& document, QString alias, std::optional<QString> file);
+    SetAssetCommand(ProjectDocument& document, AssetKind kind, QString alias,
+                    std::optional<QString> file);
     QString text() const override { return m_text; }
     void redo() override;
     void undo() override;
 
 private:
     ProjectDocument& m_document;
+    AssetKind m_kind;
     QString m_alias;
     QString m_text;
     std::optional<QString> m_before;

@@ -33,7 +33,7 @@ class ScenesPanel;
 class SceneTreePanel;
 class SceneCanvas;
 class SceneView;
-class SheetBrowserPanel;
+class AssetBrowserPanel;
 struct SheetItem;
 class WorkspaceTabs;
 
@@ -62,7 +62,7 @@ public:
     /// The right side panel: the scene settings, or the entity tree over the inspector.
     QStackedWidget* contextPanel() const { return m_contextPanel; }
     SceneTreePanel* sceneTreePanel() const { return m_sceneTree; }
-    SheetBrowserPanel* sheetBrowser() const { return m_sheetBrowser; }
+    AssetBrowserPanel* assetBrowser() const { return m_assetBrowser; }
     InspectorPanel* inspector() const { return m_inspector; }
     PresetsPanel* presetsPanel() const { return m_presets; }
     ScenesPanel* scenesPanel() const { return m_scenes; }
@@ -91,11 +91,12 @@ public:
     void openProjectAt(const QString& path);
     /// Saves into `directory` without asking or reporting.
     core::SaveResult saveProjectAs(const QString& directory);
-    /// Declares the .sprat `files` in the manifest, in one undo step, each under an alias
-    /// made from its file name; files already declared are skipped. Paths are written
+    /// Declares `files` in the manifest, in one undo step, each in the kind its extension
+    /// says, under an alias made from its file name; files already declared, or of a kind
+    /// Shoal doesn't know, are skipped. Paths are written
     /// relative to the project folder, or absolute while the project has none. Returns the
     /// new aliases.
-    QStringList addSheets(const QStringList& files);
+    QStringList addAssets(const QStringList& files);
 
 public slots:
     void newProject();
@@ -123,8 +124,9 @@ private:
     QList<SceneView*> sceneViews() const;
     void closeSceneTab(int index);
     void onCurrentTabChanged();
-    /// Loads the sheets the manifest declares, relative to the project folder.
-    void updateSheets();
+    /// Loads the sheets and images the manifest declares, relative to the project folder,
+    /// and lists its other assets.
+    void updateAssets();
     /// Places a sprite or animation from the sheet browser in the current scene's view.
     void placeSheetItem(const SheetItem& item);
     /// Places what a preset creates in the current scene's view.
@@ -141,13 +143,13 @@ private:
     QPointer<SceneCanvas> m_presetCanvas;  ///< The presets tab's, connected to this window.
     WorkspaceTabs* m_tabs = nullptr;
     assets::SheetCache m_sheets;
-    QMap<QString, QString> m_declaredSheets;
-    QString m_sheetsBase;
+    core::Assets m_declaredAssets;
+    QString m_assetsBase;
     QTabWidget* m_projectPanel = nullptr;
     QStackedWidget* m_contextPanel = nullptr;
     QSplitter* m_entityPanel = nullptr;  ///< The entity tree over the inspector.
     SceneTreePanel* m_sceneTree = nullptr;
-    SheetBrowserPanel* m_sheetBrowser = nullptr;
+    AssetBrowserPanel* m_assetBrowser = nullptr;
     PresetsPanel* m_presets = nullptr;
     InspectorPanel* m_inspector = nullptr;
     ScenesPanel* m_scenes = nullptr;

@@ -69,7 +69,8 @@ patterns and know-how carry over, and sprat-lib links directly with no FFI.
 | Flow | The graph of scenes and transitions, run as a stack |
 | Scene | A tree of entities: a menu, a level, a cutscene, an overlay |
 | Entity | A node in a scene's tree: a transform, children, and the parts it needs |
-| Part | What an entity has besides its transform: an image, a rect, a view, a layout, ... |
+| Part | What an entity has besides its transform: an image, a rect, a text, a sound, a view, ... |
+| Asset | A file the project declares under an alias: a sprat sheet, an image, a font, an audio clip or a video |
 | Layer | Informally, an entity near the top of the tree that sets `space` or `parallax` |
 | Class | A pure tag on an entity, for the engine's batch handling and for selectors |
 | Mark | A named point: a spawn point, a stage mark, a placeholder |
@@ -98,7 +99,8 @@ my_game/
 │   │       └── earthquake.json
 │   └── pause/
 │       └── scene.json
-├── art/                        the user's assets, e.g. hero.sprat and its atlases
+├── art/                        the user's assets, e.g. hero.sprat and its atlases,
+│                               images, fonts, audio and video
 ├── .shoal/                     per-user state, gitignored
 │   ├── session.json            open tabs, zoom, selection, hidden/locked entities
 │   └── autosave/
@@ -121,19 +123,43 @@ my_game/
 ### Manifest
 
 ```jsonc
-{ "format": "shoal-project", "version": 1,
+{ "format": "shoal-project", "version": 2,
   "name": "My Game",
   "design_resolution": [1920, 1080],
   "fit": "expand",
   "integer_scale": false,
   "start": "main_menu",
-  "sheets": { "hero": "art/hero.sprat", "ui": "art/ui.sprat" },
+  "assets": {
+    "sheets": { "hero": "art/hero.sprat", "ui": "art/ui.sprat" },
+    "images": { "title": "art/title.png" },
+    "fonts":  { "body": "fonts/Inter-Regular.ttf" },
+    "audio":  { "door_creak": "audio/door_creak.ogg", "theme": "audio/theme.ogg" },
+    "video":  { "intro": "video/intro.webm" } },
   "export": { "dir": "export", "targets": ["raw", "json"], "bundle": false } }
 ```
 
-Sprat sheets are declared once, under an alias. Entities refer to the alias, so
-moving a `.sprat` file is a one-line change. Atlas images resolve relative to their
-`.sprat` file, as in sprat-lib.
+### Assets
+
+Every file a scene uses is declared once, under an alias, in the kind it is. Entities
+refer to the alias, so moving a file is a one-line change.
+
+| Kind | Files | Used by |
+|---|---|---|
+| `sheets` | sprat `.sprat` sheets; their atlas images resolve relative to the `.sprat` file, as in sprat-lib | `image` (a sprite or an animation) |
+| `images` | standalone images: PNG, JPEG, BMP, GIF, WebP (the first frame), as Qt reads them | `image` |
+| `fonts` | TrueType and OpenType fonts (`.ttf`, `.otf`) | `text` |
+| `audio` | WAV, Ogg Vorbis, MP3, FLAC | `audio` |
+| `video` | WebM, MP4, Ogg Theora | `video` |
+
+- **An alias is unique across all kinds**, so a scene's asset list (section 14) and
+  the Problems panel name an asset by its alias alone.
+- **Shoal decodes only what it draws:** sheets, images and fonts. Audio and video
+  are declared, placed and exported, but not played: the editor has no media
+  playback in v1, so it needs no Qt Multimedia.
+- **The kind comes from the extension** when files are added, and stays as
+  declared afterwards.
+- **Manifest version 1** declared sheets in a top-level `sheets` key; reading it
+  moves them under `assets`.
 
 ### Class declarations
 
@@ -259,6 +285,7 @@ the background's entities.
 // scenes/level_1/scene.json
 { "format": "shoal-scene", "version": 3,
   "size": [3840, 1080],
+  "preload": ["explosion", "coin_pickup"],
   "entities": [
     { "id": "bg", "parallax": [0.5, 0.5], "children": [
         { "image": { "sheet": "hero", "sprite": "props/bush.png" },
@@ -281,6 +308,10 @@ the background's entities.
           "image": { "sheet": "ui", "sprite": "frame.png", "mode": "nineslice" },
           "tint": "#ffffffc0" } ] } ] }
 ```
+
+- **`preload` lists the assets the engine uses in the scene that no entity refers
+  to**, such as a sound the game code plays on an event, by alias. What the entities
+  use needs no listing: the export works it out (section 14). Left out, it is empty.
 
 ### Entities
 
@@ -309,7 +340,7 @@ the background's entities.
 | `at` | Where `pos` is measured from, on each axis: `0`, the parent's origin (the default), a percentage of the parent's rect such as `"50%"`, or a tile of a tiled parent such as `"3□"` (see units below) |
 | `size`, `pivot` | A rect of `size` [w, h] around the origin, each side in pixels, a percentage of the parent's rect (`"50%"`) or a number of its tiles (`"2□"`). `pivot` is the fraction of the rect that sits on the origin. Both are automatic when left out: an image's, from its sprite (see images below), or for an entity without an image no rect and a pivot of `[0, 0]`, the top-left corner. Rotation and scale turn about the origin |
 | `area` | `"viewport"` (the default) or `"safe"`: the screen rect an entity measures or lays out against when its parent has no rect, in screen space |
-| `image` | `{ sheet, sprite }`, a sprat sprite by path, or `{ sheet, animation }`, a sprat animation by name, with a `mode`; it fills the rect |
+| `image` | `{ sheet, sprite }`, a sprat sprite by path, `{ sheet, animation }`, a sprat animation by name, or `{ asset }`, a standalone image, with a `mode`; it fills the rect |
 | `fill` | A color, `#rrggbb` or `#rrggbbaa`, filling the rect |
 | `tint`, `tint_mode` | A color, `#rrggbb` or `#rrggbbaa` (default `#ffffff`), multiplying the entity's image, fill and text and passed down to its descendants; `tint_mode` says how it combines with the parent's (see tint below) |
 | `clip` | `true` draws the entity and its descendants only inside its rect |
@@ -319,10 +350,15 @@ the background's entities.
 | `layout` | Places the rect inside the parent's, by anchors (section 11), in place of `pos`, `at` and `size` |
 | `shape` | An area that isn't a rect: `{ "polygon": [[x, y], ...] }` or `{ "circle": r }` |
 | `path` | `{ points, curve: "linear" \| "bezier", closed }` |
-| `text` | Text in the rect, with alignment and an overflow hint (see open questions) |
+| `text` | `{ font, string, size, ... }`: text in the rect (see text below) |
+| `audio` | `{ clip, ... }`: a sound source at the entity's origin (see audio below) |
+| `video` | `{ clip, ... }`: a video filling the rect (see video below) |
 
-Parts that need a rect (`fill`, `clip`, `view`, `text`, `container`) do nothing without
-one, and the Problems panel reports them.
+Parts that need a rect (`fill`, `clip`, `view`, `text`, `video`, `container`) do
+nothing without one, and the Problems panel reports them.
+
+**An entity draws its parts in a fixed order:** its fill, its image, its video, then
+its text, so a button can be an image with a label, and a torch a sprite with a sound.
 
 ### Units
 
@@ -440,10 +476,79 @@ the one it receives:
   `DrawSpratFrameNPatch`; slices are cut in the original image, then clipped to the
   trimmed content. Its `scale` scales all of it, borders included.
 
+- **A standalone image** (`{ "asset": "title" }`) has the image's pixel size as its
+  automatic size, and `[0, 0]`, its top-left corner, as its automatic pivot, since it
+  has no sprat pivot. It has no slice insets, so its mode is `stretch`.
+
 Sprites are referenced by sheet alias plus sprite path (`"image": { "sheet": "hero",
 "sprite": "hero/idle.png" }`), never by name, because sprat names are basenames and
 repeat across folders. In the engine, the reference maps directly onto
 `sprat_sheet_bind(SPRAT_BIND_SPRITE_PATH, …)`.
+
+### Text
+
+```jsonc
+"text": { "font": "body", "string": "Start", "key": "menu.start", "size": 32,
+          "color": "#ffffff", "align": [0.5, 0.5], "wrap": "word", "line_height": 1.2 }
+```
+
+| Field | Meaning |
+|---|---|
+| `font` | A `fonts` alias |
+| `string` | The text, as written; `\n` breaks a line |
+| `key` | Optional: a localization key the engine looks up; `string` is then what the editor shows, and the fallback |
+| `size` | The font's size in pixels (its em), default `32` |
+| `color` | Default `#ffffff`, multiplied by the entity's tint |
+| `align` | Where the text sits in the rect, as a pivot: `[0, 0]` top-left, `[0.5, 0.5]` centered (the default), `[1, 1]` bottom-right |
+| `wrap` | `"word"` (the default) breaks lines at the rect's width; `"none"` doesn't |
+| `line_height` | A multiple of `size`, default `1.2` |
+
+- **The rect is declared; the text is laid out by the engine.** Text is the one place
+  an engine measures, so nothing else depends on it: the rect is the text's box,
+  and what is placed around it is placed around the rect. The export carries the
+  string, the box and the wrap mode, never the editor's line breaks.
+- **The editor's preview is approximate.** It lays the text out with Qt, in the font
+  the project declares; an engine with another rasterizer may break lines a little
+  differently. Text that overflows its rect in the preview is a warning.
+- **Literal strings and localization keys both work:** a game without localization
+  uses `string`, one with it sets `key` and keeps `string` as the editor's sample.
+
+### Audio
+
+```jsonc
+"audio": { "clip": "door_creak", "volume": 1, "loop": false, "autoplay": false,
+           "radius": 400 }
+```
+
+| Field | Meaning |
+|---|---|
+| `clip` | An `audio` alias |
+| `volume` | 0 to 1, default `1`; a hint |
+| `loop` | Default `false` |
+| `autoplay` | Default `false`: `true` starts it when the entity becomes active, so ambience and music need no code |
+| `radius` | Optional, in pixels: the sound is heard from the entity's origin, fading out to nothing at `radius`. Left out, it is heard everywhere at its volume, for music and ambience |
+
+- **A sound source is where the entity is.** Its position is authoritative, as any
+  position is: the engine uses it for panning and distance, with its own falloff
+  curve. `radius` is geometry; `volume` is a feel value.
+- **When it plays is the engine's,** besides `autoplay`: an event or a modifier
+  starts it, by the entity's id or class. Shoal doesn't declare triggers on sounds.
+- It needs no rect. The canvas draws a speaker at its origin, and its radius, dashed,
+  when it is selected.
+
+### Video
+
+```jsonc
+"video": { "clip": "intro", "loop": false, "autoplay": true, "mode": "fit" }
+```
+
+- `clip` is a `video` alias; `loop` and `autoplay` are as for audio, and a video's
+  sound plays with it, not positioned.
+- `mode` says how the frames fill the rect: `stretch` (the default), `fit` (inside
+  it, keeping the aspect ratio, letterboxed) or `fill` (covering it, cropped).
+- **It has no automatic size,** since Shoal doesn't decode video: placing one gives
+  the entity a rect of its own, 16:9, a quarter of the design resolution's width.
+  The canvas draws the rect with the clip's name in it.
 
 ### Space and parallax
 
@@ -825,9 +930,9 @@ Problems panel warns.
   the current workspace sits between two panels, shared by every tab.
   - On the left, the **project panel**: the project's own data, a tab for each list
     the workspace works with. The flow has the scenes; a scene and the presets have
-    the presets and the sheets, to place from. Coming to the presets shows the
+    the presets and the assets, to place from. Coming to the presets shows the
     presets, the list that tab edits; a scene shows the list last chosen on a scene,
-    the sheets at first.
+    the assets at first.
   - On the right, the **context panel**: what is selected in the current tab. On the
     flow, the selected scene's settings; on a scene or the presets, the entity tree
     over the inspector.
@@ -840,7 +945,7 @@ Problems panel warns.
 - **Presets workspace:** the preset current in the project panel's Presets list
   (every preset the project can create entities from, the built-in ones too), its
   entities on a canvas, around a cross where it is placed. The scene tree, the
-  inspector and the sheets work on it as on a scene; presets are dragged from the
+  inspector and the assets work on it as on a scene; presets are dragged from the
   list onto it to nest them, while choosing one there edits it rather than placing
   it. The tree's top level is the preset, and the
   inspector's top level its settings: its id (its file's name; a customized one
@@ -859,7 +964,7 @@ Problems panel warns.
     around the center of what they draw, and shows it. Its id is the first
     entity's, made unique, or `preset`.
 - **Scene view (micro):** the canvas, with the scene tree, an inspector,
-  a sprat sheet browser (drag sprites onto the canvas), selection and
+  an asset browser (drag sprites, images, fonts, sounds and videos onto the canvas), selection and
   move/rotate/scale gizmos, and snapping.
   - Each open scene has a tab next to the flow's; double-clicking a scene node
     opens it. Tabs follow renames and close when their scene is removed.
@@ -923,8 +1028,9 @@ Problems panel warns.
     whether it clips, its container, its space and its parallax. A check box adds or removes each part that can be absent. Each change
     is one undo step. The fields are in sections, under the id, classes and flags:
     Transform (position, offset, angle, scale, flips), Rect (size, pivot), Look
-    (image, fill, tint), Children (clip, container, tile pivot) and Camera (space,
-    parallax). A position's or a size's axes are a line each, with their units, so
+    (image, fill, tint), Text, Audio, Video, Children (clip, container, tile pivot)
+    and Camera (space, parallax). Text, Audio and Video show only for an entity
+    with that part, each with a button that removes it. A position's or a size's axes are a line each, with their units, so
     the inspector fits a narrow panel, and it scrolls when the panel is shorter than it; a scale can't be zero. An entity with a size of its own shows
     its scale only when it isn't 1.
   - Size and pivot each have an "Own" check box, off for an entity placed from a
@@ -941,6 +1047,14 @@ Problems panel warns.
   - The pivot is a 3×3 grid of points (top-left, top, top-right, ...,
     bottom-right), with fields for other fractions. Changing it keeps the rect
     where it is drawn. Tint and fill are colors with alpha.
+  - **Text** has the font (a list of the project's fonts), a multi-line text area
+    for the string, the localization key, the size, the color, the alignment (a
+    3×3 grid of points, like the pivot's), wrapping and the line height. The text
+    area applies on leaving it, or on Ctrl+Enter, as one undo step; Enter breaks a
+    line.
+  - **Audio** has the clip, the volume, loop and autoplay, and a Positional check
+    box that sets the radius (400 px when turned on) or leaves it out. **Video** has
+    the clip, loop, autoplay and the mode.
   - The container is Free or Tiled. Tiled shows the tile size and the tile pivot,
     a 3×3 grid of points like the pivot's; a new tiled container has 32×32 tiles
     centered on their pivots, and an entity without a rect is given one (64×64).
@@ -953,34 +1067,56 @@ Problems panel warns.
   - The presets panel lists the built-in and project presets; dropping one on the
     canvas, or double-clicking it, places it as a sprite is placed, in one undo
     step.
-  - **The presets and the sheets tell a click from a drag.** A row becomes current
+  - **The presets and the assets tell a click from a drag.** A row becomes current
     when the mouse is released on it, not when it is pressed, so dragging a row away
     leaves the current one as it was: dragging a sprite onto a scene doesn't change
     the selected entity's image, and dragging a preset into the one being edited
     doesn't change which one that is. A double-click makes the row current too.
-  - The sheet browser lists each declared sheet with its sprites (by path, in the
-    sheet's order) and animations, as thumbnails, and filters them by name. A sheet
-    that didn't load says why. It follows the sheet cache, so a sheet written again
-    by sprat shows up at once.
-  - **It picks the selected entity's image.** With one entity selected that can be
-    changed, its sprite or animation is the current row, or None is checked;
-    clicking another row, or None, sets it, one undo step. A nine-slice stays one
-    with another sprite, and a size of its own stays; None keeps the size and pivot
-    the image gave it. Dragging a row still places a new entity, and leaves the
-    picked image as it was; double-clicking one places it only when no entity is
-    picked for.
-  - Dropping `.sprat` files on the sheet browser declares them in the manifest, in
-    one undo step, each under an alias made from its file name (characters an id
-    can't have become `_`, and `_2`, `_3`, ... avoids a clash). The path is relative
-    to the project folder, or absolute while the project has never been saved. A
-    file already declared is skipped. With no sheets, the browser says to drop some.
-  - Dropping a sprite or an animation on the canvas adds an entity with that image
-    and no id, in the current parent, at the drop point (snapped when
-    snapping is on), and selects it; double-clicking it in the browser places it in
-    the middle of the view. Either is one undo step. A hidden or locked current
-    parent refuses it, since the new entity couldn't be seen or picked. A sprite
-    with nine-slice insets is placed in `nineslice` mode with its natural size set,
-    so the scale handle resizes it.
+  - **The asset browser** (the project panel's Assets tab, in place of Sheets) lists
+    the declared assets in groups: Sprites (each sheet, with its sprites by path, in
+    the sheet's order, and its animations), Images, Fonts, Audio and Video. Sprites
+    and images show as thumbnails, fonts as their name in the font, sounds and
+    videos as an icon with the file's name and type. A filter matches names and
+    paths. An asset that didn't load says why. It follows the asset caches, so a
+    sheet written again by sprat, or an image or a font saved again, shows up at
+    once.
+  - **It picks for the selected entity.** With one entity selected that can be
+    changed, clicking a row gives the entity that asset, one undo step: a sprite or
+    an image becomes its image, a font its text's font, a clip its sound's or its
+    video's, adding the part if it has none, so picking a font shows the Text
+    section. Its image is the current row, or None is checked, and the other
+    assets it uses are in bold. None removes the image; the other parts are removed
+    from their inspector sections. A nine-slice stays one with another sprite, and
+    a size of its own stays; None keeps the size and pivot the image gave it.
+    Dragging a row still places a new entity, and leaves the selected one as it
+    was; double-clicking one places it only when no entity is picked for.
+  - Until the text, audio and video parts come (roadmap step 5), fonts, clips and
+    videos are listed by alias, with their file as a tooltip and a missing file
+    shown in red, and can't be placed or picked.
+  - Dropping files on the asset browser declares them in the manifest, in one undo
+    step, each in the kind its extension says, under an alias made from its file
+    name (characters an id can't have become `_`, and `_2`, `_3`, ... avoids a
+    clash, across all kinds). The path is relative to the project folder, or
+    absolute while the project has never been saved. A file already declared, or of
+    a type Shoal doesn't know, is skipped. With no assets, the browser says to drop
+    some.
+  - Dropping an asset on the canvas adds an entity with no id, in the current
+    parent, at the drop point (snapped when snapping is on), and selects it;
+    double-clicking it in the browser places it in the middle of the view. Either
+    is one undo step. A hidden or locked current parent refuses it, since the new
+    entity couldn't be seen or picked. What it adds:
+    - a sprite, an animation or an image: an entity with that image. A sprite with
+      nine-slice insets is placed in `nineslice` mode with its natural size set, so
+      the scale handle resizes it;
+    - a font: a text, "Text", in a rect sized to it in the font at 32 px, with
+      its pivot at its center;
+    - a clip: a sound source with no radius;
+    - a video: a video in a 16:9 rect, a quarter of the design resolution wide,
+      centered on its origin.
+  - The scene's settings (the top level, in the inspector) list what the scene
+    loads: the assets its entities use, read-only, then the preload list, which
+    takes aliases from the asset browser by drag or from a list, and drops them
+    with −, each one undo step.
   - Entities are drawn with their effective tint.
   - Screen-space entities are listed but not drawn until the UI layout step.
 - **Transition editor:** trigger and requirements, the effect and its parameters,
@@ -996,8 +1132,11 @@ Problems panel warns.
   custom sizes, with a simulated safe area.
 - **Problems panel:** errors, warnings and notes, each linked to the entity or file
   at fault:
-  - A reference to a missing id, scene, modifier, mark or sheet; a dangling
-    transition.
+  - A reference to a missing id, scene, modifier, mark or asset, or to an asset of
+    the wrong kind (a font as an image); a dangling transition.
+  - An asset file that is missing or can't be read; one declared and used nowhere
+    (a note).
+  - Text that overflows its rect in the editor's preview.
   - A carried entity with no mark mapped in the destination.
   - A selector that matches nothing in the editor (a note: the engine may create
     matching entities).
@@ -1015,7 +1154,7 @@ Problems panel warns.
   - A position or a size in tiles outside a tiled container, or a tile outside the
     grid.
 
-### Sprat integration
+### Sprat and other assets
 
 A `SheetCache` follows sprat-lib's "load, bind, convert, free" pattern: it loads
 each `.sprat` with `sprat_sheet_load_file`, copies sprites and animations into Qt
@@ -1028,6 +1167,10 @@ recipe (trim, pivot, packing rotation, flips).
   writes reloads once. A sheet declared before it exists loads when it appears.
 - **A failed reload keeps the last good sheet**, such as one that caught a file half
   written, and the error is shown until a later write loads.
+- **Images and fonts** are cached by alias the same way, and reloaded when their
+  file is written again; a font is registered with `QFontDatabase` from its file,
+  so the system's fonts never stand in for it. Audio and video files are only
+  checked to exist.
 - **World units are the art's original pixels:** sprites are drawn at
   `1 / sheet.scale`, so packing a sheet at half scale doesn't halve the scene.
 - An atlas that can't be read, or whose size differs from what the sheet says, is
@@ -1049,8 +1192,16 @@ editor project (JSON, easy to diff)
   engine loads and frees scenes on demand. `"bundle": true` in the manifest writes
   a single `game.shoal` instead. The JSON target mirrors the same structure.
 - **What the export resolves:**
-  - Ids from paths are written explicitly, and sheet aliases become a sheet table
-    that entities index into.
+  - Ids from paths are written explicitly, and asset aliases become an asset table,
+    each with its kind and its path, that entities index into.
+  - **Each scene lists the assets it loads:** what its entities use (inactive and
+    hidden ones too, since an action may show them; the presets they were made from
+    are already copied in), then its `preload` list, without repeats, as asset table
+    indexes. An engine loads those it hasn't loaded yet when the scene starts, and
+    may free the others.
+  - **And what comes next:** `next_assets` lists what the scenes one transition away
+    load (overlays pushed on it too) that it doesn't, so an engine can load them
+    ahead of time. Only Shoal knows the flow, so this is resolved here.
   - An image's automatic size and pivot are written out (marked automatic for an
     animation).
   - Positions and sizes in percent or in tiles, and laid-out entities, carry the
@@ -1064,7 +1215,7 @@ editor project (JSON, easy to diff)
   - Selectors are compiled term lists, and each modifier carries its write set.
   - Editor data, presets and class docs are dropped.
 - **shoal-raw** follows sprat-raw: a version on the first line (`shoal-raw 1`), one
-  record per line (`flow`, `state`, `sheet`, `scene`, `entity`,
+  record per line (`flow`, `state`, `asset`, `scene`, `entity`,
   `transition`, `selector`, `modifier`, `action`), length-prefixed strings, totals
   declared before the records they count so a loader allocates one block, parents
   and references as indexes. A camera is an `entity` record and its actions are
@@ -1084,7 +1235,8 @@ memory functions. It will include:
   resolution can use `design_rect` and skip it.
 
 It stays independent of sprat-lib: sprite references are a sheet path and a sprite
-path, which the engine binds with sprat-lib itself.
+path, which the engine binds with sprat-lib itself. Other assets are paths too; the
+engine loads them with whatever it uses for images, fonts, audio and video.
 
 ## 16. Code layout
 
@@ -1093,10 +1245,11 @@ shoal/
 ├── src/
 │   ├── core/          QtCore only: model, commands, JSON reader/writer, migrations,
 │   │                  validation (Problems), export model and writers
-│   ├── assets/        sprat-lib wrapper: SheetCache, atlas pixmaps, sprite drawing
+│   ├── assets/        sprat-lib wrapper (SheetCache, atlas pixmaps, sprite drawing),
+│   │                  image and font caches
 │   └── editor/        Qt Widgets application
 │       ├── flow/      flow graph view
-│       ├── scene/     canvas, scene tree, inspector, sheet browser
+│       ├── scene/     canvas, scene tree, inspector, asset browser
 │       ├── transition/
 │       ├── modifier/  action list editor, rehearsal
 │       └── problems/
@@ -1120,16 +1273,19 @@ headless, and a command-line exporter can be added later without the GUI.
    drawing and hot reload, gizmos, ids and classes, the class registry, presets;
    then entities with parts, scene format 3 and the migrations from formats 1 and
    2, tiled containers, and units (px, %, □) for positions and sizes.
-5. **Spatial primitives:** marks, paths and regions; placeholders and ghosts; the
+5. **Assets:** the asset browser and manifest version 2; standalone images; the
+   scene's asset list and `preload`; fonts and the `text` part; the `audio` part;
+   the `video` part.
+6. **Spatial primitives:** marks, paths and regions; placeholders and ghosts; the
    Problems panel.
-6. **Transitions:** triggers, effects, persistence, push/pop and overlays.
-7. **Screen space:** anchors and offsets, the CSS-style inspector, fit modes, the
+7. **Transitions:** triggers, effects, persistence, push/pop and overlays.
+8. **Screen space:** anchors and offsets, the CSS-style inspector, fit modes, the
    viewport switcher.
-8. **Modifiers and camera:** action lists, camera entities and actions, write sets,
+9. **Modifiers and camera:** action lists, camera entities and actions, write sets,
    rehearsal, look through camera.
-9. **Export:** the export model, JSON and raw writers, the format specification.
+10. **Export:** the export model, JSON and raw writers, the format specification.
 
-After v1: shoal-lib, a reference demo with sprat-raylib, stack containers, keyframe
+After v1: media playback in the editor, bitmap fonts, shoal-lib, a reference demo with sprat-raylib, stack containers, keyframe
 tracks, a command-line exporter, a WASM build, zipped projects.
 
 ## 18. Open questions
@@ -1138,9 +1294,14 @@ tracks, a command-line exporter, a WASM build, zipped projects.
   keep an `int` prop apart from a `float` one. Props are kept as written until this
   is decided: declare prop types somewhere (per class, or per prop as
   `{ "float": 4 }`), or write float props always with a decimal point.
-- **Text:** literal strings, localization keys, or both? How are fonts referenced?
-- **Audio:** stage-direction cues (`cue("door_creak")`) that the engine maps to
-  files, or no audio in v1?
+- **Bitmap fonts:** BMFont (`.fnt`) and sprat-packed glyphs are common in custom
+  engines. Should they be a font asset of their own, with a fixed size?
+- **Rich text:** colored or bold runs inside one string, or one style per text?
+- **Streaming:** should an audio or video asset say whether the engine streams it
+  (music) or loads it whole (effects), as a hint, or is that the engine's to decide
+  from the file's size?
+- **Asset groups:** should a set of assets loaded together (a level pack) be
+  declared once and preloaded by name, or does each scene's computed list suffice?
 - **References across scenes:** can an id point into another scene
   (`level_2#door_west`), or does everything cross scenes through transitions only?
 - **Events and requirements registry:** should `flow.json` declare event and

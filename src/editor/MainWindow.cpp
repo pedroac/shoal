@@ -18,10 +18,11 @@
 #include <QTimer>
 
 #include "assets/SpratLibrary.h"
+#include "core/AssetCommands.h"
 #include "core/ProjectDocument.h"
 #include "core/ProjectTemplates.h"
-#include "core/SheetCommands.h"
 #include "core/Version.h"
+#include "editor/AssetBrowserPanel.h"
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
 #include "editor/InspectorPanel.h"
@@ -33,7 +34,6 @@
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
 #include "editor/ScenesPanel.h"
-#include "editor/SheetBrowserPanel.h"
 #include "editor/WorkspaceTabs.h"
 
 namespace shoal::editor {
@@ -72,13 +72,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // selected in the current tab. Both go beside each project's tabs.
     m_scenes = new ScenesPanel(this);
     m_presets = new PresetsPanel(this);
-    m_sheetBrowser = new SheetBrowserPanel(m_sheets, this);
+    m_assetBrowser = new AssetBrowserPanel(m_sheets, this);
     m_projectPanel = new QTabWidget(this);
     m_projectPanel->setObjectName(QStringLiteral("projectPanel"));
     m_projectPanel->setDocumentMode(true);
     m_projectPanel->addTab(m_scenes, tr("Scenes"));
     m_projectPanel->addTab(m_presets, tr("Presets"));
-    m_projectPanel->addTab(m_sheetBrowser, tr("Sheets"));
+    m_projectPanel->addTab(m_assetBrowser, tr("Assets"));
     m_sceneSettings = new SceneSettingsPanel(this);
     m_sceneTree = new SceneTreePanel(this);
     m_inspector = new InspectorPanel(this);
@@ -101,13 +101,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_presets, &PresetsPanel::editRequested, this,
             [this](const QString& id) { openPresets(id); });
     connect(m_scenes, &ScenesPanel::sceneActivated, this, &MainWindow::openScene);
-    connect(m_sheetBrowser, &SheetBrowserPanel::placeRequested, this, &MainWindow::placeSheetItem);
-    connect(m_sheetBrowser, &SheetBrowserPanel::chosen, this,
+    connect(m_assetBrowser, &AssetBrowserPanel::placeRequested, this, &MainWindow::placeSheetItem);
+    connect(m_assetBrowser, &AssetBrowserPanel::chosen, this,
             [this](const std::optional<SheetItem>& item) {
                 m_inspector->setImage(item ? std::optional(item->toImage()) : std::nullopt);
             });
     connect(m_presets, &PresetsPanel::placeRequested, this, &MainWindow::placePreset);
-    connect(m_sheetBrowser, &SheetBrowserPanel::sheetFilesDropped, this, &MainWindow::addSheets);
+    connect(m_assetBrowser, &AssetBrowserPanel::assetFilesDropped, this, &MainWindow::addAssets);
     createActions();
     createMenus();
     setDocument(nullptr);
@@ -360,7 +360,7 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     }
     m_flowScene.reset();
     m_document = std::move(document);
-    updateSheets();
+    updateAssets();
     m_presets->setDocument(m_document.get());
 
     if (m_document) {
@@ -414,7 +414,7 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
                 &MainWindow::updateActions);
         connect(m_document.get(), &core::ProjectDocument::startSceneChanged, this,
                 &MainWindow::updateActions);
-        connect(m_document.get(), &core::ProjectDocument::changed, this, &MainWindow::updateSheets);
+        connect(m_document.get(), &core::ProjectDocument::changed, this, &MainWindow::updateAssets);
         connect(m_flowScene.get(), &FlowScene::sceneActivated, this, &MainWindow::openScene);
         connect(m_document.get(), &core::ProjectDocument::sceneRemoved, this,
                 [this](const QString& id) {
@@ -567,62 +567,67 @@ void MainWindow::updatePanels()
     QWidget* current = kind == TabKind::Flow      ? static_cast<QWidget*>(m_scenes)
                        : kind == TabKind::Presets ? static_cast<QWidget*>(m_presets)
                        : m_sceneList              ? m_sceneList.data()
-                                                  : m_sheetBrowser;
+                                                  : m_assetBrowser;
     // Shown before the others are hidden, so hiding the current one doesn't pick another.
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(current), true);
     m_projectPanel->setCurrentWidget(current);
     const bool flow = kind == TabKind::Flow;
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_scenes), flow);
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_presets), !flow);
-    m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_sheetBrowser), !flow);
+    m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_assetBrowser), !flow);
 }
 
-void MainWindow::updateSheets()
+void MainWindow::updateAssets()
 {
-    QMap<QString, QString> declared;
+    core::Assets declared;
     QString base;
     if (m_document) {
-        declared = m_document->project().manifest.sheets;
+        declared = m_document->project().manifest.assets;
         base = m_document->directory().isEmpty() ? QDir::currentPath() : m_document->directory();
     }
-    if (declared != m_declaredSheets || base != m_sheetsBase) {
-        m_declaredSheets = declared;
-        m_sheetsBase = base;
-        m_sheets.setSheets(declared, base);
+    if (declared != m_declaredAssets || base != m_assetsBase) {
+        m_declaredAssets = declared;
+        m_assetsBase = base;
+        m_sheets.setSheets(declared.sheets, base, declared.images);
+        m_assetBrowser->setAssets(declared, base);
     }
 }
 
-QStringList MainWindow::addSheets(const QStringList& files)
+QStringList MainWindow::addAssets(const QStringList& files)
 {
     QStringList added;
     if (!m_document) {
-        statusBar()->showMessage(tr("Open a project to add sheets to it."), STATUS_TIMEOUT_MS);
+        statusBar()->showMessage(tr("Open a project to add assets to it."), STATUS_TIMEOUT_MS);
         return added;
     }
     const QString directory = m_document->directory();
-    const QDir base(m_sheetsBase);  // what the sheet cache resolves paths against
+    const QDir base(m_assetsBase);  // what the caches resolve paths against
     QStringList declared;
-    for (const QString& file : m_document->project().manifest.sheets) {
-        declared << QFileInfo(base.filePath(file)).absoluteFilePath();
+    const core::Assets& assets = m_document->project().manifest.assets;
+    for (core::AssetKind kind : core::Assets::KINDS) {
+        for (const QString& file : assets.of(kind)) {
+            declared << QFileInfo(base.filePath(file)).absoluteFilePath();
+        }
     }
 
     core::CommandStack& commands = m_document->commands();
-    commands.beginMacro(files.size() == 1 ? tr("Add sheet") : tr("Add sheets"));
+    commands.beginMacro(files.size() == 1 ? tr("Add asset") : tr("Add assets"));
     for (const QString& file : files) {
         const QFileInfo info(file);
         const QString absolute = info.absoluteFilePath();
-        if (declared.contains(absolute)) {
+        const std::optional<core::AssetKind> kind = core::assetKindForFile(info.fileName());
+        if (!kind || declared.contains(absolute)) {
             continue;
         }
         declared << absolute;
         const QString path = directory.isEmpty() ? absolute : base.relativeFilePath(absolute);
-        const QString alias = m_document->uniqueSheetAlias(info.completeBaseName());
-        commands.push(std::make_unique<core::SetSheetCommand>(*m_document, alias, path));
+        const QString alias = m_document->uniqueAssetAlias(info.completeBaseName());
+        commands.push(std::make_unique<core::SetAssetCommand>(*m_document, *kind, alias, path));
         added << alias;
     }
     commands.endMacro();
 
-    statusBar()->showMessage(added.isEmpty() ? tr("These sheets are already in the project.")
+    statusBar()->showMessage(added.isEmpty() ? tr("These files are already in the project.")
                                              : tr("Added %1").arg(added.join(QStringLiteral(", "))),
                              STATUS_TIMEOUT_MS);
     return added;
@@ -632,7 +637,8 @@ void MainWindow::placeSheetItem(const SheetItem& item)
 {
     SceneView* view = currentSceneView();
     if (!view) {
-        statusBar()->showMessage(tr("Open a scene to place %1 in it.").arg(item.name),
+        const QString name = item.kind == SheetItem::Kind::Image ? item.sheet : item.name;
+        statusBar()->showMessage(tr("Open a scene to place %1 in it.").arg(name),
                                  STATUS_TIMEOUT_MS);
         return;
     }
@@ -695,7 +701,7 @@ core::SaveResult MainWindow::saveProjectAs(const QString& directory)
 {
     Q_ASSERT(m_document);
     core::SaveResult result = m_document->saveAs(directory);
-    updateSheets();  // relative to the new folder
+    updateAssets();  // relative to the new folder
     updateTitle();
     return result;
 }
@@ -872,10 +878,10 @@ void MainWindow::updateSheetChoice()
                                      ? core::entityAt(*scene, selected.first())
                                      : nullptr;
     if (!entity) {
-        m_sheetBrowser->setChoice(false, std::nullopt);
+        m_assetBrowser->setChoice(false, std::nullopt);
         return;
     }
-    m_sheetBrowser->setChoice(
+    m_assetBrowser->setChoice(
         true, entity->image ? std::optional(SheetItem::fromImage(*entity->image)) : std::nullopt);
 }
 

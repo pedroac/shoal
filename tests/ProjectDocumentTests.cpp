@@ -4,10 +4,10 @@
 #include <QTest>
 
 #include "Support.h"
+#include "core/AssetCommands.h"
 #include "core/FlowCommands.h"
 #include "core/ProjectDocument.h"
 #include "core/ProjectTemplates.h"
-#include "core/SheetCommands.h"
 
 using namespace shoal::core;
 
@@ -39,6 +39,7 @@ private slots:
         QStringList written = saved.written;
         written.sort();
         QCOMPARE(written, (QStringList{QStringLiteral("presets/enemy_grunt.json"),
+                                       QStringLiteral("project.shoal.json"),
                                        QStringLiteral("scenes/level_1/modifiers/earthquake.json"),
                                        QStringLiteral("scenes/level_1/scene.json"),
                                        QStringLiteral("scenes/level_2/scene.json"),
@@ -251,45 +252,57 @@ private slots:
         QVERIFY(QFile::exists(QDir(dir.path()).filePath(notes)));
     }
 
-    void makesUniqueSheetAliases()
+    void makesUniqueAssetAliases()
     {
-        ProjectDocument document(fixtureProject());  // declares hero and ui
-        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("sheet")), QStringLiteral("sheet"));
-        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("hero")), QStringLiteral("hero_2"));
-        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("my sheet.v2")),
+        ProjectDocument document(fixtureProject());  // declares the sheets hero and ui
+        QCOMPARE(document.uniqueAssetAlias(QStringLiteral("sheet")), QStringLiteral("sheet"));
+        QCOMPARE(document.uniqueAssetAlias(QStringLiteral("hero")), QStringLiteral("hero_2"));
+        QCOMPARE(document.uniqueAssetAlias(QStringLiteral("my sheet.v2")),
                  QStringLiteral("my_sheet_v2"));
-        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("2d")), QStringLiteral("_2d"));
-        QCOMPARE(document.uniqueSheetAlias(QStringLiteral("héros")), QStringLiteral("h_ros"));
-        QCOMPARE(document.uniqueSheetAlias({}), QStringLiteral("_"));
+        QCOMPARE(document.uniqueAssetAlias(QStringLiteral("2d")), QStringLiteral("_2d"));
+        QCOMPARE(document.uniqueAssetAlias(QStringLiteral("héros")), QStringLiteral("h_ros"));
+        QCOMPARE(document.uniqueAssetAlias({}), QStringLiteral("_"));
+        // Unique across the kinds: an image can't take a font's alias.
+        document.setAsset(AssetKind::Font, QStringLiteral("title"), QStringLiteral("t.ttf"));
+        QCOMPARE(document.uniqueAssetAlias(QStringLiteral("title")), QStringLiteral("title_2"));
     }
 
-    void addsChangesAndRemovesSheets()
+    void addsChangesAndRemovesAssets()
     {
         ProjectDocument document(fixtureProject());
-        const QMap<QString, QString> before = document.project().manifest.sheets;
-        QSignalSpy changed(&document, &ProjectDocument::sheetsChanged);
+        const Assets before = document.project().manifest.assets;
+        QSignalSpy changed(&document, &ProjectDocument::assetsChanged);
         CommandStack& commands = document.commands();
         const QString items = QStringLiteral("items");
+        const auto declared = [&] { return document.project().manifest.assets.sheets; };
 
-        commands.push(
-            std::make_unique<SetSheetCommand>(document, items, QStringLiteral("art/items.sprat")));
+        commands.push(std::make_unique<SetAssetCommand>(document, AssetKind::Sheet, items,
+                                                        QStringLiteral("art/items.sprat")));
         QCOMPARE(commands.undoText(), QStringLiteral("Add sheet items"));
-        QCOMPARE(document.project().manifest.sheets.value(items),
-                 QStringLiteral("art/items.sprat"));
-        commands.push(
-            std::make_unique<SetSheetCommand>(document, items, QStringLiteral("art/items2.sprat")));
+        QCOMPARE(declared().value(items), QStringLiteral("art/items.sprat"));
+        commands.push(std::make_unique<SetAssetCommand>(document, AssetKind::Sheet, items,
+                                                        QStringLiteral("art/items2.sprat")));
         QCOMPARE(commands.undoText(), QStringLiteral("Change sheet items"));
-        commands.push(std::make_unique<SetSheetCommand>(document, items, std::nullopt));
+        commands.push(
+            std::make_unique<SetAssetCommand>(document, AssetKind::Sheet, items, std::nullopt));
         QCOMPARE(commands.undoText(), QStringLiteral("Remove sheet items"));
-        QVERIFY(!document.project().manifest.sheets.contains(items));
+        QVERIFY(!declared().contains(items));
         QCOMPARE(changed.count(), 3);
 
         commands.undo();
-        QCOMPARE(document.project().manifest.sheets.value(items),
-                 QStringLiteral("art/items2.sprat"));
+        QCOMPARE(declared().value(items), QStringLiteral("art/items2.sprat"));
         commands.undo();
         commands.undo();
-        QCOMPARE(document.project().manifest.sheets, before);
+        QCOMPARE(document.project().manifest.assets, before);
+
+        // Another kind, in its own map.
+        const QString title = QStringLiteral("title");
+        commands.push(std::make_unique<SetAssetCommand>(document, AssetKind::Image, title,
+                                                        QStringLiteral("art/title.png")));
+        QCOMPARE(commands.undoText(), QStringLiteral("Add image title"));
+        QCOMPARE(document.project().manifest.assets.images.value(title),
+                 QStringLiteral("art/title.png"));
+        QCOMPARE(document.project().manifest.assets.kindOf(title), AssetKind::Image);
     }
 
     void openingReportsErrors()

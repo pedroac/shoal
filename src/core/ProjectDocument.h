@@ -69,9 +69,9 @@ public:
     /// The ids of the transitions that name the entity `entityId` of the scene: carrying it
     /// away from there, or landing something on it.
     QStringList transitionsNamingEntity(QStringView sceneId, QStringView entityId) const;
-    /// `base` made into a sheet alias no declared sheet has: characters an id can't have
-    /// become `_`, then `_2`, `_3`, ... is added if needed.
-    QString uniqueSheetAlias(const QString& base) const;
+    /// `base` made into an asset alias no declared asset of any kind has: characters an id
+    /// can't have become `_`, then `_2`, `_3`, ... is added if needed.
+    QString uniqueAssetAlias(const QString& base) const;
 
     /// How many entities have each class, across every scene: the classes in use, which
     /// with the declarations in classes.json make up the class registry.
@@ -105,8 +105,8 @@ public:
     void setPreset(const QString& id, std::optional<Preset> preset);
     /// Gives a project preset another id.
     void renamePreset(const QString& from, const QString& to);
-    /// Declares a sprat sheet in the manifest, or changes its file; a null `file` removes it.
-    void setSheet(const QString& alias, std::optional<QString> file);
+    /// Declares an asset in the manifest, or changes its file; a null `file` removes it.
+    void setAsset(AssetKind kind, const QString& alias, std::optional<QString> file);
     /// Replaces classes.json; null removes it.
     void setClassRegistry(std::optional<ClassRegistry> registry);
 
@@ -127,8 +127,8 @@ signals:
     void presetChanged(const QString& id);
     /// Before presetChanged() for each.
     void presetRenamed(const QString& from, const QString& to);
-    /// A sheet was declared in the manifest, or its file changed, or it was removed.
-    void sheetsChanged();
+    /// An asset was declared in the manifest, or its file changed, or it was removed.
+    void assetsChanged();
     /// A class was declared, or its declaration changed or was removed.
     void classesChanged();
     void changed();

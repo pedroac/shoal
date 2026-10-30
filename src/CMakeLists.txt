@@ -1,5 +1,7 @@
 # core: the model, files, validation and export. QtCore only, so it is tested headless.
 add_library(shoal_core STATIC
+    core/AssetCommands.cpp
+    core/AssetCommands.h
     core/ClassCommands.cpp
     core/ClassCommands.h
     core/CommandStack.cpp
@@ -28,8 +30,6 @@ add_library(shoal_core STATIC
     core/SceneCommands.h
     core/SceneTree.cpp
     core/SceneTree.h
-    core/SheetCommands.cpp
-    core/SheetCommands.h
     core/Version.cpp
     core/Version.h
 )
@@ -55,10 +55,12 @@ shoal_set_warnings(shoal_assets)
 
 # editor: the Qt Widgets application, as a library so tests can create its windows.
 add_library(shoal_editor STATIC
+    editor/AssetBrowserPanel.cpp
+    editor/AssetBrowserPanel.h
     editor/CanvasView.cpp
     editor/CanvasView.h
-    editor/ColorButton.cpp
     editor/ClickOrDragView.h
+    editor/ColorButton.cpp
     editor/ColorButton.h
     editor/EntityItem.cpp
     editor/EntityItem.h
@@ -94,8 +96,6 @@ add_library(shoal_editor STATIC
     editor/SceneSettingsPanel.h
     editor/ScenesPanel.cpp
     editor/ScenesPanel.h
-    editor/SheetBrowserPanel.cpp
-    editor/SheetBrowserPanel.h
     editor/SheetItem.cpp
     editor/SheetItem.h
     editor/TileGridOverlay.cpp

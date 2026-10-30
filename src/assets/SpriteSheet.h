@@ -67,6 +67,14 @@ struct SheetLoad {
 /// Loads a .sprat file and the atlas images it names, relative to its folder.
 SheetLoad loadSheet(const QString& file);
 
+/// The path of a standalone image's one sprite, in the sheet loadImageAsSheet() makes.
+inline const QString IMAGE_SPRITE;
+
+/// Loads a standalone image as a sheet of one sprite, IMAGE_SPRITE: the whole image, at
+/// scale 1, untrimmed, with its pivot at its top-left corner. So it is drawn, tinted and
+/// sized as a sprite is.
+SheetLoad loadImageAsSheet(const QString& file);
+
 /// How to draw a sprite following sprat-lib's drawing recipe, with its pivot at the origin.
 struct SpritePlacement {
     /// Maps `target` into pivot space: draw `source` from the atlas into `target` with

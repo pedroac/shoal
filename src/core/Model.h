@@ -22,8 +22,10 @@ namespace shoal::core {
 /// The versions of the source file formats this Shoal writes. It reads older ones too, and
 /// migrates them: scene format 1 had layers and entity types, and preset format 1 too, with
 /// a `tint` for its swatch; scene and preset format 2 placed entities by `align` and `cell`
-/// where format 3 has units.
+/// where format 3 has units; manifest format 1 declared sheets in a `sheets` key, which
+/// format 2 moved under `assets`.
 inline constexpr int FORMAT_VERSION = 1;
+inline constexpr int MANIFEST_FORMAT_VERSION = 2;
 inline constexpr int SCENE_FORMAT_VERSION = 3;
 inline constexpr int PRESET_FORMAT_VERSION = 3;
 
@@ -72,6 +74,8 @@ enum class ContainerType { Tiled };
 enum class TransitionMode { Replace, Push, PushModifier, Pop };
 enum class Underlying { Paused, Running, Hidden };
 enum class RestoreMode { Commit, Restore };
+/// The kinds of asset a project declares, each under a key of its own in `assets`.
+enum class AssetKind { Sheet, Image, Font, Audio, Video };
 
 // --- project.shoal.json ---
 
@@ -83,13 +87,38 @@ struct ExportSettings {
     bool operator==(const ExportSettings&) const = default;
 };
 
+/// The files the project's scenes use, each kind by alias. An alias is unique across all
+/// kinds, so it names an asset alone.
+struct Assets {
+    QMap<QString, QString> sheets;  ///< Alias -> path of a .sprat file.
+    QMap<QString, QString> images;  ///< Alias -> path of a standalone image.
+    QMap<QString, QString> fonts;
+    QMap<QString, QString> audio;
+    QMap<QString, QString> video;
+    QJsonObject extras;
+    bool operator==(const Assets&) const = default;
+
+    static constexpr AssetKind KINDS[] = {AssetKind::Sheet, AssetKind::Image, AssetKind::Font,
+                                          AssetKind::Audio, AssetKind::Video};
+    QMap<QString, QString>& of(AssetKind kind);
+    const QMap<QString, QString>& of(AssetKind kind) const;
+    /// The kind `alias` is declared in, or null.
+    std::optional<AssetKind> kindOf(const QString& alias) const;
+    /// Every alias, of every kind.
+    QStringList aliases() const;
+};
+
+/// The kind of asset a file is, by its extension (in any case), or null for a file Shoal
+/// doesn't know.
+std::optional<AssetKind> assetKindForFile(QStringView path);
+
 struct Manifest {
     QString name;
     Size designResolution{1920, 1080};
     Fit fit = Fit::Expand;
     bool integerScale = false;
-    QString start;                  ///< Scene id; empty when the project has no start scene yet.
-    QMap<QString, QString> sheets;  ///< Alias -> path of a .sprat file.
+    QString start;  ///< Scene id; empty when the project has no start scene yet.
+    Assets assets;
     ExportSettings exportSettings;
     QJsonObject extras;
     bool operator==(const Manifest&) const = default;
@@ -189,16 +218,21 @@ struct Transform {
 };
 
 /// A sprat sprite, by the sheet's alias and the sprite's path (unique in a sheet, unlike
-/// its name), or a sprat animation, by name. It fills its entity's rect.
+/// its name), a sprat animation, by name, or a standalone image, by its alias. It fills its
+/// entity's rect.
 struct Image {
-    QString sheet;
-    QString sprite;     ///< The sprite's path; empty for an animation.
-    QString animation;  ///< The animation's name; empty for a sprite.
+    QString sheet;      ///< Empty for a standalone image.
+    QString sprite;     ///< The sprite's path; empty for an animation or a standalone image.
+    QString animation;  ///< The animation's name; empty for a sprite or a standalone image.
+    QString asset;      ///< A standalone image's alias; empty for a sheet's.
     ImageMode mode = ImageMode::Stretch;
     QJsonObject extras;
     bool operator==(const Image&) const = default;
 
     bool isAnimation() const { return !animation.isEmpty(); }
+    bool isStandalone() const { return !asset.isEmpty(); }
+    /// The alias of the asset it draws from: its sheet's, or its own.
+    const QString& source() const { return isStandalone() ? asset : sheet; }
 };
 
 /// A cell of a tiled container's grid: its column and row, counted from the top-left one.
@@ -357,6 +391,8 @@ std::span<const EnumName<ContainerType>> enumNames(ContainerType);
 std::span<const EnumName<TransitionMode>> enumNames(TransitionMode);
 std::span<const EnumName<Underlying>> enumNames(Underlying);
 std::span<const EnumName<RestoreMode>> enumNames(RestoreMode);
+/// As the keys of `assets`: `sheets`, `images`, `fonts`, `audio`, `video`.
+std::span<const EnumName<AssetKind>> enumNames(AssetKind);
 
 template <typename E>
 QString enumName(E value)

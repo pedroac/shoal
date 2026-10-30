@@ -15,7 +15,8 @@ namespace shoal::assets {
 
 /// The sheets a project declares, by alias, loaded and kept current: when sprat-gui or
 /// sprat-cli writes a sheet or one of its atlases again, the sheet reloads and
-/// sheetChanged() tells the views to redraw.
+/// sheetChanged() tells the views to redraw. Its standalone images too, each loaded as a
+/// sheet of one sprite (see loadImageAsSheet()), and reloaded when written again.
 ///
 /// A sheet that doesn't exist yet loads as soon as it is written.
 ///
@@ -27,10 +28,14 @@ public:
     explicit SheetCache(QObject* parent = nullptr);
 
     /// Declares the sheets: alias -> path of the .sprat file, relative to `baseDirectory`
-    /// (the project folder). Sheets whose file didn't change are kept as loaded.
-    void setSheets(const QMap<QString, QString>& sheets, const QString& baseDirectory);
+    /// (the project folder), and the standalone images, likewise. Those whose file didn't
+    /// change are kept as loaded.
+    void setSheets(const QMap<QString, QString>& sheets, const QString& baseDirectory,
+                   const QMap<QString, QString>& images = {});
 
     QStringList aliases() const { return m_entries.keys(); }
+    /// Whether `alias` is a standalone image, rather than a sprat sheet.
+    bool isImage(const QString& alias) const;
     /// The loaded sheet, or null if it never loaded.
     std::shared_ptr<const Sheet> sheet(const QString& alias) const;
     /// Why the sheet didn't load last time, or empty.
@@ -47,6 +52,7 @@ signals:
 private:
     struct Entry {
         QString file;
+        bool image = false;
         std::shared_ptr<const Sheet> sheet;
         QString error;
     };

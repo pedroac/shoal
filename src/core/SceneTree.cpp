@@ -169,7 +169,8 @@ QString kindOf(const Entity& entity)
         return QStringLiteral("camera");
     }
     if (entity.image) {
-        return entity.image->isAnimation()                  ? QStringLiteral("animation")
+        return entity.image->isStandalone()                 ? QStringLiteral("image")
+               : entity.image->isAnimation()                ? QStringLiteral("animation")
                : entity.image->mode == ImageMode::NineSlice ? QStringLiteral("nine-slice")
                                                             : QStringLiteral("sprite");
     }

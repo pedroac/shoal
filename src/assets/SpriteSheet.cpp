@@ -122,6 +122,30 @@ SheetLoad loadSheet(const QString& file)
     return result;
 }
 
+SheetLoad loadImageAsSheet(const QString& file)
+{
+    SheetLoad result;
+    QImage image;
+    if (!image.load(file)) {
+        result.error = QFileInfo::exists(file) ? QStringLiteral("cannot read the image")
+                                               : QStringLiteral("the file doesn't exist");
+        return result;
+    }
+    auto sheet = std::make_shared<Sheet>();
+    sheet->file = file;
+    Sprite sprite;
+    sprite.name = QFileInfo(file).fileName();
+    sprite.path = IMAGE_SPRITE;
+    sprite.rect = image.rect();
+    sprite.contentSize = image.size();
+    sprite.sourceSize = image.size();
+    sheet->sprites.push_back(std::move(sprite));
+    sheet->m_byPath.insert(IMAGE_SPRITE, 0);
+    sheet->atlases.push_back(std::move(image));
+    result.sheet = std::move(sheet);
+    return result;
+}
+
 SpritePlacement placeSprite(const Sprite& sprite, double drawScale, bool flipX, bool flipY)
 {
     // sprat-lib's recipe: the stored region, centered on `center` and turned back by

@@ -26,9 +26,11 @@
 
 #include "Support.h"
 #include "assets/SpriteSheet.h"
+#include "core/AssetCommands.h"
 #include "core/Presets.h"
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
+#include "editor/AssetBrowserPanel.h"
 #include "editor/EntityItem.h"
 #include "editor/FlowScene.h"
 #include "editor/InspectorPanel.h"
@@ -41,7 +43,6 @@
 #include "editor/SceneSettingsPanel.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
-#include "editor/SheetBrowserPanel.h"
 #include "editor/TransformHandle.h"
 #include "editor/WorkspaceTabs.h"
 
@@ -237,7 +238,7 @@ private slots:
     {
         Fixture f;
         Entity ghost;
-        ghost.image = Image{QStringLiteral("hero"), QStringLiteral("nope.png"), {}, {}, {}};
+        ghost.image = Image{QStringLiteral("hero"), QStringLiteral("nope.png"), {}, {}, {}, {}};
         const EntityPath path = f.canvas().addEntity(ghost, QPointF(100, 100));
         QCOMPARE(path, (EntityPath{3}));  // at the top level, the current parent
         QCOMPARE(f.canvas().item(path)->visualRect(), QRectF(-16, -16, 32, 32));
@@ -615,7 +616,7 @@ private slots:
     void theSheetBrowserListsSpritesAndAnimations()
     {
         Fixture f;
-        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        AssetBrowserPanel* browser = f.window.assetBrowser();
         QTreeWidgetItem* hero = browser->sheetRow(QStringLiteral("hero"));
         QVERIFY(hero);
         QCOMPARE(hero->childCount(), 2);
@@ -626,9 +627,9 @@ private slots:
         QTreeWidgetItem* idle = browser->itemRow(IDLE_SPRITE);
         QVERIFY(idle);
         QVERIFY(!idle->icon(0).isNull());
-        QCOMPARE(SheetBrowserPanel::itemOf(idle), IDLE_SPRITE);
+        QCOMPARE(AssetBrowserPanel::itemOf(idle), IDLE_SPRITE);
         QVERIFY(browser->itemRow(IDLE_ANIMATION));
-        QVERIFY(!SheetBrowserPanel::itemOf(hero));
+        QVERIFY(!AssetBrowserPanel::itemOf(hero));
 
         // The manifest declares a ui sheet that isn't there: it says why.
         QTreeWidgetItem* ui = browser->sheetRow(QStringLiteral("ui"));
@@ -643,7 +644,7 @@ private slots:
         QCOMPARE(SheetItem::fromMimeData(data.get()), IDLE_SPRITE);
     }
 
-    void droppingSpratFilesOnTheSheetBrowserDeclaresThem()
+    void droppingFilesOnTheAssetBrowserDeclaresThem()
     {
         Fixture f;
         // A sheet outside the project folder, as sprat-gui would write it anywhere.
@@ -652,7 +653,7 @@ private slots:
         QVERIFY(QFile::copy(support::fixturePath(QStringLiteral("sheets/hero.sprat")), sheetFile));
         QVERIFY(QFile::copy(support::fixturePath(QStringLiteral("sheets/hero.png")),
                             elsewhere.filePath(QStringLiteral("hero.png"))));
-        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        AssetBrowserPanel* browser = f.window.assetBrowser();
         QWidget* viewport = browser->tree()->viewport();
         const auto drop = [&](const QList<QUrl>& urls) {
             QMimeData data;
@@ -672,15 +673,18 @@ private slots:
             return dropEvent.isAccepted();
         };
 
-        // Anything but .sprat files is refused.
-        QVERIFY(!drop({QUrl::fromLocalFile(elsewhere.filePath(QStringLiteral("hero.png")))}));
+        const auto assets = [&] { return f.window.document()->project().manifest.assets; };
+        // Files of a kind Shoal doesn't know, or not local, are refused.
+        const QString notes = elsewhere.filePath(QStringLiteral("notes.txt"));
+        QVERIFY(QFile(notes).open(QIODevice::WriteOnly));
+        QVERIFY(!drop({QUrl::fromLocalFile(notes)}));
         QVERIFY(!drop({QUrl(QStringLiteral("https://example.com/sheet.sprat"))}));
 
         QVERIFY(drop({QUrl::fromLocalFile(sheetFile)}));
         // Named after the file, relative to the project, with its sprites listed.
         const QString alias = QStringLiteral("sheet");
-        QCOMPARE(f.window.document()->project().manifest.sheets.value(alias),
-                 QDir(f.dir.path()).relativeFilePath(sheetFile));
+        QCOMPARE(assets().sheets.value(alias), QDir(f.dir.path()).relativeFilePath(sheetFile));
+        QCOMPARE(browser->sheetRow(alias)->parent(), browser->kindRow(AssetKind::Sheet));
         QTreeWidgetItem* row = browser->sheetRow(alias);
         QVERIFY(row);
         QCOMPARE(row->text(0), alias);
@@ -690,18 +694,41 @@ private slots:
 
         // Dropping it again adds nothing; it's one undo step either way.
         QVERIFY(drop({QUrl::fromLocalFile(sheetFile)}));
-        QCOMPARE(f.window.document()->project().manifest.sheets.size(), 3);
-        QCOMPARE(f.window.document()->commands().undoText(), QStringLiteral("Add sheet"));
+        QCOMPARE(assets().sheets.size(), 3);
+        QCOMPARE(f.window.document()->commands().undoText(), QStringLiteral("Add asset"));
         f.window.document()->commands().undo();
         QVERIFY(!browser->sheetRow(alias));
-        QCOMPARE(f.window.document()->project().manifest.sheets.size(), 2);
+        QCOMPARE(assets().sheets.size(), 2);
+
+        // An image is a standalone image, its alias unique across the kinds: hero is a sheet.
+        QVERIFY(!browser->kindRow(AssetKind::Image));
+        QVERIFY(drop({QUrl::fromLocalFile(elsewhere.filePath(QStringLiteral("hero.png")))}));
+        const QString image = QStringLiteral("hero_2");
+        QVERIFY(assets().images.contains(image));
+        QTreeWidgetItem* imageRow = browser->itemRow({SheetItem::Kind::Image, image, {}});
+        QVERIFY(imageRow);
+        QCOMPARE(imageRow->parent(), browser->kindRow(AssetKind::Image));
+        QVERIFY(!imageRow->icon(0).isNull());
+        QVERIFY(imageRow->flags() & Qt::ItemIsDragEnabled);
+
+        // A font is listed under Fonts, by alias; it can't be placed yet.
+        const QString font = elsewhere.filePath(QStringLiteral("Body.TTF"));
+        QVERIFY(QFile(font).open(QIODevice::WriteOnly));
+        QVERIFY(drop({QUrl::fromLocalFile(font)}));
+        QCOMPARE(assets().fonts.keys(), QStringList{QStringLiteral("Body")});
+        QTreeWidgetItem* fontRow = browser->assetRow(QStringLiteral("Body"));
+        QVERIFY(fontRow);
+        QCOMPARE(fontRow->parent(), browser->kindRow(AssetKind::Font));
+        QVERIFY(!AssetBrowserPanel::itemOf(fontRow));
+        f.window.document()->commands().undo();
+        QVERIFY(!browser->kindRow(AssetKind::Font));
 
         // A second file with the same name gets its own alias.
         QTemporaryDir other;
         QVERIFY(QFile::copy(sheetFile, other.filePath(QStringLiteral("sheet.sprat"))));
-        QCOMPARE(f.window.addSheets({sheetFile, other.filePath(QStringLiteral("sheet.sprat"))}),
+        QCOMPARE(f.window.addAssets({sheetFile, other.filePath(QStringLiteral("sheet.sprat"))}),
                  QStringList({alias, QStringLiteral("sheet_2")}));
-        QCOMPARE(f.window.document()->commands().undoText(), QStringLiteral("Add sheets"));
+        QCOMPARE(f.window.document()->commands().undoText(), QStringLiteral("Add assets"));
     }
 
     void arrangesTheSelectionInDrawOrder()
@@ -748,10 +775,10 @@ private slots:
         QCOMPARE(entityAt(f.scene(), PLAYER)->id, QStringLiteral("player"));
     }
 
-    void theSheetBrowserFilters()
+    void theAssetBrowserFilters()
     {
         Fixture f;
-        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        AssetBrowserPanel* browser = f.window.assetBrowser();
         browser->setFilter(QStringLiteral("DOOR"));
         const auto door = SheetItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
                                     QStringLiteral("props/door.png")};
@@ -759,14 +786,14 @@ private slots:
         QVERIFY(browser->itemRow(IDLE_SPRITE)->isHidden());
         QVERIFY(browser->sheetRow(QStringLiteral("hero"))->child(1)->isHidden());  // animations
         QVERIFY(browser->sheetRow(QStringLiteral("ui"))->isHidden());
-        browser->findChild<QLineEdit*>(QStringLiteral("sheetFilter"))->clear();
+        browser->findChild<QLineEdit*>(QStringLiteral("assetFilter"))->clear();
         QVERIFY(!browser->itemRow(IDLE_SPRITE)->isHidden());
     }
 
-    void theSheetBrowserFollowsTheSheets()
+    void theAssetBrowserFollowsTheSheets()
     {
         Fixture f;
-        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        AssetBrowserPanel* browser = f.window.assetBrowser();
         // A sheet written again by sprat: the bush is renamed, keeping the string total.
         QByteArray sheet = readFile(f.dir.filePath(QStringLiteral("art/hero.sprat")));
         QVERIFY(sheet.contains("props/bush.png"));
@@ -783,6 +810,46 @@ private slots:
         // Closing the project empties it.
         f.window.setDocument(nullptr);
         QCOMPARE(browser->tree()->topLevelItemCount(), 0);
+    }
+
+    void aStandaloneImageIsPlacedAndDrawnAsASprite()
+    {
+        Fixture f;
+        AssetBrowserPanel* browser = f.window.assetBrowser();
+        const QString title = QStringLiteral("title");
+        f.document().commands().push(std::make_unique<SetAssetCommand>(
+            f.document(), AssetKind::Image, title, QStringLiteral("art/hero.png")));
+        const SheetItem item{SheetItem::Kind::Image, title, {}};
+        QVERIFY(browser->itemRow(item));
+        const QSize pixels = QImage(f.dir.filePath(QStringLiteral("art/hero.png"))).size();
+        QVERIFY(!pixels.isEmpty());
+
+        // Dropped, it is an image entity, its size the image's and its pivot its top-left.
+        const QPointF where(400, 300);
+        QVERIFY(f.dropOnView(item, f.at(where)));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Add image"));
+        const EntityPath path{int(f.scene().entities.size()) - 1};
+        const Entity* added = entityAt(f.scene(), path);
+        QCOMPARE(added->image->asset, title);
+        QVERIFY(added->image->sheet.isEmpty());
+        QVERIFY(!added->size && !added->pivot);
+        const std::optional<RectF> rect = entityRect(*added, Frame{}, f.canvas().imageMetrics());
+        QVERIFY(rect);
+        QCOMPARE(rect->x, 0.0);
+        QCOMPARE(rect->width, double(pixels.width()));
+        QCOMPARE(rect->height, double(pixels.height()));
+        QCOMPARE(f.canvas().item(path)->sceneBoundingRect().size().toSize(), pixels);
+
+        // With it selected, the browser shows it as the entity's image.
+        f.canvas().select({path});
+        QCOMPARE(browser->tree()->currentItem(), browser->itemRow(item));
+        QCOMPARE(f.window.inspector()->summary()->text(), QStringLiteral("image · title"));
+
+        // Removed from the manifest, its row goes.
+        f.document().commands().push(
+            std::make_unique<SetAssetCommand>(f.document(), AssetKind::Image, title, std::nullopt));
+        QVERIFY(!browser->itemRow(item));
+        QVERIFY(!browser->kindRow(AssetKind::Image));
     }
 
     void droppingASpritePlacesItWhereTheCursorIs()
@@ -880,7 +947,7 @@ private slots:
     void theSheetsPickTheSelectedEntitysImage()
     {
         Fixture f;
-        SheetBrowserPanel* sheets = f.window.sheetBrowser();
+        AssetBrowserPanel* sheets = f.window.assetBrowser();
         QTreeWidget* tree = sheets->tree();
         // Nothing selected: they only browse, and a double-click places.
         QVERIFY(!sheets->isPicking());
@@ -932,8 +999,8 @@ private slots:
     {
         Fixture f;
         f.window.show();
-        f.window.projectPanel()->setCurrentWidget(f.window.sheetBrowser());
-        SheetBrowserPanel* sheets = f.window.sheetBrowser();
+        f.window.projectPanel()->setCurrentWidget(f.window.assetBrowser());
+        AssetBrowserPanel* sheets = f.window.assetBrowser();
         QTreeWidget* tree = sheets->tree();
         const auto centerOf = [&](const SheetItem& item) {
             QTreeWidgetItem* row = sheets->itemRow(item);
@@ -1396,7 +1463,7 @@ private slots:
     void activatingARowPlacesItInTheMiddleOfTheView()
     {
         Fixture f;
-        SheetBrowserPanel* browser = f.window.sheetBrowser();
+        AssetBrowserPanel* browser = f.window.assetBrowser();
         emit browser->tree()->itemActivated(browser->itemRow(IDLE_ANIMATION), 0);
         QCOMPARE(f.document().commands().count(), 1);
         const Entity& added = f.scene().entities.back();

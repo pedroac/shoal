@@ -195,7 +195,7 @@ QStringList ProjectDocument::transitionsNamingEntity(QStringView sceneId,
     return ids;
 }
 
-QString ProjectDocument::uniqueSheetAlias(const QString& base) const
+QString ProjectDocument::uniqueAssetAlias(const QString& base) const
 {
     QString alias;
     for (const QChar c : base) {
@@ -205,13 +205,13 @@ QString ProjectDocument::uniqueSheetAlias(const QString& base) const
     if (alias.isEmpty() || !isValidId(alias)) {
         alias.prepend(u'_');  // ids start with a letter or _
     }
-    const QMap<QString, QString>& sheets = m_project.manifest.sheets;
-    if (!sheets.contains(alias)) {
+    const Assets& assets = m_project.manifest.assets;
+    if (!assets.kindOf(alias)) {
         return alias;
     }
     for (int n = 2;; ++n) {
         const QString candidate = QStringLiteral("%1_%2").arg(alias).arg(n);
-        if (!sheets.contains(candidate)) {
+        if (!assets.kindOf(candidate)) {
             return candidate;
         }
     }
@@ -435,15 +435,16 @@ void ProjectDocument::setEntityFields(const QString& sceneId, const EntityPath& 
     emitSceneContentChanged(sceneId);
 }
 
-void ProjectDocument::setSheet(const QString& alias, std::optional<QString> file)
+void ProjectDocument::setAsset(AssetKind kind, const QString& alias, std::optional<QString> file)
 {
+    QMap<QString, QString>& declared = m_project.manifest.assets.of(kind);
     if (file) {
-        m_project.manifest.sheets.insert(alias, *file);
+        declared.insert(alias, *file);
     }
     else {
-        m_project.manifest.sheets.remove(alias);
+        declared.remove(alias);
     }
-    emit sheetsChanged();
+    emit assetsChanged();
     emit changed();
 }
 

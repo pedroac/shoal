@@ -33,7 +33,7 @@ changes.
   - `JsonReader` / `JsonWriter`: path-named format errors, and the canonical writer.
   - `ProjectCodec`: files to model and back, pure (no disk access), migrating older
     formats as it reads them (scene format 1, with layers and entity types, and
-    format 2, with `align` and `cell`).
+    format 2, with `align` and `cell`; manifest format 1, with a top-level `sheets`).
     `ProjectStore`: the disk side, atomic writes, skipping unchanged files, removing
     stale ones.
   - `CommandStack`: undo history, like `QUndoStack` (which is in QtGui).
@@ -49,12 +49,14 @@ changes.
     model). `ClassCommands`: declaring classes in classes.json. `PresetCommands`:
     adding, customizing, renaming and removing presets; the document edits a
     preset's entities as a tree of their own (`entityTree()`, `presetTreeId()`), so
-    the entity commands work on presets too.
-- `src/assets/`: sprat sheets and atlases, through sprat-lib. The only place that
-  includes `<sprat/sprat.h>`.
+    the entity commands work on presets too. `AssetCommands`: declaring assets
+    (sheets, images, fonts, audio, video) in the manifest, each kind by alias.
+- `src/assets/`: sprat sheets and atlases, through sprat-lib, and standalone images.
+  The only place that includes `<sprat/sprat.h>`.
   - `SpriteSheet`: `loadSheet()` copies a sheet into Qt types, and `placeSprite()`
-    is sprat-lib's drawing recipe. `SheetCache`: a project's sheets by alias, with
-    hot reload.
+    is sprat-lib's drawing recipe; `loadImageAsSheet()` makes a standalone image a
+    sheet of one sprite, so it draws, tints and sizes as a sprite does. `SheetCache`: a
+    project's sheets and standalone images by alias, with hot reload.
 - `src/editor/`: the Qt Widgets application, built as a library (`shoal_editor`)
   so tests can create its windows. `main.cpp` is the executable's only source.
   - `MainWindow`: one open `ProjectDocument`, the menus, New/Open/Save, and the
@@ -74,7 +76,8 @@ changes.
     `SceneView` is its tab, `SceneTreePanel` its entity tree.
     `TileGridOverlay` draws the tiled containers' grids above them, when they help.
     `CanvasView` holds the zoom and pan both views share.
-  - `SheetBrowserPanel`: the project's sheets, sprites and animations as thumbnails.
+  - `AssetBrowserPanel`: the project's assets, by kind: sheets with their sprites and
+    animations, and standalone images, as thumbnails; fonts, audio and video by alias.
     A drag or a double-click hands a `SheetItem` to `SceneView`, which places it.
     `PresetsPanel` does the same with presets, and adds, duplicates and removes them.
     Both tell a click from a drag (`ClickOrDragView`), so a drag leaves the current
@@ -82,7 +85,7 @@ changes.
     entity, with unit boxes for positions and sizes, a `PointGrid` for pivots and a
     `ColorButton` for tints and fills, or, with none selected, the top level's scene
     settings (a `SceneSettingsPanel`), or a preset's (a `PresetSettingsPanel`). The
-    sheet browser also picks the selected entity's image (`setChoice()`).
+    asset browser also picks the selected entity's image (`setChoice()`).
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the
