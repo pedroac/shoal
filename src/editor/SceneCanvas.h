@@ -59,6 +59,18 @@ public:
     const core::Scene* scene() const;
     /// Whether its entities can be changed: false for a built-in preset.
     bool isEditable() const;
+    /// Whether properties locked by a preset are refused: in a scene, not in a preset, where
+    /// the locked values are its defaults.
+    bool enforcesLocks() const { return !presetId(); }
+    /// Whether `entity`'s `lock` is in force here.
+    bool holdsLock(const core::Entity& entity, core::Lock lock) const
+    {
+        return enforcesLocks() && entity.locks.testFlag(lock);
+    }
+    /// `changes`, each with what its entity locks kept as it is (see core::keepingLocked()),
+    /// leaving out those that then change nothing; as they are in a preset.
+    QList<std::pair<core::EntityPath, core::Entity>> keepingLocks(
+        QList<std::pair<core::EntityPath, core::Entity>> changes) const;
     /// The scene's own rectangle, from the origin to its size.
     QRectF sceneBounds() const;
 

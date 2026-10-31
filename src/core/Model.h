@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QFlags>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -333,6 +334,30 @@ struct Audio {
     bool operator==(const Audio&) const = default;
 };
 
+/// A property of an entity's that its preset says scenes shouldn't change: the editor shows
+/// it read-only, and refuses every edit of it. Only a preset defines its locks. Locks
+/// are editor-only (`editor.locks` in the file, by the names enumNames() gives them), copied
+/// with the rest of a preset's entities, and never exported.
+enum class Lock : quint32 {
+    PosX = 1u << 0,        ///< `transform.pos.x`, with where it is measured from.
+    PosY = 1u << 1,        ///< `transform.pos.y`, likewise.
+    Angle = 1u << 2,       ///< `transform.rot`.
+    ScaleX = 1u << 3,      ///< `transform.scale.x`.
+    ScaleY = 1u << 4,      ///< `transform.scale.y`.
+    Flip = 1u << 5,        ///< `transform.flip`, both axes.
+    Width = 1u << 6,       ///< `size`'s width.
+    Height = 1u << 7,      ///< `size`'s height.
+    Pivot = 1u << 8,       ///< `pivot`.
+    Asset = 1u << 9,       ///< Its image, text, video and audio, each with its settings.
+    Fill = 1u << 10,       ///< `fill`.
+    Tint = 1u << 11,       ///< `tint` and `tint_mode`.
+    Clip = 1u << 12,       ///< `clip`.
+    Container = 1u << 13,  ///< `container`.
+    Space = 1u << 14,      ///< `space`, with `fit`.
+    Parallax = 1u << 15,   ///< `parallax`.
+};
+using Locks = QFlags<Lock>;
+
 /// A node of a scene's tree: the same fields for every entity, and the parts it has, which
 /// say what it is. Parts the editor doesn't model yet (`view`, `layout`, `shape`, `path`)
 /// are kept in `extras`.
@@ -362,7 +387,9 @@ struct Entity {
     std::optional<Text> text;
     std::optional<Video> video;
     std::optional<Audio> audio;
-    QJsonObject props;  ///< Kept as written until typed props are modeled.
+    QJsonObject props;         ///< Kept as written until typed props are modeled.
+    Locks locks;               ///< What its preset locked (see Lock).
+    QJsonObject editorExtras;  ///< Unmodeled keys of its `editor` block.
     QJsonObject extras;
     std::vector<Entity> children;
     bool operator==(const Entity&) const = default;
@@ -433,6 +460,8 @@ std::span<const EnumName<TintMode>> enumNames(TintMode);
 std::span<const EnumName<ContainerType>> enumNames(ContainerType);
 std::span<const EnumName<TextWrap>> enumNames(TextWrap);
 std::span<const EnumName<VideoMode>> enumNames(VideoMode);
+/// In the order the editor lists them, and the file writes them.
+std::span<const EnumName<Lock>> enumNames(Lock);
 std::span<const EnumName<TransitionMode>> enumNames(TransitionMode);
 std::span<const EnumName<Underlying>> enumNames(Underlying);
 std::span<const EnumName<RestoreMode>> enumNames(RestoreMode);
@@ -462,3 +491,5 @@ std::optional<E> enumFromName(QStringView name)
 }
 
 }  // namespace shoal::core
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(shoal::core::Locks)

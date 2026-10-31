@@ -90,7 +90,9 @@ changes.
     `ColorButton` for tints and fills, or, with none selected, the top level's scene
     settings (a `SceneSettingsPanel`), or a preset's (a `PresetSettingsPanel`). Its
     `AssetField` chooses the entity's asset, whose kind makes it an image, a video, a text or a sound:
-    dropped, typed with a completer, browsed or cleared.
+    dropped, typed with a completer, browsed or cleared. A preset's entities have a Locks tab too,
+    for the properties they can't change in a scene (`core::Lock`, kept by `keepingLocked()`
+    in `SceneTree`, applied by `SceneCanvas::keepingLocks()` to every edit).
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the

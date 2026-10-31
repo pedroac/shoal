@@ -324,6 +324,7 @@ the background's entities.
 | `transform` | `pos`, `rot`, `scale`, `flip`, relative to the parent |
 | `props` | Custom key-values the engine reads; typed (`bool`, `int`, `float`, `string`, `point`, `color`) once the open question on prop types is settled |
 | `children` | Child entities |
+| `editor` | Editor-only, never exported: `locks`, the properties its preset locked (see presets, section 12) |
 
 - **Draw order is the tree's order**, depth first: an entity, then its children,
   then its next sibling.
@@ -881,7 +882,8 @@ Problems panel warns.
         "props": { "hp": 3 } } ] }
   ```
 
-  - Positions are relative to where the preset is placed. The entities go into the
+  - Positions are relative to where the preset is placed, but for a locked one (see
+    locks below). The entities go into the
     current parent; ids are made unique in the scene (`camera`, then `camera_2`),
     and entities without one stay without one.
   - A preset file is kept as written, and read only when it is used: one the
@@ -899,6 +901,44 @@ Problems panel warns.
     them writes the preset's `entities` back, one undo step. A built-in preset is
     read-only until it is customized, which copies it into the project under the
     same id; reverting removes the copy.
+  - **A preset can lock properties** of the entities it creates, so a scene doesn't
+    change them by accident: in the Presets workspace the inspector has two tabs,
+    **Defaults** (the values its entities start with) and **Locks**, where each
+    lockable property is Editable or Locked. They are position x and y, angle,
+    scale w and h, flip, rect w and h, pivot, asset (with its part's settings: the
+    image's mode, the text's, the sound's and the video's), fill, tint (with its
+    mode), clip, container, space (with `fit`) and parallax.
+  - **Locked means as the preset has it.** A locked property of a created entity is
+    the preset's default, and stays it: a locked position isn't moved to where the
+    preset is dropped (or to the tile under the cursor in a tiled container), so a
+    HUD element whose position is locked at `[0, 0]` lands at `[0, 0]` in the parent
+    it goes into, wherever it is dropped; an unlocked axis follows the drop.
+  - Locks are copied onto each entity the preset creates, as the rest of it is,
+    into its `editor.locks`: nothing stays linked to the preset, so changing the
+    preset's locks or defaults later changes no entity already placed. They are
+    editor-only and never exported:
+
+    ```jsonc
+    { "image": { "sheet": "props", "sprite": "door.png" },
+      "editor": { "locks": ["transform.pos.y", "asset"] } }
+    ```
+
+    The names are `transform.pos.x`, `transform.pos.y`, `transform.rot`,
+    `transform.scale.x`, `transform.scale.y`, `transform.flip`, `size.width`,
+    `size.height`, `pivot`, `asset`, `fill`, `tint`, `clip`, `container`, `space`
+    and `parallax`, written in that order; another name is an error.
+  - **Locks are defined in the preset only.** A scene has no Locks tab: its
+    inspector shows the entity's properties, and a locked one is read-only there,
+    its fields disabled, with a note naming what is locked, and every edit of
+    it is refused, from the inspector, a drag (which moves the entity on its free
+    axis only), a nudge, or the rotate and scale handles (hidden when everything
+    they change is locked). A size with one axis locked keeps that axis, and can't
+    be given or taken away. Moving the entity to another parent in the tree, which
+    keeps it where it is drawn, is allowed.
+  - Nothing in a scene unlocks a property. In the preset itself nothing is
+    enforced: the locked values are its defaults, edited there.
+  - These locks are a property's; locking an entity in the scene tree, so it can't
+    be picked, is editor state of another kind (section 13).
 
 ## 13. The editor
 
@@ -1022,6 +1062,8 @@ Problems panel warns.
     rect its top-level entities measure against, and its settings as the flow's
     Scene panel edits them (id, start scene, size and fit). Resizing it moves and
     resizes what is in percent of it.
+  - In the Presets workspace the inspector shows an entity in two tabs, Defaults
+    and Locks (see presets, section 12); in a scene, it shows its properties only.
   - The inspector edits the selected entity's id, classes, active and visible
     flags, position, angle (degrees), scale and flips, then its parts: its size
     and pivot, its asset (see below) and its image's mode, its fill, its tint and tint mode,
@@ -1243,7 +1285,8 @@ editor project (JSON, easy to diff)
   - Each clip says whether it stays axis-aligned (no rotation in it or above it),
     so an engine can use a scissor rectangle instead of a stencil.
   - Selectors are compiled term lists, and each modifier carries its write set.
-  - Editor data, presets and class docs are dropped.
+  - Editor data (an entity's `editor` block too), presets and class docs are
+    dropped.
 - **shoal-raw** follows sprat-raw: a version on the first line (`shoal-raw 1`), one
   record per line (`flow`, `state`, `asset`, `scene`, `entity`,
   `transition`, `selector`, `modifier`, `action`), length-prefixed strings, totals

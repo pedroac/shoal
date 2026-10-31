@@ -50,7 +50,8 @@ bool isBuiltInPreset(const Project& project, const QString& id);
 
 /// The entities `preset` creates in `scene`, around `position` in the coordinates of the
 /// parent they go into: copies with fresh ids, unique in the scene, nothing linked to the
-/// preset.
+/// preset. A top-level entity whose position the preset locks keeps the preset's on that
+/// axis, wherever it is placed.
 std::vector<Entity> instantiatePreset(const PresetDefinition& preset, const Scene& scene,
                                       Point position);
 

@@ -1,6 +1,7 @@
 #include "editor/InspectorPanel.h"
 
 #include <QAbstractItemView>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCompleter>
@@ -19,6 +20,7 @@
 #include <QStackedWidget>
 #include <QStandardItemModel>
 #include <QStringListModel>
+#include <QTabBar>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <cmath>
@@ -245,6 +247,9 @@ InspectorPanel::InspectorPanel(QWidget* parent)
       m_topLevel(new SceneSettingsPanel(this)),
       m_presetTopLevel(new PresetSettingsPanel(this)),
       m_pages(new QStackedWidget(this)),
+      m_tabs(new QTabBar(this)),
+      m_locksPage(new QWidget(this)),
+      m_lockNote(new QLabel(this)),
       m_scaleRow(new QWidget(this)),
       m_sizeRow(new QWidget(this)),
       m_imageRow(nullptr),
@@ -488,9 +493,68 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     form->addRow(tr("Space"), m_spaceBox);
     form->addRow(tr("Parallax"), row(this, {m_parallaxBox, m_parallaxXBox, m_parallaxYBox}));
 
+    // The Locks tab: for each property a preset can lock, Editable or Locked.
+    auto* locksLayout = new QVBoxLayout(m_locksPage);
+    locksLayout->setContentsMargins({});
+    const auto addLock = [&](QFormLayout* section, const QString& label, core::Lock lock) {
+        auto* editable = new QToolButton(m_locksPage);
+        auto* locked = new QToolButton(m_locksPage);
+        editable->setText(tr("Editable"));
+        locked->setText(tr("Locked"));
+        auto* group = new QButtonGroup(m_locksPage);
+        for (QToolButton* button : {editable, locked}) {
+            button->setCheckable(true);
+            button->setAutoRaise(false);
+            group->addButton(button);
+        }
+        group->setExclusive(true);
+        editable->setChecked(true);
+        locked->setObjectName(QStringLiteral("lock:") + core::enumName(lock));
+        locked->setToolTip(
+            tr("Scenes show it read-only and refuse every edit of it, until it "
+               "is unlocked on the entity"));
+        m_lockButtons.insert(lock, locked);
+        m_editableButtons.insert(lock, editable);
+        connect(locked, &QToolButton::clicked, this, [this, lock] { setLocked(lock, true); });
+        connect(editable, &QToolButton::clicked, this, [this, lock] { setLocked(lock, false); });
+        section->addRow(label, row(m_locksPage, {editable, locked}));
+    };
+    form = addSection(locksLayout, tr("Transform"));
+    addLock(form, tr("Position x"), core::Lock::PosX);
+    addLock(form, tr("Position y"), core::Lock::PosY);
+    addLock(form, tr("Angle"), core::Lock::Angle);
+    addLock(form, tr("Scale w"), core::Lock::ScaleX);
+    addLock(form, tr("Scale h"), core::Lock::ScaleY);
+    addLock(form, tr("Flip"), core::Lock::Flip);
+    form = addSection(locksLayout, tr("Rect"));
+    addLock(form, tr("Rect w"), core::Lock::Width);
+    addLock(form, tr("Rect h"), core::Lock::Height);
+    addLock(form, tr("Pivot"), core::Lock::Pivot);
+    form = addSection(locksLayout, tr("Look"));
+    addLock(form, tr("Asset"), core::Lock::Asset);
+    addLock(form, tr("Fill"), core::Lock::Fill);
+    addLock(form, tr("Tint"), core::Lock::Tint);
+    form = addSection(locksLayout, tr("Children"));
+    addLock(form, tr("Clip"), core::Lock::Clip);
+    addLock(form, tr("Container"), core::Lock::Container);
+    form = addSection(locksLayout, tr("Camera"));
+    addLock(form, tr("Space"), core::Lock::Space);
+    addLock(form, tr("Parallax"), core::Lock::Parallax);
+
+    m_tabs->setObjectName(QStringLiteral("inspectorTabs"));
+    m_tabs->setDocumentMode(true);
+    m_tabs->setExpanding(false);
+    m_tabs->addTab(tr("Defaults"));
+    m_tabs->addTab(tr("Locks"));
+    connect(m_tabs, &QTabBar::currentChanged, this, &InspectorPanel::refresh);
+    m_lockNote->setObjectName(QStringLiteral("lockNote"));
+    m_lockNote->setWordWrap(true);
+    m_lockNote->setVisible(false);
+
     m_topLevel->setObjectName(QStringLiteral("topLevelSettings"));
     m_topLevel->layout()->setContentsMargins({});
     m_pages->addWidget(m_entityForm);
+    m_pages->addWidget(m_locksPage);
     m_pages->addWidget(m_topLevel);
     m_presetTopLevel->setObjectName(QStringLiteral("presetTopLevelSettings"));
     m_presetTopLevel->layout()->setContentsMargins({});
@@ -499,6 +563,8 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     auto* content = new QWidget;
     auto* contentLayout = new QVBoxLayout(content);
     contentLayout->addWidget(m_summary);
+    contentLayout->addWidget(m_tabs);
+    contentLayout->addWidget(m_lockNote);
     contentLayout->addWidget(m_pages);
     contentLayout->addWidget(m_message);
     contentLayout->addStretch();
@@ -1483,8 +1549,13 @@ void InspectorPanel::setContainer(std::optional<core::ContainerType> type)
     }
     showMessage({});
     const QString name = core::describe(*entity);
+    const QList<std::pair<EntityPath, Entity>> kept = m_canvas->keepingLocks(changes);
+    if (kept.isEmpty()) {
+        refresh();
+        return;
+    }
     m_document->commands().push(std::make_unique<core::EditEntitiesCommand>(
-        *m_document, m_canvas->sceneId(), changes,
+        *m_document, m_canvas->sceneId(), kept,
         type ? tr("Tile %1").arg(name) : tr("Stop tiling %1").arg(name)));
 }
 
@@ -1561,6 +1632,11 @@ bool InspectorPanel::showsSize() const
     return formOf(m_sizeRow)->isRowVisible(m_sizeRow);
 }
 
+bool InspectorPanel::showsLocks() const
+{
+    return m_pages->currentWidget() == m_locksPage;
+}
+
 bool InspectorPanel::showsImage() const
 {
     return formOf(m_imageRow)->isRowVisible(m_imageRow);
@@ -1617,9 +1693,15 @@ void InspectorPanel::refresh()
     // Nothing selected: the top level, the scene itself.
     const bool topLevel = m_canvas && m_canvas->scene() && paths.isEmpty();
     const std::optional<QString> preset = m_canvas ? m_canvas->presetId() : std::nullopt;
-    m_pages->setCurrentWidget(!topLevel ? m_entityForm
+    // A preset's entity: its defaults, or its locks. Locks are a preset's only: a scene's
+    // entity shows its properties, and what its preset locked read-only.
+    const bool tabs = !topLevel && preset && m_canvas->scene();
+    const bool locksTab = tabs && m_tabs->currentIndex() == 1;
+    m_tabs->setVisible(tabs);
+    m_pages->setCurrentWidget(!topLevel ? (locksTab ? m_locksPage : m_entityForm)
                               : preset  ? static_cast<QWidget*>(m_presetTopLevel)
                                         : m_topLevel);
+    refreshLocks(topLevel ? nullptr : entity);
     m_topLevel->setScene(topLevel && !preset ? std::optional(m_canvas->sceneId()) : std::nullopt);
     m_presetTopLevel->setPreset(m_document, topLevel && preset ? *preset : QString());
     for (QWidget* field : std::initializer_list<QWidget*>{
@@ -1804,6 +1886,138 @@ void InspectorPanel::refresh()
                                 : QStringLiteral("<b>.%1</b>: %2").arg(name, doc.toHtmlEscaped()));
     }
     m_classesField->setToolTip(lines.join(QStringLiteral("<br>")));
+
+    // What its preset locked is read-only in a scene.
+    if (m_canvas->enforcesLocks()) {
+        for (const auto& entry : core::enumNames(core::Lock{})) {
+            if (entity->locks.testFlag(entry.value)) {
+                for (QWidget* field : lockedFields(entry.value)) {
+                    field->setEnabled(false);
+                }
+            }
+        }
+    }
+}
+
+QList<QWidget*> InspectorPanel::lockedFields(core::Lock lock) const
+{
+    switch (lock) {
+        case core::Lock::PosX:
+            return {m_xBox, m_xUnitBox, m_offsetXBox};
+        case core::Lock::PosY:
+            return {m_yBox, m_yUnitBox, m_offsetYBox};
+        case core::Lock::Angle:
+            return {m_angleBox};
+        case core::Lock::ScaleX:
+            return {m_scaleXBox};
+        case core::Lock::ScaleY:
+            return {m_scaleYBox};
+        case core::Lock::Flip:
+            return {m_flipXBox, m_flipYBox};
+        case core::Lock::Width:
+            return {m_widthBox, m_widthUnitBox, m_sizeBox};
+        case core::Lock::Height:
+            return {m_heightBox, m_heightUnitBox, m_sizeBox};
+        case core::Lock::Pivot:
+            return {m_pivotBox, m_pivotGrid, m_pivotXBox, m_pivotYBox};
+        case core::Lock::Asset:
+            return {m_assetField,        m_imageModeBox,     m_fontField,       m_textEdit,
+                    m_textKeyField,      m_textSizeBox,      m_textColorButton, m_textAlignGrid,
+                    m_textWrapBox,       m_lineHeightBox,    m_audioField,      m_volumeBox,
+                    m_audioLoopBox,      m_audioAutoplayBox, m_positionalBox,   m_radiusBox,
+                    m_removeAudioButton, m_videoField,       m_videoLoopBox,    m_videoAutoplayBox,
+                    m_videoModeBox};
+        case core::Lock::Fill:
+            return {m_fillBox, m_fillButton};
+        case core::Lock::Tint:
+            return {m_tintButton, m_tintModeBox};
+        case core::Lock::Clip:
+            return {m_clipBox};
+        case core::Lock::Container:
+            return {m_containerBox,  m_tileWidthBox,  m_tileHeightBox,
+                    m_tilePivotGrid, m_tilePivotXBox, m_tilePivotYBox};
+        case core::Lock::Space:
+            return {m_spaceBox};
+        case core::Lock::Parallax:
+            return {m_parallaxBox, m_parallaxXBox, m_parallaxYBox};
+    }
+    return {};
+}
+
+QString InspectorPanel::lockLabel(core::Lock lock)
+{
+    switch (lock) {
+        case core::Lock::PosX:
+            return tr("position x");
+        case core::Lock::PosY:
+            return tr("position y");
+        case core::Lock::Angle:
+            return tr("angle");
+        case core::Lock::ScaleX:
+            return tr("scale w");
+        case core::Lock::ScaleY:
+            return tr("scale h");
+        case core::Lock::Flip:
+            return tr("flip");
+        case core::Lock::Width:
+            return tr("rect w");
+        case core::Lock::Height:
+            return tr("rect h");
+        case core::Lock::Pivot:
+            return tr("pivot");
+        case core::Lock::Asset:
+            return tr("asset");
+        case core::Lock::Fill:
+            return tr("fill");
+        case core::Lock::Tint:
+            return tr("tint");
+        case core::Lock::Clip:
+            return tr("clip");
+        case core::Lock::Container:
+            return tr("container");
+        case core::Lock::Space:
+            return tr("space");
+        case core::Lock::Parallax:
+            return tr("parallax");
+    }
+    return {};
+}
+
+void InspectorPanel::refreshLocks(const Entity* entity)
+{
+    const bool editable = entity && m_canvas && m_canvas->isEditable();
+    QStringList locked;
+    for (const auto& entry : core::enumNames(core::Lock{})) {
+        const bool on = entity && entity->locks.testFlag(entry.value);
+        m_lockButtons.value(entry.value)->setChecked(on);
+        m_editableButtons.value(entry.value)->setChecked(!on);
+        m_lockButtons.value(entry.value)->setEnabled(editable);
+        m_editableButtons.value(entry.value)->setEnabled(editable);
+        if (on) {
+            locked << lockLabel(entry.value);
+        }
+    }
+    // In a scene, why some fields are read-only.
+    const bool note = !locked.isEmpty() && m_canvas && m_canvas->enforcesLocks();
+    m_lockNote->setVisible(note);
+    if (note) {
+        m_lockNote->setText(tr("Locked by its preset: %1.").arg(locked.join(QStringLiteral(", "))));
+    }
+}
+
+void InspectorPanel::setLocked(core::Lock lock, bool locked)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    // Only a preset defines its locks.
+    if (!entity || m_canvas->enforcesLocks() || entity->locks.testFlag(lock) == locked) {
+        return;
+    }
+    Entity changed = *entity;
+    changed.locks.setFlag(lock, locked);
+    push(path, std::move(changed),
+         (locked ? tr("Lock the %2 of %1") : tr("Unlock the %2 of %1"))
+             .arg(core::describe(*entity), lockLabel(lock)));
 }
 
 void InspectorPanel::refreshClasses()
@@ -1903,9 +2117,14 @@ void InspectorPanel::push(const EntityPath& path, Entity entity, const QString& 
     showMessage({});
     m_idField->setModified(false);
     m_classesField->setModified(false);
+    // What the entity's preset locked stays, in a scene; a field shows it again.
+    const QList<std::pair<EntityPath, Entity>> changes = m_canvas->keepingLocks({{path, entity}});
+    if (changes.isEmpty()) {
+        refresh();
+        return;
+    }
     m_document->commands().push(std::make_unique<core::EditEntitiesCommand>(
-        *m_document, m_canvas->sceneId(), QList<std::pair<EntityPath, Entity>>{{path, entity}},
-        text));
+        *m_document, m_canvas->sceneId(), changes, text));
 }
 
 void InspectorPanel::completeClass(const QString& text)

@@ -40,6 +40,12 @@ QString kindOf(const Entity& entity);
 /// An entity's name in a command's text: its id, or its kind.
 QString describe(const Entity& entity);
 
+/// `edited`, with what `before` locks put back as `before` had it, so an edit in a scene never
+/// changes a locked property (see Lock); its locks themselves, and its children, are
+/// `edited`'s. A size with one axis locked keeps that axis; with no size of its own on
+/// either side, it stays as `before` had it.
+Entity keepingLocked(const Entity& before, Entity edited);
+
 // --- geometry ---
 
 /// An image's natural size and its sprite's pivot, as a fraction of that size: what an

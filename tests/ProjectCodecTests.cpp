@@ -491,6 +491,61 @@ private slots:
         QCOMPARE(*again.project, *parsed.project);
     }
 
+    void readsAndWritesLocks()
+    {
+        ProjectFiles files = minimalProject();
+        files[paths::scene(QStringLiteral("a"))] = sceneWithEntity(R"(
+            {"editor": {"locks": ["tint", "transform.pos.x", "asset"], "note": "keep"}})");
+
+        const ParseResult parsed = parseProject(files);
+        QVERIFY2(parsed.project, qPrintable(errorStrings(parsed.errors).join(u'\n')));
+        const Entity entity = parsed.project->scenes.value(QStringLiteral("a")).entities.at(0);
+        QCOMPARE(entity.locks, Locks(Lock::PosX) | Lock::Asset | Lock::Tint);
+        QCOMPARE(entity.editorExtras.value(QStringLiteral("note")),
+                 QJsonValue(QStringLiteral("keep")));
+
+        // Written in the editor's order, with what else the block has.
+        const QString written = QString::fromUtf8(
+            serializeProject(*parsed.project).at(paths::scene(QStringLiteral("a"))));
+        QVERIFY2(written.contains(QStringLiteral("\"editor\": {\n"
+                                                 "        \"locks\": [\"transform.pos.x\", "
+                                                 "\"asset\", \"tint\"],\n"
+                                                 "        \"note\": \"keep\"\n"
+                                                 "      }")),
+                 qPrintable(written));
+        const ParseResult again = parseProject(serializeProject(*parsed.project));
+        QVERIFY(again.project);
+        QCOMPARE(*again.project, *parsed.project);
+    }
+
+    void keepsWhatIsLocked()
+    {
+        Entity before;
+        before.transform.pos = {10, 20};
+        before.transform.rot = 30;
+        before.size = Extent::px({100, 50});
+        before.tint = Color{255, 0, 0, 255};
+        before.locks = Locks(Lock::PosX) | Lock::Angle | Lock::Width | Lock::Tint;
+        Entity edited = before;
+        edited.transform.pos = {11, 21};
+        edited.transform.rot = 45;
+        edited.size = Extent::px({200, 80});
+        edited.tint = Color{};
+        edited.fill = Color{0, 0, 255, 255};
+        edited.locks = Locks(Lock::Angle);
+        const Entity kept = keepingLocked(before, edited);
+        QCOMPARE(kept.transform.pos, (Point{10, 21}));
+        QCOMPARE(kept.transform.rot, 30.0);
+        QCOMPARE(kept.size, std::optional(Extent::px({100, 80})));
+        QCOMPARE(kept.tint, before.tint);
+        QCOMPARE(kept.fill, edited.fill);    // not locked
+        QCOMPARE(kept.locks, edited.locks);  // the locks are the edit's
+        // A size of its own, with an axis locked, can't be given or taken away.
+        edited.size.reset();
+        QCOMPARE(keepingLocked(before, edited).size, before.size);
+        QCOMPARE(keepingLocked(Entity{}, edited), edited);
+    }
+
     void reportsWhatTheModelCannotRepresent_data()
     {
         QTest::addColumn<QString>("path");
@@ -792,6 +847,9 @@ private slots:
             << scene << sceneWithEntity(R"({"audio": {"clip": "a", "radius": 0}})")
             << "scenes/a/scene.json: entities[0].audio.radius: expected a number more than 0, "
                "found 0";
+        QTest::newRow("lock")
+            << scene << sceneWithEntity(R"({"editor": {"locks": ["position"]}})")
+            << R"(scenes/a/scene.json: entities[0].editor.locks: "position" is not a property that can be locked)";
         QTest::newRow("modifier without its scene")
             << paths::modifier(QStringLiteral("ghost"), QStringLiteral("m"))
             << QByteArray(R"({"format": "shoal-modifier", "version": 1})")

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QMap>
 #include <QPointer>
 #include <QStringList>
 #include <QWidget>
@@ -18,6 +19,7 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QStackedWidget;
+class QTabBar;
 class QStringListModel;
 class QToolButton;
 
@@ -107,6 +109,17 @@ public:
     QWidget* textSection() const { return m_textSection; }
     /// The text's font, for an entity whose asset is its image or its video: shown only then.
     AssetField* fontField() const { return m_fontField; }
+    /// Defaults and Locks, for a preset's entity; hidden in a scene.
+    QTabBar* tabs() const { return m_tabs; }
+    /// The Locks tab's Locked button for `lock` (its Editable one is beside it).
+    QToolButton* lockButton(core::Lock lock) const { return m_lockButtons.value(lock); }
+    QToolButton* editableButton(core::Lock lock) const { return m_editableButtons.value(lock); }
+    /// In a scene, says which fields the entity's preset locked.
+    QLabel* lockNote() const { return m_lockNote; }
+    /// The fields that edit what `lock` locks: read-only in a scene while it is locked.
+    QList<QWidget*> lockedFields(core::Lock lock) const;
+    /// How the inspector names what `lock` locks, as in "the angle of player".
+    static QString lockLabel(core::Lock lock);
     /// The Audio section's: shown for an entity with a sound.
     QWidget* audioSection() const { return m_audioSection; }
     /// The sound's clip, for an entity whose asset is another part's: shown only then.
@@ -152,6 +165,8 @@ public:
     bool showsScale() const;
     bool showsSize() const;
     bool showsImage() const;
+    /// Whether it shows a preset's entity's Locks tab.
+    bool showsLocks() const;
     /// Whether the offset row is shown: when an axis of the position isn't in pixels.
     bool showsOffset() const;
     /// Whether the tile pivot row is shown: for a tiled container.
@@ -212,6 +227,9 @@ public slots:
     /// Sets the clip of the entity's sound, giving it one, heard everywhere, if it has none;
     /// null removes the sound.
     void setSoundClip(const std::optional<QString>& clip);
+    /// Locks or unlocks a property of a preset's entity, for the entities it creates, one
+    /// undo step; nothing in a scene, where locks are the preset's.
+    void setLocked(core::Lock lock, bool locked);
     /// Sets the font of the entity's text, giving it a text, "Text", if it has none, in a rect
     /// sized to it if it has none; null removes the text.
     void setTextFont(const std::optional<QString>& font);
@@ -266,6 +284,7 @@ private:
     /// Like changeText(), for the sound.
     void changeAudio(const std::function<void(core::Audio&)>& change, const QString& text);
     void refreshAudio(const core::Entity& entity);
+    void refreshLocks(const core::Entity* entity);
     /// Tells the asset fields the audio and video the manifest declares.
     void refreshClips();
     /// A text's rect, sized to it on one line.
@@ -343,6 +362,11 @@ private:
     PresetSettingsPanel* m_presetTopLevel;
     /// The entity's form or the top level's, as big as the bigger, so nothing jumps.
     QStackedWidget* m_pages;
+    QTabBar* m_tabs;
+    QWidget* m_locksPage;
+    QLabel* m_lockNote;
+    QMap<core::Lock, QToolButton*> m_lockButtons;
+    QMap<core::Lock, QToolButton*> m_editableButtons;
     QWidget* m_scaleRow;
     QWidget* m_sizeRow;
     QWidget* m_imageRow;

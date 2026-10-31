@@ -200,6 +200,76 @@ QString describe(const Entity& entity)
     return entity.id.isEmpty() ? kindOf(entity) : entity.id;
 }
 
+Entity keepingLocked(const Entity& before, Entity edited)
+{
+    const Locks locks = before.locks;
+    if (!locks) {
+        return edited;
+    }
+    if (locks.testFlag(Lock::PosX)) {
+        edited.transform.pos.x = before.transform.pos.x;
+        edited.at.x = before.at.x;
+    }
+    if (locks.testFlag(Lock::PosY)) {
+        edited.transform.pos.y = before.transform.pos.y;
+        edited.at.y = before.at.y;
+    }
+    if (locks.testFlag(Lock::Angle)) {
+        edited.transform.rot = before.transform.rot;
+    }
+    if (locks.testFlag(Lock::ScaleX)) {
+        edited.transform.scale.x = before.transform.scale.x;
+    }
+    if (locks.testFlag(Lock::ScaleY)) {
+        edited.transform.scale.y = before.transform.scale.y;
+    }
+    if (locks.testFlag(Lock::Flip)) {
+        edited.transform.flipX = before.transform.flipX;
+        edited.transform.flipY = before.transform.flipY;
+    }
+    const bool width = locks.testFlag(Lock::Width);
+    const bool height = locks.testFlag(Lock::Height);
+    if ((width || height) && edited.size != before.size) {
+        if (before.size && edited.size && !(width && height)) {
+            (width ? edited.size->width : edited.size->height) =
+                width ? before.size->width : before.size->height;
+        }
+        else {
+            edited.size = before.size;
+        }
+    }
+    if (locks.testFlag(Lock::Pivot)) {
+        edited.pivot = before.pivot;
+    }
+    if (locks.testFlag(Lock::Asset)) {
+        edited.image = before.image;
+        edited.text = before.text;
+        edited.video = before.video;
+        edited.audio = before.audio;
+    }
+    if (locks.testFlag(Lock::Fill)) {
+        edited.fill = before.fill;
+    }
+    if (locks.testFlag(Lock::Tint)) {
+        edited.tint = before.tint;
+        edited.tintMode = before.tintMode;
+    }
+    if (locks.testFlag(Lock::Clip)) {
+        edited.clip = before.clip;
+    }
+    if (locks.testFlag(Lock::Container)) {
+        edited.container = before.container;
+    }
+    if (locks.testFlag(Lock::Space)) {
+        edited.space = before.space;
+        edited.fit = before.fit;
+    }
+    if (locks.testFlag(Lock::Parallax)) {
+        edited.parallax = before.parallax;
+    }
+    return edited;
+}
+
 namespace {
 
 double& on(Point& point, int axis)

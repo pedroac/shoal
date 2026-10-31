@@ -33,6 +33,7 @@
 #include "core/SceneCommands.h"
 #include "editor/AssetBrowserPanel.h"
 #include "editor/AssetField.h"
+#include "editor/ColorButton.h"
 #include "editor/EntityItem.h"
 #include "editor/FlowScene.h"
 #include "editor/InspectorPanel.h"
@@ -1534,6 +1535,88 @@ private slots:
         f.window.tabs()->setCurrentWidget(f.view);
         const QList<EntityPath> paths = f.view->placePreset(id, QPointF(100, 100));
         QCOMPARE(entityAt(f.scene(), paths.first())->id, QStringLiteral("player_2"));
+    }
+
+    void aPresetLocksPropertiesOfTheEntitiesItCreates()
+    {
+        Fixture f;
+        InspectorPanel* inspector = f.window.inspector();
+        f.canvas().select({PLAYER});
+        const QString id = f.window.makePresetFromSelection();
+        PresetsView* presets = f.window.presetsView();
+        SceneCanvas& presetCanvas = presets->view()->canvas();
+
+        // In the preset, the inspector has its Defaults and its Locks.
+        presetCanvas.select({{0}});
+        QVERIFY(!inspector->tabs()->isHidden());
+        QCOMPARE(inspector->tabs()->tabText(0), QStringLiteral("Defaults"));
+        inspector->tabs()->setCurrentIndex(1);
+        QVERIFY(inspector->editableButton(Lock::PosX)->isChecked());
+        for (const Lock lock : {Lock::PosX, Lock::Angle, Lock::Tint}) {
+            inspector->lockButton(lock)->click();
+        }
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Lock the tint of player"));
+        const Scene* tree = f.document().entityTree(presetTreeId(id));
+        QCOMPARE(tree->entities[0].locks, Locks(Lock::PosX) | Lock::Angle | Lock::Tint);
+        QVERIFY(inspector->lockButton(Lock::PosX)->isChecked());
+        QVERIFY(!inspector->editableButton(Lock::PosX)->isChecked());
+        // Its defaults stay editable there: they are what the locks keep.
+        inspector->tabs()->setCurrentIndex(0);
+        QVERIFY(inspector->xBox()->isEnabled());
+        QVERIFY(inspector->lockNote()->isHidden());
+        inspector->xBox()->setValue(5);
+        QCOMPARE(f.document().entityTree(presetTreeId(id))->entities[0].transform.pos.x, 5.0);
+
+        // Placed, the entity has its locks, in force: those fields are read-only.
+        f.window.tabs()->setCurrentWidget(f.view);
+        const QList<EntityPath> paths = f.view->placePreset(id, QPointF(100, 100));
+        const EntityPath placed = paths.first();
+        QCOMPARE(entityAt(f.scene(), placed)->locks, Locks(Lock::PosX) | Lock::Angle | Lock::Tint);
+        // Its locked x is the preset's, wherever it is dropped; its y follows the drop.
+        const Entity& preset = f.document().entityTree(presetTreeId(id))->entities[0];
+        QCOMPARE(entityAt(f.scene(), placed)->transform.pos.x, 5.0);
+        QCOMPARE(entityAt(f.scene(), placed)->transform.pos.y, preset.transform.pos.y + 100);
+        const QList<EntityPath> again = f.view->placePreset(id, QPointF(700, 300));
+        QCOMPARE(entityAt(f.scene(), again.first())->transform.pos.x, 5.0);
+        f.document().commands().undo();
+        f.canvas().select({placed});
+        f.canvas().select({placed});
+        QVERIFY(inspector->tabs()->isHidden());
+        QVERIFY(!inspector->xBox()->isEnabled());
+        QVERIFY(!inspector->angleBox()->isEnabled());
+        QVERIFY(!inspector->tintButton()->isEnabled());
+        QVERIFY(inspector->yBox()->isEnabled());
+        QVERIFY(!inspector->lockNote()->isHidden());
+        QCOMPARE(inspector->lockNote()->text(),
+                 QStringLiteral("Locked by its preset: position x, angle, tint."));
+
+        // Every edit of a locked property is refused: the inspector's, a nudge, a drag.
+        const Entity before = *entityAt(f.scene(), placed);
+        const int commands = f.document().commands().count();
+        inspector->setTint(Color{255, 0, 0, 255});
+        f.canvas().nudgeSelection(QPoint(1, 0), false);
+        QCOMPARE(f.document().commands().count(), commands);
+        QCOMPARE(*entityAt(f.scene(), placed), before);
+        // Dragged, it moves on its free axis only.
+        const EntityItem* item = f.canvas().item(placed);
+        const QPoint at = f.at(item->mapRectToScene(item->visualRect()).center());
+        f.drag(at, at + QPoint(40, 10));
+        const Entity* moved = entityAt(f.scene(), placed);
+        QCOMPARE(moved->transform.pos.x, before.transform.pos.x);
+        QCOMPARE(moved->transform.pos.y, before.transform.pos.y + 10);
+        QCOMPARE(f.canvas().item(placed)->pos().x(), item->pos().x());
+
+        // Locks are the preset's: a scene has no Locks tab, and can't unlock one.
+        QVERIFY(inspector->tabs()->isHidden());
+        QVERIFY(!inspector->showsLocks());
+        const int beforeUnlock = f.document().commands().count();
+        inspector->setLocked(Lock::PosX, false);
+        QCOMPARE(f.document().commands().count(), beforeUnlock);
+        QVERIFY(entityAt(f.scene(), placed)->locks.testFlag(Lock::PosX));
+        // Back in the preset, its tabs show again.
+        f.window.tabs()->setCurrentWidget(presets);
+        presetCanvas.select({{0}});
+        QVERIFY(!inspector->tabs()->isHidden());
     }
 
     void theTopLevelEditsTheScene()

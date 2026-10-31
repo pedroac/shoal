@@ -65,6 +65,16 @@ void TransformHandle::attach(const core::EntityPath& target)
         hide();
         return;
     }
+    // Not for what the entity's preset locks.
+    const core::Entity& entity = item->entity();
+    const auto locked = [&](core::Lock lock) { return m_canvas.holdsLock(entity, lock); };
+    const bool resizes = entity.size && item->rect();
+    if (m_kind == Kind::Rotate ? locked(core::Lock::Angle)
+        : resizes              ? locked(core::Lock::Width) && locked(core::Lock::Height)
+                               : locked(core::Lock::ScaleX) && locked(core::Lock::ScaleY)) {
+        hide();
+        return;
+    }
     const QRectF rect = item->visualRect();
     setPos(item->mapToScene(m_kind == Kind::Rotate ? QPointF(rect.center().x(), rect.top())
                                                    : rect.bottomRight()));
@@ -108,8 +118,12 @@ void TransformHandle::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
             const double result = side > MIN_SIDE ? along / side : start * factor;
             return std::max(1.0, std::round(result));
         };
-        m_size = QSizeF(length(local.x(), m_side.x(), m_startSize.width()),
-                        length(local.y(), m_side.y(), m_startSize.height()));
+        m_size = QSizeF(m_canvas.holdsLock(item->entity(), core::Lock::Width)
+                            ? m_startSize.width()
+                            : length(local.x(), m_side.x(), m_startSize.width()),
+                        m_canvas.holdsLock(item->entity(), core::Lock::Height)
+                            ? m_startSize.height()
+                            : length(local.y(), m_side.y(), m_startSize.height()));
         core::Entity resized = item->entity();
         resized.size = core::Extent::px({m_size.width(), m_size.height()});
         item->setEntity(resized);
@@ -131,7 +145,11 @@ void TransformHandle::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
             return std::abs(result) < core::MIN_SCALE ? std::copysign(core::MIN_SCALE, value)
                                                       : result;
         };
-        m_scale = core::Point{scaled(start.scale.x), scaled(start.scale.y)};
+        m_scale = core::Point{
+            m_canvas.holdsLock(item->entity(), core::Lock::ScaleX) ? start.scale.x
+                                                                   : scaled(start.scale.x),
+            m_canvas.holdsLock(item->entity(), core::Lock::ScaleY) ? start.scale.y
+                                                                   : scaled(start.scale.y)};
     }
     item->setTransform(QTransform::fromScale(m_scale.x, m_scale.y) *
                        QTransform().rotate(m_rotation));

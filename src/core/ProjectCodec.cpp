@@ -395,6 +395,23 @@ Audio readAudio(ObjectReader& reader)
     return audio;
 }
 
+/// An entity's `editor` block: its locks, and what else an editor keeps there.
+void readEntityEditor(ObjectReader& reader, Entity& entity)
+{
+    const QString key = QStringLiteral("locks");
+    const QJsonArray locks = reader.array(key);
+    for (const QJsonValue& value : locks) {
+        const std::optional<Lock> lock = enumFromName<Lock>(value.toString());
+        if (!value.isString() || !lock) {
+            reader.failMessage(
+                key,
+                QStringLiteral("%1 is not a property that can be locked").arg(describeJson(value)));
+        }
+        entity.locks |= *lock;
+    }
+    entity.editorExtras = reader.extras();
+}
+
 /// The fields every entity has, in both formats.
 void readCommonFields(ObjectReader& reader, Entity& entity)
 {
@@ -465,6 +482,10 @@ Entity readEntityFields(ObjectReader& reader, int version = SCENE_FORMAT_VERSION
         entity.audio = readAudio(audio);
     }
     entity.props = reader.object(QStringLiteral("props"));
+    if (reader.has(QStringLiteral("editor"))) {
+        ObjectReader editor = reader.child(QStringLiteral("editor"));
+        readEntityEditor(editor, entity);
+    }
     const Format2Place childPlace =
         entity.container && entity.container->type == ContainerType::Tiled ? Format2Place::InTiles
                                                                            : Format2Place::Child;
@@ -1380,6 +1401,22 @@ void writeEntity(JsonWriter& writer, const Entity& entity)
     if (!entity.props.isEmpty()) {
         writer.key(u"props");
         writer.value(entity.props);
+    }
+    if (entity.locks || !entity.editorExtras.isEmpty()) {
+        writer.key(u"editor");
+        writer.beginObject();
+        if (entity.locks) {
+            QStringList locks;
+            for (const auto& entry : enumNames(Lock{})) {
+                if (entity.locks.testFlag(entry.value)) {
+                    locks << QLatin1StringView(entry.name);
+                }
+            }
+            writer.key(u"locks");
+            writer.stringArray(locks);
+        }
+        writeExtras(writer, entity.editorExtras);
+        writer.endObject();
     }
     writeExtras(writer, entity.extras);
     if (!entity.children.empty()) {

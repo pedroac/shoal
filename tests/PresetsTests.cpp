@@ -153,6 +153,24 @@ private slots:
                  (QStringList{QStringLiteral("enemy"), QStringLiteral("boss")}));
         QCOMPARE(created[1].classes, QStringList{QStringLiteral("enemy")});
     }
+
+    void aLockedPositionIsThePresetsWhereverItIsPlaced()
+    {
+        PresetDefinition preset;
+        Entity hud;
+        hud.transform.pos = {0, 0};
+        hud.locks = Locks(Lock::PosX) | Lock::PosY;
+        preset.entities.push_back(hud);
+        Entity column;
+        column.transform.pos = {10, 20};
+        column.locks = Locks(Lock::PosX);
+        preset.entities.push_back(column);
+
+        const std::vector<Entity> created = instantiatePreset(preset, Scene{}, Point{100, 200});
+        QCOMPARE(created[0].transform.pos, (Point{0, 0}));
+        QCOMPARE(created[1].transform.pos, (Point{10, 220}));  // its y isn't locked
+        QCOMPARE(created[0].locks, hud.locks);
+    }
 };
 
 QTEST_GUILESS_MAIN(PresetsTests)

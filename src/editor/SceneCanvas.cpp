@@ -355,7 +355,13 @@ QList<EntityPath> SceneCanvas::addPreset(const QString& presetId, QPointF sceneP
         const core::Anchor tile{{double(frame.grid->nearest(0, at.x())), core::Unit::Cell},
                                 {double(frame.grid->nearest(1, at.y())), core::Unit::Cell}};
         for (Entity& entity : entities) {
-            entity.at = tile;
+            // Not on an axis the preset locks: that stays as the preset has it.
+            if (!entity.locks.testFlag(core::Lock::PosX)) {
+                entity.at.x = tile.x;
+            }
+            if (!entity.locks.testFlag(core::Lock::PosY)) {
+                entity.at.y = tile.y;
+            }
         }
     }
     QList<EntityPath> paths;
@@ -507,6 +513,29 @@ void SceneCanvas::addArrangeActions(QMenu& menu)
     }
 }
 
+QList<std::pair<EntityPath, Entity>> SceneCanvas::keepingLocks(
+    QList<std::pair<EntityPath, Entity>> changes) const
+{
+    const core::Scene* current = scene();
+    if (!enforcesLocks() || !current) {
+        return changes;
+    }
+    QList<std::pair<EntityPath, Entity>> kept;
+    for (auto& [path, entity] : changes) {
+        const Entity* before = core::entityAt(*current, path);
+        if (!before) {
+            kept.append({path, std::move(entity)});
+            continue;
+        }
+        Entity changed = core::keepingLocked(*before, std::move(entity));
+        changed.children = before->children;  // compared without them; the command keeps them
+        if (changed != *before) {
+            kept.append({path, std::move(changed)});
+        }
+    }
+    return kept;
+}
+
 void SceneCanvas::nudgeSelection(QPoint direction, bool large)
 {
     const int count = large ? NUDGE_MULTIPLIER : 1;
@@ -533,6 +562,7 @@ void SceneCanvas::nudgeSelection(QPoint direction, bool large)
         }
         changes.append({path, entity});
     }
+    changes = keepingLocks(changes);
     if (!changes.isEmpty()) {
         m_document.commands().push(std::make_unique<core::EditEntitiesCommand>(
             m_document, m_sceneId, changes, tr("Nudge %n entities", nullptr, int(changes.size()))));
@@ -554,6 +584,14 @@ void SceneCanvas::commitMoves()
                                             {entityItem->pos().x(), entityItem->pos().y()});
         changes.append({it.key(), entity});
     }
+    const qsizetype dragged = changes.size();
+    changes = keepingLocks(changes);
+    if (changes.size() != dragged) {
+        // What a drag showed of a locked position goes; the others follow the document.
+        for (EntityItem* entityItem : std::as_const(m_items)) {
+            entityItem->setEntity(entityItem->entity());
+        }
+    }
     if (changes.isEmpty()) {
         return;
     }
@@ -569,7 +607,7 @@ void SceneCanvas::commitMoves()
 void SceneCanvas::commitTransform(const EntityPath& path, double rotation, core::Point scale,
                                   const QString& verb)
 {
-    const EntityItem* entityItem = item(path);
+    EntityItem* entityItem = item(path);
     if (!entityItem) {
         return;
     }
@@ -579,9 +617,13 @@ void SceneCanvas::commitTransform(const EntityPath& path, double rotation, core:
     }
     entity.transform.rot = rotation;
     entity.transform.scale = scale;
+    const QList<std::pair<EntityPath, Entity>> changes = keepingLocks({{path, entity}});
+    if (changes.isEmpty()) {
+        entityItem->setEntity(entityItem->entity());
+        return;
+    }
     m_document.commands().push(std::make_unique<core::EditEntitiesCommand>(
-        m_document, m_sceneId, QList<std::pair<EntityPath, Entity>>{{path, entity}},
-        QStringLiteral("%1 %2").arg(verb, core::describe(entity))));
+        m_document, m_sceneId, changes, QStringLiteral("%1 %2").arg(verb, core::describe(entity))));
 }
 
 void SceneCanvas::commitSize(const EntityPath& path, QSizeF size)
@@ -602,9 +644,13 @@ void SceneCanvas::commitSize(const EntityPath& path, QSizeF size)
         return;
     }
     entity.size = resized;
+    const QList<std::pair<EntityPath, Entity>> changes = keepingLocks({{path, entity}});
+    if (changes.isEmpty()) {
+        entityItem->setEntity(*current);
+        return;
+    }
     m_document.commands().push(std::make_unique<core::EditEntitiesCommand>(
-        m_document, m_sceneId, QList<std::pair<EntityPath, Entity>>{{path, entity}},
-        tr("Resize %1").arg(core::describe(entity))));
+        m_document, m_sceneId, changes, tr("Resize %1").arg(core::describe(entity))));
 }
 
 void SceneCanvas::moveEntity(const EntityPath& from, const EntityPath& to)

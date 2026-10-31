@@ -181,8 +181,13 @@ std::vector<Entity> instantiatePreset(const PresetDefinition& preset, const Scen
 
     std::vector<Entity> entities;
     for (Entity entity : preset.entities) {
-        entity.transform.pos.x += position.x;
-        entity.transform.pos.y += position.y;
+        // A locked axis is the preset's, wherever it is placed.
+        if (!entity.locks.testFlag(Lock::PosX)) {
+            entity.transform.pos.x += position.x;
+        }
+        if (!entity.locks.testFlag(Lock::PosY)) {
+            entity.transform.pos.y += position.y;
+        }
         QStringList classes = preset.classes;
         for (const QString& name : std::as_const(entity.classes)) {
             if (!classes.contains(name)) {

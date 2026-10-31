@@ -64,6 +64,24 @@ constexpr EnumName<VideoMode> VIDEO_MODE_NAMES[] = {
     {VideoMode::Fit, "fit"},
     {VideoMode::Fill, "fill"},
 };
+constexpr EnumName<Lock> LOCK_NAMES[] = {
+    {Lock::PosX, "transform.pos.x"},
+    {Lock::PosY, "transform.pos.y"},
+    {Lock::Angle, "transform.rot"},
+    {Lock::ScaleX, "transform.scale.x"},
+    {Lock::ScaleY, "transform.scale.y"},
+    {Lock::Flip, "transform.flip"},
+    {Lock::Width, "size.width"},
+    {Lock::Height, "size.height"},
+    {Lock::Pivot, "pivot"},
+    {Lock::Asset, "asset"},
+    {Lock::Fill, "fill"},
+    {Lock::Tint, "tint"},
+    {Lock::Clip, "clip"},
+    {Lock::Container, "container"},
+    {Lock::Space, "space"},
+    {Lock::Parallax, "parallax"},
+};
 constexpr EnumName<ContainerType> CONTAINER_TYPE_NAMES[] = {
     {ContainerType::Tiled, "tiled"},
 };
@@ -191,6 +209,10 @@ std::span<const EnumName<ContainerType>> enumNames(ContainerType)
 std::span<const EnumName<TextWrap>> enumNames(TextWrap)
 {
     return TEXT_WRAP_NAMES;
+}
+std::span<const EnumName<Lock>> enumNames(Lock)
+{
+    return LOCK_NAMES;
 }
 std::span<const EnumName<VideoMode>> enumNames(VideoMode)
 {

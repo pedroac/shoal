@@ -396,6 +396,29 @@ QVariant EntityItem::itemChange(GraphicsItemChange change, const QVariant& value
         m_canvas.updateHandles();  // they follow a drag
     }
     if (change == ItemPositionChange && m_canvas.isDragging() &&
+        (m_canvas.holdsLock(m_entity, core::Lock::PosX) ||
+         m_canvas.holdsLock(m_entity, core::Lock::PosY))) {
+        // A locked axis stays where it is, snapped or not.
+        QPointF wanted = value.toPointF();
+        if (m_canvas.holdsLock(m_entity, core::Lock::PosX)) {
+            wanted.setX(pos().x());
+        }
+        if (m_canvas.holdsLock(m_entity, core::Lock::PosY)) {
+            wanted.setY(pos().y());
+        }
+        if (!(QGuiApplication::keyboardModifiers() & Qt::AltModifier)) {
+            const QPointF offset = m_placement.offset;
+            const QPointF snapped = m_canvas.snap(wanted - offset) + offset;
+            if (!m_canvas.holdsLock(m_entity, core::Lock::PosX)) {
+                wanted.setX(snapped.x());
+            }
+            if (!m_canvas.holdsLock(m_entity, core::Lock::PosY)) {
+                wanted.setY(snapped.y());
+            }
+        }
+        return wanted;
+    }
+    if (change == ItemPositionChange && m_canvas.isDragging() &&
         !(QGuiApplication::keyboardModifiers() & Qt::AltModifier)) {  // Alt drags freely
         // Its position snaps, measured from its anchor point, and on an axis in tiles it
         // goes from tile to tile, keeping its offset.
