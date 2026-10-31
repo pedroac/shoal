@@ -18,6 +18,8 @@ class SheetCache;
 
 namespace shoal::editor {
 
+enum class Icon;
+
 /// The project's assets, a group for each kind: Sprites (each sprat sheet, with its sprites
 /// and animations as thumbnails), Images, Fonts (each by its alias, in itself), Audio and
 /// Video. A group shows only once it has an asset.
@@ -79,6 +81,9 @@ private:
     void removeRow(QTreeWidgetItem* row);
     void fillSheetRow(QTreeWidgetItem* row, const QString& alias);
     void fillImageRow(QTreeWidgetItem* row, const QString& alias);
+    /// A row's error or warning, as high as its text, where a thumbnail goes: in the middle
+    /// of the thumbnail's box, so the row keeps its height.
+    QIcon problemIcon(Icon which) const;
     void applyFilter();
 
     assets::SheetCache& m_sheets;

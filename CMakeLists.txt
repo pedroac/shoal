@@ -21,7 +21,7 @@ if(SHOAL_SANITIZE AND NOT MSVC)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Svg Widgets)
 qt_standard_project_setup()
 
 # sprat-lib: an installed package when there is one, otherwise a download.

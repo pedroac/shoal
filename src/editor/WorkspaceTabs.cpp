@@ -5,6 +5,8 @@
 #include <QTabBar>
 #include <QVBoxLayout>
 
+#include "editor/Splitter.h"
+
 namespace shoal::editor {
 
 namespace {
@@ -15,7 +17,7 @@ WorkspaceTabs::WorkspaceTabs(QWidget* parent)
     : QWidget(parent),
       m_bar(new QTabBar(this)),
       m_pages(new QStackedWidget(this)),
-      m_splitter(new QSplitter(this))
+      m_splitter(new Splitter(Qt::Horizontal, this))
 {
     m_bar->setObjectName(QStringLiteral("workspaceTabBar"));
     m_bar->setDocumentMode(true);

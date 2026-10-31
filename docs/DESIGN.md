@@ -978,10 +978,11 @@ Problems panel warns.
     over the inspector.
   - They start narrow (240 px on the left, 300 px on the right) and the workspace
     takes the rest; they keep the widths the user gives them, from one project to
-    the next. The View menu hides or shows each one.
+    the next. The View menu hides or shows each one. With no project open, neither
+    shows.
 - **Files:** a new project starts from a template, in memory; its folder is asked
   on the first save. Opening takes a project folder or its `project.shoal.json`,
-  also from the command line. Closing or replacing a modified project asks first.
+  also from the command line, or dropped on the window while no project is open. Closing or replacing a modified project asks first.
 - **Presets workspace:** the preset current in the project panel's Presets list
   (every preset the project can create entities from, the built-in ones too), its
   entities on a canvas, around a cross where it is placed. The scene tree, the
@@ -1022,7 +1023,8 @@ Problems panel warns.
     it a child; above or below, a sibling; on the empty space after the rows, a
     top-level entity in front of the others. A drop is one undo step. Its + button
     adds a group (an entity with nothing yet) into the current parent, at the
-    parent's origin; − removes the selection.
+    parent's origin; − removes the selection; the arrows move it up the list, a step
+    backward, or down, a step forward, as the Arrange menu does.
   - The Arrange menu, and the context menus of the canvas and the scene tree, bring
     the selection to the front (Ctrl+Shift+]) or forward (Ctrl+]), or send it
     backward (Ctrl+[) or to the back (Ctrl+Shift+[), among its siblings. Several

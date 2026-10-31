@@ -7,7 +7,6 @@
 #include <QFileInfo>
 #include <QGraphicsItem>
 #include <QKeySequence>
-#include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSplitter>
@@ -25,15 +24,18 @@
 #include "editor/AssetBrowserPanel.h"
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
+#include "editor/Icons.h"
 #include "editor/InspectorPanel.h"
 #include "editor/NewProjectDialog.h"
 #include "editor/PresetsPanel.h"
 #include "editor/PresetsView.h"
+#include "editor/ProjectDropArea.h"
 #include "editor/SceneCanvas.h"
 #include "editor/SceneSettingsPanel.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
 #include "editor/ScenesPanel.h"
+#include "editor/Splitter.h"
 #include "editor/WorkspaceTabs.h"
 
 namespace shoal::editor {
@@ -76,13 +78,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_projectPanel = new QTabWidget(this);
     m_projectPanel->setObjectName(QStringLiteral("projectPanel"));
     m_projectPanel->setDocumentMode(true);
-    m_projectPanel->addTab(m_scenes, tr("Scenes"));
-    m_projectPanel->addTab(m_presets, tr("Presets"));
-    m_projectPanel->addTab(m_assetBrowser, tr("Assets"));
+    m_projectPanel->addTab(m_scenes, icon(Icon::Scene), tr("Scenes"));
+    m_projectPanel->addTab(m_presets, icon(Icon::Preset), tr("Presets"));
+    m_projectPanel->addTab(m_assetBrowser, icon(Icon::Assets), tr("Assets"));
     m_sceneSettings = new SceneSettingsPanel(this);
     m_sceneTree = new SceneTreePanel(this);
     m_inspector = new InspectorPanel(this);
-    m_entityPanel = new QSplitter(Qt::Vertical, this);
+    m_entityPanel = new Splitter(Qt::Vertical, this);
     m_entityPanel->setObjectName(QStringLiteral("entityPanel"));
     m_entityPanel->addWidget(m_sceneTree);
     m_entityPanel->addWidget(m_inspector);
@@ -376,11 +378,12 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         m_contextPanel->setVisible(m_contextPanelAction->isChecked());
         m_flowView = new FlowView(*m_flowScene, m_tabs);
         m_flowView->setObjectName(QStringLiteral("flowView"));
-        m_tabs->addTab(m_flowView, tr("Flow"));
+        m_tabs->tabBar()->setTabIcon(m_tabs->addTab(m_flowView, tr("Flow")), icon(Icon::Flow));
         m_presetsView = new PresetsView(*m_document, m_sheets, m_fonts, m_tabs);
         m_presetsView->setObjectName(QStringLiteral("presetsView"));
         m_presetsView->setSnapping(m_snapAction->isChecked());
-        m_tabs->addTab(m_presetsView, tr("Presets"));
+        m_tabs->tabBar()->setTabIcon(m_tabs->addTab(m_presetsView, tr("Presets")),
+                                     icon(Icon::Preset));
         for (int i = 0; i < 2; ++i) {  // neither is closable
             m_tabs->tabBar()->setTabButton(i, QTabBar::RightSide, nullptr);
             m_tabs->tabBar()->setTabButton(i, QTabBar::LeftSide, nullptr);
@@ -435,9 +438,11 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         QTimer::singleShot(0, m_flowView, &FlowView::fitAll);
     }
     else {
-        auto* placeholder = new QLabel(tr("No project open"), this);
-        placeholder->setAlignment(Qt::AlignCenter);
+        auto* placeholder = new ProjectDropArea(this);
         placeholder->setObjectName(QStringLiteral("workspacePlaceholder"));
+        // Queued, since opening one replaces the area that is still handling the drop.
+        connect(placeholder, &ProjectDropArea::projectDropped, this, &MainWindow::openProjectAt,
+                Qt::QueuedConnection);
         setCentralWidget(placeholder);
     }
     updateTitle();
@@ -510,7 +515,9 @@ SceneView* MainWindow::openScene(const QString& sceneId)
     connect(&view->canvas(), &QGraphicsScene::selectionChanged, this, &MainWindow::updateActions);
     connect(&view->canvas(), &SceneCanvas::presetMade, this,
             [this](const QString& id) { openPresets(id); });
-    m_tabs->setCurrentIndex(m_tabs->addTab(view, sceneId));
+    const int index = m_tabs->addTab(view, sceneId);
+    m_tabs->tabBar()->setTabIcon(index, icon(Icon::Scene));
+    m_tabs->setCurrentIndex(index);
     QTimer::singleShot(0, view, &CanvasView::fitAll);
     return view;
 }
@@ -688,6 +695,7 @@ void MainWindow::openProjectAt(const QString& path)
             QMessageBox::Critical, tr("Open Project"),
             tr("The project in %1 can't be opened.").arg(QDir::toNativeSeparators(directory)),
             QMessageBox::Ok, this);
+        setMessageIcon(box, Icon::Error);
         box.setInformativeText(tr("Fix the files below and open it again. Nothing was changed."));
         box.setDetailedText(describeErrors(errors));
         box.exec();
@@ -757,7 +765,7 @@ bool MainWindow::saveAs()
     }
     const bool elsewhere = QDir(directory) != QDir(m_document->directory());
     if (elsewhere && QFileInfo::exists(QDir(directory).filePath(core::paths::MANIFEST))) {
-        const auto answer = QMessageBox::warning(
+        const auto answer = warning(
             this, tr("Save Project"),
             tr("%1 already holds a project. Replace it?").arg(QDir::toNativeSeparators(directory)),
             QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
@@ -773,6 +781,7 @@ bool MainWindow::reportSave(const core::SaveResult& result)
     if (!result.ok()) {
         QMessageBox box(QMessageBox::Critical, tr("Save Project"),
                         tr("Some files couldn't be saved."), QMessageBox::Ok, this);
+        setMessageIcon(box, Icon::Error);
         box.setInformativeText(
             tr("The files that did save are complete, and the others are as they were."));
         box.setDetailedText(describeErrors(result.errors));
@@ -792,10 +801,10 @@ bool MainWindow::maybeSave()
     if (!m_document || m_document->commands().isClean()) {
         return true;
     }
-    const auto answer = QMessageBox::warning(
-        this, tr("Unsaved Changes"),
-        tr("Save the changes to %1?").arg(m_document->project().manifest.name),
-        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    const auto answer =
+        warning(this, tr("Unsaved Changes"),
+                tr("Save the changes to %1?").arg(m_document->project().manifest.name),
+                QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
     if (answer == QMessageBox::Save) {
         return save();
     }

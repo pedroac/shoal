@@ -76,6 +76,8 @@ add_library(shoal_editor STATIC
     editor/FlowView.h
     editor/FormFields.cpp
     editor/FormFields.h
+    editor/Icons.cpp
+    editor/Icons.h
     editor/InspectorPanel.cpp
     editor/InspectorPanel.h
     editor/MainWindow.cpp
@@ -90,6 +92,8 @@ add_library(shoal_editor STATIC
     editor/PresetsPanel.h
     editor/PresetsView.cpp
     editor/PresetsView.h
+    editor/ProjectDropArea.cpp
+    editor/ProjectDropArea.h
     editor/SceneCanvas.cpp
     editor/SceneCanvas.h
     editor/SceneTreePanel.cpp
@@ -102,6 +106,8 @@ add_library(shoal_editor STATIC
     editor/SceneSettingsPanel.h
     editor/ScenesPanel.cpp
     editor/ScenesPanel.h
+    editor/Splitter.cpp
+    editor/Splitter.h
     editor/Thumbnails.cpp
     editor/Thumbnails.h
     editor/TextLayout.cpp
@@ -117,7 +123,34 @@ add_library(shoal_editor STATIC
 )
 add_library(shoal::editor ALIAS shoal_editor)
 target_include_directories(shoal_editor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(shoal_editor PUBLIC shoal::core shoal::assets Qt6::Widgets)
+target_link_libraries(shoal_editor PUBLIC shoal::core shoal::assets Qt6::Widgets PRIVATE Qt6::Svg)
+
+# The editor's icons, from assets/icons, by the names Icons.cpp uses.
+set(shoal_icons
+    "add-ellipse-svgrepo-com.svg=add.svg"
+    "remove-svgrepo-com.svg=remove.svg"
+    "filter-svgrepo-com(1).svg=filter.svg"
+    "flow-tree-svgrepo-com.svg=flow.svg"
+    "cinema-clapper-director-scene-movie-svgrepo-com.svg=scene.svg"
+    "template-20px-svgrepo-com.svg=preset.svg"
+    "images-967-svgrepo-com.svg=assets.svg"
+    "gui-arrow-up-svgrepo-com.svg=move-up.svg"
+    "gui-arrow-down-svgrepo-com.svg=move-down.svg"
+    "drag-handle-dots-1-svgrepo-com.svg=drag-handle.svg"
+    "drag-svgrepo-com.svg=drop.svg"
+    "alert-danger-error-warning-svgrepo-com.svg=error.svg"
+    "warning-svgrepo-com.svg=warning.svg"
+)
+set(shoal_icon_files)
+foreach(icon IN LISTS shoal_icons)
+    string(REPLACE "=" ";" icon "${icon}")
+    list(GET icon 0 file)
+    list(GET icon 1 alias)
+    set(file "${PROJECT_SOURCE_DIR}/assets/icons/${file}")
+    set_source_files_properties("${file}" PROPERTIES QT_RESOURCE_ALIAS "${alias}")
+    list(APPEND shoal_icon_files "${file}")
+endforeach()
+qt_add_resources(shoal_editor "icons" PREFIX "/icons" FILES ${shoal_icon_files})
 shoal_set_warnings(shoal_editor)
 
 qt_add_executable(shoal editor/main.cpp)

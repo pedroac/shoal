@@ -14,6 +14,7 @@
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
 #include "editor/EntityItem.h"
+#include "editor/Icons.h"
 #include "editor/SceneCanvas.h"
 
 namespace shoal::editor {
@@ -76,7 +77,9 @@ SceneTreePanel::SceneTreePanel(QWidget* parent)
     : QWidget(parent),
       m_tree(new Tree(*this)),
       m_addButton(new QToolButton(this)),
-      m_removeButton(new QToolButton(this))
+      m_removeButton(new QToolButton(this)),
+      m_moveUpButton(new QToolButton(this)),
+      m_moveDownButton(new QToolButton(this))
 {
     m_tree->setObjectName(QStringLiteral("sceneTree"));
     m_tree->setColumnCount(3);
@@ -89,13 +92,24 @@ SceneTreePanel::SceneTreePanel(QWidget* parent)
     m_tree->setDragDropMode(QAbstractItemView::InternalMove);
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
 
-    m_addButton->setText(QStringLiteral("+"));
+    m_addButton->setObjectName(QStringLiteral("addGroupButton"));
+    m_addButton->setIcon(icon(Icon::Add));
     m_addButton->setToolTip(tr("Add a group to the current parent"));
-    m_removeButton->setText(QStringLiteral("−"));
+    m_removeButton->setObjectName(QStringLiteral("removeEntitiesButton"));
+    m_removeButton->setIcon(icon(Icon::Remove));
     m_removeButton->setToolTip(tr("Remove the selection"));
+    // Up the list is toward the back, since the list runs back to front.
+    m_moveUpButton->setObjectName(QStringLiteral("moveEntitiesUpButton"));
+    m_moveUpButton->setIcon(icon(Icon::MoveUp));
+    m_moveUpButton->setToolTip(tr("Move the selection up, one step back"));
+    m_moveDownButton->setObjectName(QStringLiteral("moveEntitiesDownButton"));
+    m_moveDownButton->setIcon(icon(Icon::MoveDown));
+    m_moveDownButton->setToolTip(tr("Move the selection down, one step forward"));
     auto* buttonRow = new QHBoxLayout;
     buttonRow->addWidget(m_addButton);
     buttonRow->addWidget(m_removeButton);
+    buttonRow->addWidget(m_moveUpButton);
+    buttonRow->addWidget(m_moveDownButton);
     buttonRow->addStretch();
 
     auto* layout = new QVBoxLayout(this);
@@ -105,6 +119,16 @@ SceneTreePanel::SceneTreePanel(QWidget* parent)
 
     connect(m_addButton, &QToolButton::clicked, this, &SceneTreePanel::addGroup);
     connect(m_removeButton, &QToolButton::clicked, this, &SceneTreePanel::removeSelection);
+    connect(m_moveUpButton, &QToolButton::clicked, this, [this] {
+        if (m_canvas) {
+            m_canvas->arrangeSelection(core::Arrange::Backward);
+        }
+    });
+    connect(m_moveDownButton, &QToolButton::clicked, this, [this] {
+        if (m_canvas) {
+            m_canvas->arrangeSelection(core::Arrange::Forward);
+        }
+    });
     connect(m_tree, &QTreeWidget::itemSelectionChanged, this,
             &SceneTreePanel::onTreeSelectionChanged);
     connect(m_tree, &QTreeWidget::itemChanged, this, &SceneTreePanel::onItemChanged);
@@ -221,6 +245,13 @@ void SceneTreePanel::updateButtons()
 {
     m_addButton->setEnabled(m_canvas && m_canvas->scene() && m_canvas->canAddEntities());
     m_removeButton->setEnabled(m_canvas && !m_canvas->selectedPaths().isEmpty());
+    const core::Scene* scene = m_canvas ? m_canvas->scene() : nullptr;
+    const QList<EntityPath> selected = m_canvas ? m_canvas->selectedPaths() : QList<EntityPath>{};
+    const auto canArrange = [&](core::Arrange arrange) {
+        return scene && !core::arrangedOrders(*scene, selected, arrange).isEmpty();
+    };
+    m_moveUpButton->setEnabled(canArrange(core::Arrange::Backward));
+    m_moveDownButton->setEnabled(canArrange(core::Arrange::Forward));
 }
 
 void SceneTreePanel::onTreeSelectionChanged()

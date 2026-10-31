@@ -591,6 +591,35 @@ private slots:
         QVERIFY(!panel->dropEntity(BUSH, panel->entityRow(BUSH), SceneTreePanel::Drop::Above));
     }
 
+    void theTreesButtonsMoveEntitiesUpAndDown()
+    {
+        Fixture f;
+        SceneTreePanel* panel = f.window.sceneTreePanel();
+        auto* up = panel->findChild<QToolButton*>(QStringLiteral("moveEntitiesUpButton"));
+        auto* down = panel->findChild<QToolButton*>(QStringLiteral("moveEntitiesDownButton"));
+        QVERIFY(up && down);
+        QVERIFY(!up->icon().isNull() && !down->icon().isNull());
+        // Nothing selected, nothing to move.
+        QVERIFY(!up->isEnabled());
+        QVERIFY(!down->isEnabled());
+
+        // Up the list is a step back: world before bg.
+        f.canvas().select({WORLD});
+        QVERIFY(up->isEnabled());
+        QVERIFY(down->isEnabled());
+        QTest::mouseClick(up, Qt::LeftButton);
+        QCOMPARE(findEntity(f.scene(), u"world"), (EntityPath{0}));
+        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{{0}});
+        QCOMPARE(f.document().commands().count(), 1);
+        // At the top, it goes no further up.
+        QVERIFY(!up->isEnabled());
+        QTest::mouseClick(down, Qt::LeftButton);
+        QTest::mouseClick(down, Qt::LeftButton);
+        QCOMPARE(findEntity(f.scene(), u"world"), (EntityPath{2}));
+        QVERIFY(!down->isEnabled());
+        QVERIFY(up->isEnabled());
+    }
+
     void newEntitiesGoIntoTheCurrentParent()
     {
         Fixture f;

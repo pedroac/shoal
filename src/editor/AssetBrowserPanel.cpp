@@ -14,6 +14,7 @@
 #include "assets/FontCache.h"
 #include "assets/SheetCache.h"
 #include "editor/ClickOrDragView.h"
+#include "editor/Icons.h"
 #include "editor/Thumbnails.h"
 
 namespace shoal::editor {
@@ -130,11 +131,19 @@ protected:
             return;
         }
         QPainter painter(viewport());
+        const QRect area = viewport()->rect().adjusted(8, 8, -8, -8);
+        const QString text =
+            tr("Drop sprat sheets, images, fonts, audio or video here to add "
+               "them to the project.");
+        const QRect textBounds =
+            painter.fontMetrics().boundingRect(area, Qt::AlignHCenter | Qt::TextWordWrap, text);
+        const int iconSize = 2 * painter.fontMetrics().height();
+        const int top = area.center().y() - (iconSize + textBounds.height()) / 2;
+        icon(Icon::Drop)
+            .paint(&painter, QRect(area.center().x() - iconSize / 2, top, iconSize, iconSize));
         painter.setPen(palette().color(QPalette::PlaceholderText));
-        painter.drawText(viewport()->rect().adjusted(8, 8, -8, -8),
-                         Qt::AlignCenter | Qt::TextWordWrap,
-                         tr("Drop sprat sheets, images, fonts, audio or video here to add "
-                            "them to the project."));
+        painter.drawText(QRect(area.left(), top + iconSize, area.width(), textBounds.height()),
+                         Qt::AlignHCenter | Qt::TextWordWrap, text);
     }
 
     QStringList mimeTypes() const override { return {QLatin1StringView(AssetItem::MIME_TYPE)}; }
@@ -164,6 +173,7 @@ AssetBrowserPanel::AssetBrowserPanel(assets::SheetCache& sheets, assets::FontCac
     m_filter->setObjectName(QStringLiteral("assetFilter"));
     m_filter->setPlaceholderText(tr("Filter assets"));
     m_filter->setClearButtonEnabled(true);
+    m_filter->addAction(icon(Icon::Filter), QLineEdit::LeadingPosition);
     m_tree->setObjectName(QStringLiteral("assetTree"));
     m_tree->setHeaderHidden(true);
     m_tree->setIconSize(QSize(ICON_SIZE, ICON_SIZE));
@@ -442,6 +452,9 @@ void AssetBrowserPanel::onFontChanged(const QString& alias)
     row->setToolTip(0, tips.join(u'\n'));
     row->setText(0, family.isEmpty() ? tr("%1 (not loaded)").arg(alias) : alias);
     row->setForeground(0, error.isEmpty() ? palette().color(QPalette::Text) : ERROR_COLOR);
+    row->setIcon(0, family.isEmpty()   ? problemIcon(Icon::Error)
+                    : !error.isEmpty() ? problemIcon(Icon::Warning)
+                                       : QIcon());
     applyFilter();
 }
 
@@ -460,7 +473,7 @@ void AssetBrowserPanel::fillImageRow(QTreeWidgetItem* row, const QString& alias)
         row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
     }
     else {
-        row->setIcon(0, {});
+        row->setIcon(0, problemIcon(Icon::Error));
         row->setFlags(Qt::ItemIsEnabled);
     }
     if (!error.isEmpty()) {
@@ -499,6 +512,9 @@ void AssetBrowserPanel::fillSheetRow(QTreeWidgetItem* row, const QString& alias)
     row->setForeground(0, error.isEmpty() && (!sheet || sheet->warnings.isEmpty())
                               ? palette().color(QPalette::Text)
                               : ERROR_COLOR);
+    row->setIcon(0, !sheet                                           ? problemIcon(Icon::Error)
+                    : !error.isEmpty() || !sheet->warnings.isEmpty() ? problemIcon(Icon::Warning)
+                                                                     : QIcon());
     if (!sheet) {
         return;
     }
@@ -556,6 +572,18 @@ void AssetBrowserPanel::fillSheetRow(QTreeWidgetItem* row, const QString& alias)
                                    Qt::ItemIsDragEnabled);
         }
     }
+}
+
+QIcon AssetBrowserPanel::problemIcon(Icon which) const
+{
+    const qreal ratio = devicePixelRatioF();
+    QPixmap box(QSize(ICON_SIZE, ICON_SIZE) * ratio);
+    box.setDevicePixelRatio(ratio);
+    box.fill(Qt::transparent);
+    QPainter painter(&box);
+    const int size = fontMetrics().height();
+    icon(which).paint(&painter, QRect((ICON_SIZE - size) / 2, (ICON_SIZE - size) / 2, size, size));
+    return QIcon(box);
 }
 
 void AssetBrowserPanel::applyFilter()

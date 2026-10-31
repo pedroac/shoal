@@ -1,16 +1,22 @@
 #include <QAction>
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QDragEnterEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenuBar>
+#include <QMimeData>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QUrl>
 
 #include "Support.h"
 #include "assets/SpratLibrary.h"
@@ -19,19 +25,24 @@
 #include "editor/AssetBrowserPanel.h"
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
+#include "editor/Icons.h"
 #include "editor/InspectorPanel.h"
 #include "editor/MainWindow.h"
 #include "editor/PresetsPanel.h"
+#include "editor/ProjectDropArea.h"
 #include "editor/SceneCanvas.h"
 #include "editor/SceneSettingsPanel.h"
 #include "editor/SceneTreePanel.h"
 #include "editor/SceneView.h"
 #include "editor/ScenesPanel.h"
+#include "editor/Splitter.h"
 #include "editor/WorkspaceTabs.h"
 
 using namespace shoal::core;
 using shoal::editor::FlowView;
+using shoal::editor::Icon;
 using shoal::editor::MainWindow;
+using shoal::editor::ProjectDropArea;
 using shoal::editor::SceneSettingsPanel;
 
 namespace {
@@ -60,7 +71,7 @@ private slots:
     {
         MainWindow window;
         QCOMPARE(window.windowTitle(), QStringLiteral("Shoal"));
-        auto* placeholder = qobject_cast<QLabel*>(window.centralWidget());
+        auto* placeholder = qobject_cast<ProjectDropArea*>(window.centralWidget());
         QVERIFY(placeholder);
         QCOMPARE(placeholder->objectName(), QStringLiteral("workspacePlaceholder"));
         QVERIFY(!window.document());
@@ -106,6 +117,79 @@ private slots:
         QCOMPARE(window.windowTitle(), QStringLiteral("Fixture Game[*] — Shoal"));
         QVERIFY(!window.isWindowModified());
         QVERIFY(action(window, "saveAction")->isEnabled());
+        // Every tab has its icon: the flow, the presets, each scene, and the side lists.
+        QVERIFY(window.openScene(window.document()->project().scenes.firstKey()));
+        for (int i = 0; i < window.tabs()->count(); ++i) {
+            QVERIFY(!window.tabs()->tabBar()->tabIcon(i).isNull());
+        }
+        for (int i = 0; i < window.projectPanel()->count(); ++i) {
+            QVERIFY(!window.projectPanel()->tabIcon(i).isNull());
+        }
+    }
+
+    void opensAProjectDroppedOnTheWindow()
+    {
+        QTemporaryDir dir;
+        QVERIFY(copyFixture(dir));
+        const QString manifest = QDir(dir.path()).filePath(paths::MANIFEST);
+        // Its folder or its manifest, and nothing else.
+        QCOMPARE(ProjectDropArea::projectIn({QUrl::fromLocalFile(dir.path())}),
+                 QFileInfo(dir.path()).absoluteFilePath());
+        QCOMPARE(ProjectDropArea::projectIn({QUrl::fromLocalFile(manifest)}), manifest);
+        QVERIFY(ProjectDropArea::projectIn(
+                    {QUrl::fromLocalFile(QDir(dir.path()).filePath(QStringLiteral("x.png")))})
+                    .isEmpty());
+        QVERIFY(
+            ProjectDropArea::projectIn({QUrl(QStringLiteral("https://example.com/"))}).isEmpty());
+        QVERIFY(ProjectDropArea::projectIn(
+                    {QUrl::fromLocalFile(dir.path()), QUrl::fromLocalFile(manifest)})
+                    .isEmpty());
+
+        MainWindow window;
+        window.show();
+        QWidget* area = window.centralWidget();
+        QMimeData data;
+        data.setUrls({QUrl::fromLocalFile(dir.path())});
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+        const QPointF at(area->rect().center());
+#else
+        const QPoint at = area->rect().center();
+#endif
+        QDragEnterEvent enter(at, Qt::CopyAction, &data, Qt::LeftButton, {});
+        QApplication::sendEvent(area, &enter);
+        QVERIFY(enter.isAccepted());
+        QDropEvent drop(at, Qt::CopyAction, &data, Qt::LeftButton, {});
+        QApplication::sendEvent(area, &drop);
+        QVERIFY(drop.isAccepted());
+        QTRY_VERIFY(window.document());
+        QCOMPARE(window.document()->directory(), QFileInfo(dir.path()).absoluteFilePath());
+    }
+
+    void iconsTakeThePalettesColor()
+    {
+        for (const Icon which : {Icon::Add, Icon::Remove, Icon::Filter, Icon::Flow, Icon::Scene,
+                                 Icon::Preset, Icon::Assets, Icon::MoveUp, Icon::MoveDown,
+                                 Icon::DragHandle, Icon::Drop, Icon::Error, Icon::Warning}) {
+            const QImage image = shoal::editor::icon(which).pixmap(QSize(32, 32)).toImage();
+            QVERIFY2(!image.isNull(), qPrintable(QString::number(int(which))));
+            bool drawn = false;
+            for (int y = 0; y < image.height() && !drawn; ++y) {
+                for (int x = 0; x < image.width() && !drawn; ++x) {
+                    drawn = qAlpha(image.pixel(x, y)) > 0;
+                }
+            }
+            QVERIFY2(drawn, qPrintable(QString::number(int(which))));  // its file is there
+        }
+        // A plain one is drawn in the palette's button text; it is black in the file.
+        const QImage add = shoal::editor::icon(Icon::Add).pixmap(QSize(32, 32)).toImage();
+        const QColor color = QGuiApplication::palette().color(QPalette::ButtonText);
+        QCOMPARE(QColor(add.pixel(16, 16)).rgb(), color.rgb());
+        QCOMPARE(qAlpha(add.pixel(0, 0)), 0);  // and nothing around it
+        const QImage disabled =
+            shoal::editor::icon(Icon::Add).pixmap(QSize(32, 32), QIcon::Disabled).toImage();
+        QCOMPARE(qAlpha(disabled.pixel(0, 0)), 0);
+        QCOMPARE(QColor(disabled.pixel(16, 16)).rgb(),
+                 QGuiApplication::palette().color(QPalette::Disabled, QPalette::ButtonText).rgb());
     }
 
     void keepsTheCurrentProjectWhenOpeningFails()
@@ -223,6 +307,7 @@ private slots:
         QStackedWidget* context = window.contextPanel();
         // Beside the workspace, under its tabs.
         QSplitter* splitter = window.tabs()->splitter();
+        QVERIFY(qobject_cast<shoal::editor::Splitter*>(splitter));  // its handles show dots
         QCOMPARE(splitter->widget(0), static_cast<QWidget*>(project));
         QCOMPARE(splitter->widget(2), static_cast<QWidget*>(context));
         QCOMPARE(project->count(), 3);

@@ -12,6 +12,7 @@
 #include "core/ProjectCodec.h"
 #include "core/ProjectDocument.h"
 #include "editor/ClickOrDragView.h"
+#include "editor/Icons.h"
 
 namespace shoal::editor {
 
@@ -65,14 +66,19 @@ PresetsPanel::PresetsPanel(QWidget* parent)
 
     m_newButton->setObjectName(QStringLiteral("newPresetButton"));
     m_newButton->setText(tr("New"));
+    m_newButton->setIcon(icon(Icon::Add));
     m_newButton->setToolTip(tr("A new preset, creating one mark"));
     m_duplicateButton->setObjectName(QStringLiteral("duplicatePresetButton"));
     m_duplicateButton->setText(tr("Duplicate"));
     m_duplicateButton->setToolTip(tr("Copy the preset into a new one"));
     m_removeButton->setObjectName(QStringLiteral("removePresetButton"));
     m_removeButton->setText(tr("Remove"));
+    m_removeButton->setIcon(icon(Icon::Remove));
     m_removeButton->setToolTip(tr("Remove the project's preset"));
 
+    for (QToolButton* button : {m_newButton, m_duplicateButton, m_removeButton}) {
+        button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    }
     auto* buttons = new QHBoxLayout;
     buttons->addWidget(m_newButton);
     buttons->addWidget(m_duplicateButton);
@@ -257,6 +263,7 @@ void PresetsPanel::rebuild()
         else {
             row->setText(tr("%1 (can't read)").arg(it.key()));
             row->setForeground(QColor(200, 60, 40));
+            row->setIcon(icon(Icon::Error));
             row->setToolTip(QStringLiteral("%1: %2").arg(origin, read.error.toHtmlEscaped()));
             row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
         }

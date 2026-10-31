@@ -19,7 +19,8 @@ class SceneCanvas;
 
 /// The open scene's entities, back to front, as a tree under a row for the top level, the
 /// scene itself: select entities, pick the parent new entities go into, hide or lock
-/// entities in the editor, and drag entities to reorder them or give them another parent.
+/// entities in the editor, move entities up and down, and drag them to reorder them or give
+/// them another parent.
 /// The top level's row is selected when no entity is; selecting it clears the selection,
 /// and the inspector shows the scene's settings.
 class SceneTreePanel : public QWidget {
@@ -62,6 +63,8 @@ private:
     Tree* m_tree;
     QToolButton* m_addButton;
     QToolButton* m_removeButton;
+    QToolButton* m_moveUpButton;    ///< Arranges the selection backward.
+    QToolButton* m_moveDownButton;  ///< Arranges the selection forward.
     bool m_syncing = false;
 };
 

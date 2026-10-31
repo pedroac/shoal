@@ -10,6 +10,7 @@
 #include "core/Model.h"
 #include "core/ProjectDocument.h"
 #include "editor/FlowScene.h"
+#include "editor/Icons.h"
 #include "editor/SceneNodeItem.h"
 #include "editor/TransitionEdgeItem.h"
 
@@ -72,7 +73,7 @@ void FlowView::promptRename(const QString& sceneId)
         if (!ok || m_flowScene.renameScene(sceneId, text)) {
             return;
         }
-        QMessageBox::warning(this, tr("Rename Scene"), FlowScene::renameRefusal(text));
+        warning(this, tr("Rename Scene"), FlowScene::renameRefusal(text));
     }
 }
 

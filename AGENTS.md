@@ -93,6 +93,10 @@ changes.
     dropped, typed with a completer, browsed or cleared. A preset's entities have a Locks tab too,
     for the properties they can't change in a scene (`core::Lock`, kept by `keepingLocked()`
     in `SceneTree`, applied by `SceneCanvas::keepingLocks()` to every edit).
+  - `Icons`: the editor's own icons, the SVGs in `assets/icons/` built in as resources
+    under short names; the plain ones take the palette's colors. `Splitter` shows the
+    drag handle's dots on its handles. `ProjectDropArea` is what the window shows with no
+    project open, and opens a project folder dropped on it.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the
@@ -109,7 +113,7 @@ changes.
 
 ## Dependencies
 
-- **Qt 6** (Core, Gui, Widgets, Test).
+- **Qt 6** (Core, Gui, Svg, Widgets, Test).
 - **sprat-lib** through `FetchContent`, pinned to a commit in `CMakeLists.txt`. To
   build against a local checkout, pass `-DFETCHCONTENT_SOURCE_DIR_SPRAT=../sprat-lib`.
   Follow its "load, bind, convert, free" pattern: copy what the editor needs out of a

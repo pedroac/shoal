@@ -15,6 +15,7 @@
 #include "assets/FontCache.h"
 #include "assets/SheetCache.h"
 #include "assets/SpriteSheet.h"
+#include "editor/Icons.h"
 #include "editor/Thumbnails.h"
 
 namespace shoal::editor {
@@ -312,9 +313,9 @@ QIcon AssetField::thumbnailOf(const AssetItem& item) const
 void AssetField::showItem()
 {
     const bool missing = isMissing();
-    const QIcon icon = m_item ? thumbnailOf(*m_item) : QIcon();
-    m_icon->setIcon(icon);
-    m_icon->setVisible(!icon.isNull());
+    const QIcon shown = missing ? icon(Icon::Warning) : m_item ? thumbnailOf(*m_item) : QIcon();
+    m_icon->setIcon(shown);
+    m_icon->setVisible(!shown.isNull());
     m_clearButton->setEnabled(isEnabled() && m_item.has_value());
     const QString path = m_item ? m_item->path() : QString();
     m_edit->setToolTip(missing ? tr("%1 isn't in the project's assets").arg(path) : path);

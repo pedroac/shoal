@@ -17,7 +17,7 @@ QDoubleSpinBox* numberBox(QWidget* parent, const QString& name, double range, in
 /// Shows `value` unless the box is being typed in.
 void showValue(QDoubleSpinBox* box, double value);
 
-/// A hidden label for why an edit couldn't be applied.
+/// A hidden label, with the error icon, for why an edit couldn't be applied.
 QLabel* messageLabel(QWidget* parent, const QString& name);
 /// Shows `message` in a label from messageLabel(); empty hides it.
 void showMessage(QLabel* label, const QString& message);
