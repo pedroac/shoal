@@ -91,6 +91,9 @@ my_game/
 ├── classes.json                optional class declarations
 ├── presets/
 │   └── enemy_grunt.json        copy-on-create presets (editor-only)
+├── transitions/
+│   ├── ripple.json             the project's own transition types
+│   └── ripple.gif              a type's optional preview
 ├── scenes/
 │   ├── level_1/
 │   │   ├── scene.json          the entity tree
@@ -212,8 +215,8 @@ tooltips and autocompletes from them.
   scene or an image from an undeclared sheet. They are the Problems panel's to report,
   so a hand edit never locks a user out of their project.
 - Each broken file is reported; a project opens only when every file reads.
-- `project.shoal.json` and `flow.json` are required; `classes.json` and `presets/`
-  are optional. A modifier whose scene folder has no `scene.json` is an error.
+- `project.shoal.json` and `flow.json` are required; `classes.json`, `presets/` and
+  `transitions/` are optional. A modifier whose scene folder has no `scene.json` is an error.
 - **Saving removes only what Shoal loaded or wrote before**, when the project no
   longer has it (a deleted or renamed scene, for example), along with folders left
   empty. Other files in the project folder, such as art or notes, are never
@@ -245,7 +248,8 @@ The flow is a **stack** of scenes. Transitions change it in one of four ways:
   "transitions": [
     { "id": "l1_to_l2", "from": "level_1", "to": "level_2", "mode": "replace",
       "trigger": { "event": "door_west_entered", "requires": ["has_key"] },
-      "effect":  { "type": "fade", "duration_ms": 400, "easing": "ease_out", "params": {} },
+      "effect":  { "type": "fade", "duration_ms": 400, "easing": "ease_out",
+                   "params": { "color": "#000000" } },
       "persist": { "state": ["player.hp", "inventory"],
                    "entities": { "player": "spawn_west_door" } } },
     { "id": "l1_pause", "from": "level_1", "to": "pause", "mode": "push",
@@ -261,9 +265,13 @@ The flow is a **stack** of scenes. Transitions change it in one of four ways:
 - **Triggers are labels.** `event` is a name the engine fires; `requires` lists
   names of conditions the engine checks however it likes. Shoal records that the
   dependency exists and never evaluates it.
-- **Effects are a vocabulary.** `fade`, `slide`, `iris` and others, with
-  parameters. The editor previews the built-in ones; the engine implements them.
-  Unknown effect types pass through unchanged.
+- **Effects are transition types**, each declared in a file (below): `type` is the
+  type's id, `duration_ms` how long it lasts, `easing` how it runs (`linear`, the
+  default and written as none, `ease_in`, `ease_out` or `ease_in_out`; others pass
+  through), and `params` the values of the type's options, by name. A transition
+  with no `effect` changes scene at once. The engine reads the id and the values and
+  draws the effect; Shoal never does. An effect's values load whatever they are, and
+  a type the project doesn't have passes through unchanged.
 - **State is declared by name.** Shoal says which keys carry over; their types and
   values belong to the engine.
 - **Persisted entities map to marks.** A carried entity lands on a mark in the
@@ -272,6 +280,44 @@ The flow is a **stack** of scenes. Transitions change it in one of four ways:
   sibling, at the mark's position, so it is drawn where the mark is and inherits
   what the mark inherits (space, parallax, tint).
 - **The start scene** is set in the manifest.
+
+### Transition types
+
+A transition type is a file, `transitions/<id>.json`, named after its id. Shoal ships
+Fade, Fade In, Fade Out, Cross-Dissolve, Flashbang, Screen Scroll, Slide, Camera Push,
+Linear Wipe, Circle Wipe, Pattern Mask, Pixelate, Dissolve, Dither, Shatter and Glitch,
+as files of its own (`assets/transitions` in its source, where adding a file adds a
+built-in type). A project adds its own in its `transitions/` folder, and one with a
+built-in type's id replaces it.
+
+```jsonc
+// transitions/ripple.json
+{ "format": "shoal-transition", "version": 1,
+  "name": "Ripple",                      // optional: the id when absent
+  "description": "Rings spread from the center, revealing the arriving scene.",
+  "preview": "ripple.gif",               // optional: beside the file
+  "options": [
+    { "name": "rings", "type": "number", "integer": true, "min": 1, "max": 50,
+      "default": 3, "description": "How many rings" },
+    { "name": "hold", "type": "time", "default": 100 },
+    { "name": "direction", "type": "string", "choices": ["in", "out"], "default": "out" },
+    { "name": "tint", "type": "color", "default": "#ffffff" },
+    { "name": "mask", "type": "path" } ] }
+```
+
+- **An option is a value the engine reads** from the effect's `params`, under its
+  `name` (an id). Its `type` is `time` (whole milliseconds), `number`, `string`,
+  `path` (a file, relative to the project folder) or `color` (`#rrggbb` or
+  `#rrggbbaa`). A time or a number may have a `min` and a `max`, and a number may be
+  `integer`; a string may list its `choices`. A `default` must be a value the option
+  takes; an option without one is unset until it is given a value.
+- **Types are read when they are used**, as presets are: a type file is kept as
+  written, and one that can't be read never stops the project from opening. The
+  transition panel says what is wrong with it. Its keys are written in the order
+  above, then any others.
+- Choosing a type for an effect sets its options to their defaults. Changing it
+  keeps the values the new type has an option for, and takes, drops the old type's
+  other options, and keeps keys neither type has.
 
 ## 7. Scenes
 
@@ -1193,8 +1239,16 @@ Problems panel warns.
     with −, each one undo step.
   - Entities are drawn with their effective tint.
   - Screen-space entities are listed but not drawn until the UI layout step.
-- **Transition editor:** trigger and requirements, the effect and its parameters,
-  the persisted state, and the mapping of entities to marks.
+- **Transition panel:** selecting one transition, and nothing else, in the flow
+  shows it in the context panel: where it goes, and its effect, a type from the
+  project's transition types or none, its duration and easing, and a field for each
+  option the type takes, made from the type's file (a box for a time or a number,
+  a list for choices, a line for a string, a line with a file chooser for a path, a
+  swatch for a color). The type's description and preview GIF show under it. Each
+  edit is one undo step. A type the project doesn't have shows by its id, with its
+  duration and easing; its values are kept. The edge's tooltip names the effect.
+- **Transition editor:** trigger and requirements, the persisted state, and the
+  mapping of entities to marks.
 - **Modifier editor:** the host scene's canvas with the action list underneath.
   Ghosts show start and end positions; paths are drawn on the canvas.
 - **Rehearsal:** a play mode that steps through the flow and scrubs modifiers with

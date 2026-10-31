@@ -1,0 +1,17 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Dissolve",
+  "description": "The arriving scene appears grain by grain, in random order.",
+  "options": [
+    {
+      "name": "block_size",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 4096,
+      "default": 1,
+      "description": "The grain, in screen pixels"
+    }
+  ]
+}

@@ -37,10 +37,11 @@ inline const QString CLASSES = QStringLiteral("classes.json");
 QString scene(const QString& sceneId);
 QString modifier(const QString& sceneId, const QString& modifierId);
 QString preset(const QString& presetId);
+QString transitionType(const QString& typeId);
 }  // namespace paths
 
 /// Whether `path` is one of the files a project consists of (and Shoal writes): the
-/// manifest, flow.json, classes.json, presets/*.json, scenes/*/scene.json and
+/// manifest, flow.json, classes.json, presets/*.json, transitions/*.json, scenes/*/scene.json and
 /// scenes/*/modifiers/*.json.
 bool isProjectFile(QStringView path);
 

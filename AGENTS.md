@@ -38,7 +38,10 @@ changes.
     stale ones.
   - `CommandStack`: undo history, like `QUndoStack` (which is in QtGui).
     `ProjectDocument`: the open project, its mutators and change signals.
-    `FlowCommands`: the commands that change scenes and transitions.
+    `FlowCommands`: the commands that change scenes and transitions, effects included.
+    `TransitionTypes`: transition types, read from their files when used: the built-in
+    ones (`assets/transitions/`, built into core as resources) and the project's own
+    (`transitions/`); and effects made from them.
     `SceneCommands`: the commands that change entities, which `SceneTree`
     addresses by `EntityPath`. `SceneTree` also places entities: their rects and
     pivots, positions and sizes in px, % or tiles against their parent's `Frame`,
@@ -97,6 +100,8 @@ changes.
     under short names; the plain ones take the palette's colors. `Splitter` shows the
     drag handle's dots on its handles. `ProjectDropArea` is what the window shows with no
     project open, and opens a project folder dropped on it.
+  - `TransitionPanel`: the context panel for the flow's selected transition: its
+    effect, with a field for each option its type's file declares.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the

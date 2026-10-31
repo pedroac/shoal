@@ -1,0 +1,6 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Cross-Dissolve",
+  "description": "The leaving scene blends into the arriving one."
+}

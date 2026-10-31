@@ -1,0 +1,21 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Pattern Mask",
+  "description": "An image's brightness orders the reveal: its dark parts give way first.",
+  "options": [
+    {
+      "name": "mask",
+      "type": "path",
+      "description": "The image, relative to the project folder"
+    },
+    {
+      "name": "softness",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "description": "The edge: 0 is hard, 1 as wide as the screen"
+    }
+  ]
+}

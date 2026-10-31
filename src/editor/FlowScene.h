@@ -59,6 +59,9 @@ public:
     void setSceneSettings(const QString& sceneId, core::Size size, std::optional<core::Fit> fit);
     /// Adds a `replace` transition with no trigger yet; returns its id.
     QString addTransition(const QString& from, const QString& to);
+    /// Sets a transition's effect, or takes it away (null); nothing if it is the same.
+    void setTransitionEffect(const QString& transitionId,
+                             const std::optional<core::Effect>& effect);
 
     // --- for the items ---
 

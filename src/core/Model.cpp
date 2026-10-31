@@ -118,6 +118,18 @@ constexpr EnumName<Underlying> UNDERLYING_NAMES[] = {
     {Underlying::Hidden, "hidden"},
 };
 
+constexpr EnumName<OptionType> OPTION_TYPE_NAMES[] = {
+    {OptionType::Time, "time"}, {OptionType::Number, "number"}, {OptionType::String, "string"},
+    {OptionType::Path, "path"}, {OptionType::Color, "color"},
+};
+
+constexpr EnumName<Easing> EASING_NAMES[] = {
+    {Easing::Linear, "linear"},
+    {Easing::EaseIn, "ease_in"},
+    {Easing::EaseOut, "ease_out"},
+    {Easing::EaseInOut, "ease_in_out"},
+};
+
 constexpr EnumName<RestoreMode> RESTORE_MODE_NAMES[] = {
     {RestoreMode::Commit, "commit"},
     {RestoreMode::Restore, "restore"},
@@ -229,6 +241,14 @@ std::span<const EnumName<Underlying>> enumNames(Underlying)
 std::span<const EnumName<RestoreMode>> enumNames(RestoreMode)
 {
     return RESTORE_MODE_NAMES;
+}
+std::span<const EnumName<OptionType>> enumNames(OptionType)
+{
+    return OPTION_TYPE_NAMES;
+}
+std::span<const EnumName<Easing>> enumNames(Easing)
+{
+    return EASING_NAMES;
 }
 std::span<const EnumName<AssetKind>> enumNames(AssetKind)
 {

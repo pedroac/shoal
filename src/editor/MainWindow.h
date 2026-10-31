@@ -30,6 +30,7 @@ class PresetsView;
 class FlowScene;
 class FlowView;
 class SceneSettingsPanel;
+class TransitionPanel;
 class ScenesPanel;
 class SceneTreePanel;
 class SceneCanvas;
@@ -68,6 +69,7 @@ public:
     PresetsPanel* presetsPanel() const { return m_presets; }
     ScenesPanel* scenesPanel() const { return m_scenes; }
     SceneSettingsPanel* sceneSettingsPanel() const { return m_sceneSettings; }
+    TransitionPanel* transitionPanel() const { return m_transitionPanel; }
     assets::SheetCache& sheets() { return m_sheets; }
     assets::FontCache& fonts() { return m_fonts; }
     /// The Presets tab.
@@ -136,6 +138,8 @@ private:
     void setPanelCanvas(SceneView* view);
     /// Shows the current tab's kind of context, and the project panel's lists for it.
     void updatePanels();
+    /// On the flow, the context panel shows the one selected transition, or scene settings.
+    void updateFlowContext();
 
     std::unique_ptr<core::ProjectDocument> m_document;
     std::unique_ptr<FlowScene> m_flowScene;
@@ -156,6 +160,7 @@ private:
     InspectorPanel* m_inspector = nullptr;
     ScenesPanel* m_scenes = nullptr;
     SceneSettingsPanel* m_sceneSettings = nullptr;
+    TransitionPanel* m_transitionPanel = nullptr;
     /// The kinds of tab, each with a context of its own.
     enum class TabKind { Flow, Scene, Presets };
     std::optional<TabKind> m_panelsFor;  ///< The kind of tab the panels show for.

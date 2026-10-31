@@ -19,9 +19,11 @@ QStringList findProjectFilesIn(const QDir& directory)
             found << name;
         }
     }
-    const QDir presets(directory.filePath(QStringLiteral("presets")));
-    for (const QString& name : presets.entryList({JSON_FILTER}, QDir::Files, QDir::Name)) {
-        found << QStringLiteral("presets/") + name;
+    for (const QString& folder : {QStringLiteral("presets"), QStringLiteral("transitions")}) {
+        const QDir files(directory.filePath(folder));
+        for (const QString& name : files.entryList({JSON_FILTER}, QDir::Files, QDir::Name)) {
+            found << folder + u'/' + name;
+        }
     }
     const QDir scenes(directory.filePath(QStringLiteral("scenes")));
     for (const QString& scene : scenes.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {

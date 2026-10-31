@@ -1,0 +1,17 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Dither",
+  "description": "The arriving scene appears through an ordered dither pattern.",
+  "options": [
+    {
+      "name": "block_size",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 4096,
+      "default": 1,
+      "description": "The pattern's dot, in screen pixels"
+    }
+  ]
+}

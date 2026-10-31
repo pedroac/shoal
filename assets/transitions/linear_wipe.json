@@ -1,0 +1,23 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Linear Wipe",
+  "description": "A straight edge sweeps across the screen, revealing the arriving scene.",
+  "options": [
+    {
+      "name": "direction",
+      "type": "string",
+      "choices": ["left", "right", "up", "down"],
+      "default": "left",
+      "description": "The way the edge moves"
+    },
+    {
+      "name": "softness",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "description": "The edge: 0 is hard, 1 as wide as the screen"
+    }
+  ]
+}

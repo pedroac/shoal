@@ -1,0 +1,20 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Fade",
+  "description": "The leaving scene fades to a color, then the arriving one fades in from it.",
+  "options": [
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#000000",
+      "description": "The color the screen goes through"
+    },
+    {
+      "name": "hold",
+      "type": "time",
+      "default": 0,
+      "description": "How long the screen stays that color, within the duration"
+    }
+  ]
+}

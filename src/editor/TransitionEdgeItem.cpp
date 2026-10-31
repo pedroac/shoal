@@ -8,6 +8,8 @@
 #include <QtMath>
 #include <limits>
 
+#include "core/ProjectDocument.h"
+#include "core/TransitionTypes.h"
 #include "editor/FlowScene.h"
 #include "editor/SceneNodeItem.h"
 
@@ -74,6 +76,17 @@ void TransitionEdgeItem::setTransition(const core::Transition& transition, doubl
     if (!transition.trigger.requirements.isEmpty()) {
         tip << tr("Requires: %1")
                    .arg(transition.trigger.requirements.join(QStringLiteral(", ")).toHtmlEscaped());
+    }
+    if (transition.effect) {
+        const core::Project& project = m_flowScene.document().project();
+        const QMap<QString, core::TransitionType> types = core::availableTransitionTypes(project);
+        const auto type = types.constFind(transition.effect->type);
+        const std::optional<core::TransitionTypeDefinition> definition =
+            type != types.cend() ? core::readTransitionType(type.key(), *type).definition
+                                 : std::nullopt;
+        tip << tr("Effect: %1, %2 ms")
+                   .arg((definition ? definition->name : transition.effect->type).toHtmlEscaped())
+                   .arg(transition.effect->durationMs);
     }
     setToolTip(tip.join(QStringLiteral("<br>")));
     updateGeometry();

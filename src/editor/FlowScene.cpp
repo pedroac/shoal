@@ -204,6 +204,17 @@ void FlowScene::setSceneSettings(const QString& sceneId, core::Size size,
         std::make_unique<core::SetSceneSettingsCommand>(m_document, sceneId, size, fit, text));
 }
 
+void FlowScene::setTransitionEffect(const QString& transitionId,
+                                    const std::optional<core::Effect>& effect)
+{
+    const Transition* transition = m_document.findTransition(transitionId);
+    if (!transition || transition->effect == effect) {
+        return;
+    }
+    m_document.commands().push(std::make_unique<core::SetTransitionEffectCommand>(
+        m_document, transitionId, effect, tr("Set the effect of transition %1").arg(transitionId)));
+}
+
 QString FlowScene::addTransition(const QString& from, const QString& to)
 {
     Transition transition;

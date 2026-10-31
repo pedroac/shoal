@@ -36,6 +36,7 @@
 #include "editor/SceneView.h"
 #include "editor/ScenesPanel.h"
 #include "editor/Splitter.h"
+#include "editor/TransitionPanel.h"
 #include "editor/WorkspaceTabs.h"
 
 namespace shoal::editor {
@@ -93,6 +94,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_contextPanel = new QStackedWidget(this);
     m_contextPanel->setObjectName(QStringLiteral("contextPanel"));
     m_contextPanel->addWidget(m_sceneSettings);
+    m_transitionPanel = new TransitionPanel(this);
+    m_transitionPanel->setObjectName(QStringLiteral("transitionPanel"));
+    m_contextPanel->addWidget(m_transitionPanel);
     m_contextPanel->addWidget(m_entityPanel);
     m_sideWidths = {PROJECT_PANEL_WIDTH, CONTEXT_PANEL_WIDTH};
     // Until a project's tabs hold them, or they'd show in the window's corner.
@@ -328,6 +332,7 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     setPanelCanvas(nullptr);
     m_scenes->setFlowScene(nullptr);
     m_sceneSettings->setFlowScene(nullptr);
+    m_transitionPanel->setFlowScene(nullptr);
     m_inspector->setFlowScene(nullptr);
     m_presets->setDocument(nullptr);
     if (m_tabs) {
@@ -368,6 +373,7 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         m_flowScene = std::make_unique<FlowScene>(*m_document);
         m_scenes->setFlowScene(m_flowScene.get());
         m_sceneSettings->setFlowScene(m_flowScene.get());
+        m_transitionPanel->setFlowScene(m_flowScene.get());
         m_inspector->setFlowScene(m_flowScene.get());
         m_tabs = new WorkspaceTabs(this);
         m_tabs->setObjectName(QStringLiteral("workspaceTabs"));
@@ -414,6 +420,8 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         connect(&commands, &core::CommandStack::cleanChanged, this, &MainWindow::updateTitle);
         connect(m_flowScene.get(), &QGraphicsScene::selectionChanged, this,
                 &MainWindow::updateActions);
+        connect(m_flowScene.get(), &QGraphicsScene::selectionChanged, this,
+                &MainWindow::updateFlowContext);
         connect(m_document.get(), &core::ProjectDocument::startSceneChanged, this,
                 &MainWindow::updateActions);
         connect(m_document.get(), &core::ProjectDocument::changed, this, &MainWindow::updateAssets);
@@ -566,8 +574,12 @@ void MainWindow::updatePanels()
         m_sceneList = m_projectPanel->currentWidget();
     }
     m_panelsFor = kind;
-    m_contextPanel->setCurrentWidget(kind == TabKind::Flow ? static_cast<QWidget*>(m_sceneSettings)
-                                                           : m_entityPanel);
+    if (kind == TabKind::Flow) {
+        updateFlowContext();
+    }
+    else {
+        m_contextPanel->setCurrentWidget(m_entityPanel);
+    }
     // The lists the tab works with: the scenes on the flow, what to place on a scene or a
     // preset. A scene comes back to the one the user chose last on a scene.
     QWidget* current = kind == TabKind::Flow      ? static_cast<QWidget*>(m_scenes)
@@ -581,6 +593,16 @@ void MainWindow::updatePanels()
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_scenes), flow);
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_presets), !flow);
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_assetBrowser), !flow);
+}
+
+void MainWindow::updateFlowContext()
+{
+    if (m_panelsFor != TabKind::Flow) {
+        return;
+    }
+    m_contextPanel->setCurrentWidget(m_transitionPanel->transitionId().isEmpty()
+                                         ? static_cast<QWidget*>(m_sceneSettings)
+                                         : m_transitionPanel);
 }
 
 void MainWindow::updateAssets()

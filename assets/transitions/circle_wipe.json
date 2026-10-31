@@ -1,0 +1,32 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Circle Wipe",
+  "description": "A circle grows from a point until the arriving scene fills the screen.",
+  "options": [
+    {
+      "name": "center_x",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.5,
+      "description": "Where the circle grows from, across the screen: 0 is the left edge, 1 the right"
+    },
+    {
+      "name": "center_y",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0.5,
+      "description": "Where the circle grows from, down the screen: 0 is the top edge, 1 the bottom"
+    },
+    {
+      "name": "softness",
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "description": "The edge: 0 is hard, 1 as wide as the screen"
+    }
+  ]
+}

@@ -30,6 +30,8 @@ add_library(shoal_core STATIC
     core/SceneCommands.h
     core/SceneTree.cpp
     core/SceneTree.h
+    core/TransitionTypes.cpp
+    core/TransitionTypes.h
     core/Version.cpp
     core/Version.h
 )
@@ -38,6 +40,15 @@ target_include_directories(shoal_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(shoal_core PUBLIC Qt6::Core)
 target_compile_definitions(shoal_core PRIVATE SHOAL_VERSION_STRING="${SHOAL_VERSION_TAG}")
 shoal_set_warnings(shoal_core)
+
+# The built-in transition types: every file in assets/transitions, and their previews.
+file(GLOB shoal_transition_types CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/assets/transitions/*.json"
+    "${PROJECT_SOURCE_DIR}/assets/transitions/*.gif")
+qt_add_resources(shoal_core "transition_types"
+    PREFIX "/shoal/transitions"
+    BASE "${PROJECT_SOURCE_DIR}/assets/transitions"
+    FILES ${shoal_transition_types})
 
 # assets: sprat sheets and their atlases, through sprat-lib.
 add_library(shoal_assets STATIC
@@ -112,6 +123,8 @@ add_library(shoal_editor STATIC
     editor/Thumbnails.h
     editor/TextLayout.cpp
     editor/TextLayout.h
+    editor/TransitionPanel.cpp
+    editor/TransitionPanel.h
     editor/TileGridOverlay.cpp
     editor/TileGridOverlay.h
     editor/TransformHandle.cpp

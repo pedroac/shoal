@@ -8,6 +8,7 @@
 #include "core/FlowCommands.h"
 #include "core/ProjectDocument.h"
 #include "core/ProjectTemplates.h"
+#include "core/TransitionTypes.h"
 
 using namespace shoal::core;
 
@@ -207,6 +208,33 @@ private slots:
         document.commands().undo();
         QCOMPARE(document.project(), before);
         QCOMPARE(changed.count(), 2);
+    }
+
+    void setsATransitionsEffect()
+    {
+        ProjectDocument document(fixtureProject());
+        const Project before = document.project();
+        const QString id = QStringLiteral("l1_to_l2");
+        QSignalSpy changed(&document, &ProjectDocument::transitionChanged);
+        const Effect shatter = makeEffect(
+            QStringLiteral("shatter"),
+            *readTransitionType(QStringLiteral("shatter"),
+                                builtInTransitionTypes().value(QStringLiteral("shatter")))
+                 .definition);
+        document.commands().push(std::make_unique<SetTransitionEffectCommand>(
+            document, id, shatter, QStringLiteral("Shatter")));
+        QCOMPARE(document.findTransition(id)->effect, std::optional(shatter));
+        QCOMPARE(changed.count(), 1);
+        QCOMPARE(changed.first().first().toString(), id);
+        // The rest of the transition stays.
+        QCOMPARE(document.findTransition(id)->trigger, before.flow.transitions.at(2).trigger);
+
+        document.commands().push(std::make_unique<SetTransitionEffectCommand>(
+            document, id, std::nullopt, QStringLiteral("None")));
+        QVERIFY(!document.findTransition(id)->effect);
+        document.commands().undo();
+        document.commands().undo();
+        QCOMPARE(document.project(), before);
     }
 
     void savingMarksTheHistoryClean()

@@ -5,6 +5,7 @@
 #include "core/ProjectCodec.h"
 #include "core/ProjectTemplates.h"
 #include "core/SceneTree.h"
+#include "core/TransitionTypes.h"
 
 using namespace shoal::core;
 
@@ -455,6 +456,37 @@ private slots:
         QCOMPARE(*again.project, *parsed.project);
     }
 
+    void readsAndWritesTransitionTypes()
+    {
+        ProjectFiles files = minimalProject();
+        files[paths::transitionType(QStringLiteral("ripple"))] = QByteArray(R"(
+            {"format": "shoal-transition", "version": 1, "name": "Ripple",
+             "preview": "ripple.gif", "options": [{"name": "rings", "type": "number"}],
+             "later": true})");
+        files[paths::FLOW] = flowWithTransition(R"(
+            {"id": "t", "from": "a", "to": "b", "effect": {"type": "ripple", "duration_ms": 300,
+             "params": {"rings": "not a number", "seed": 7}}})");
+        const ParseResult parsed = parseProject(files);
+        QVERIFY2(parsed.project, qPrintable(errorStrings(parsed.errors).join(u'\n')));
+        // Kept as written, and read when used.
+        const TransitionType& ripple =
+            parsed.project->transitionTypes.value(QStringLiteral("ripple"));
+        QCOMPARE(ripple.content.value(QStringLiteral("later")), QJsonValue(true));
+        QCOMPARE(readTransitionType(QStringLiteral("ripple"), ripple).definition->preview,
+                 QStringLiteral("ripple.gif"));
+        // An effect's values are the engine's: they load whatever they are.
+        const Effect& effect = *parsed.project->flow.transitions.at(0).effect;
+        QCOMPARE(effect.params.value(QStringLiteral("rings")),
+                 QJsonValue(QStringLiteral("not a number")));
+
+        const ProjectFiles written = serializeProject(*parsed.project);
+        QVERIFY(written.contains(paths::transitionType(QStringLiteral("ripple"))));
+        QVERIFY(isProjectFile(paths::transitionType(QStringLiteral("ripple"))));
+        const ParseResult again = parseProject(written);
+        QVERIFY(again.project);
+        QCOMPARE(*again.project, *parsed.project);
+    }
+
     void readsAndWritesAudio()
     {
         ProjectFiles files = minimalProject();
@@ -808,6 +840,15 @@ private slots:
                    R"({"id": "t", "from": "a", "to": "b", "effect": {"type": "fade", "duration_ms": -1}})")
             << "flow.json: transitions[0].effect.duration_ms: expected an integer from 0 to "
                "2147483647, found -1";
+        QTest::newRow("transition type format")
+            << paths::transitionType(QStringLiteral("ripple"))
+            << QByteArray(R"({"format": "shoal-preset", "version": 1})")
+            << R"(transitions/ripple.json: format: expected "shoal-transition", found "shoal-preset")";
+        QTest::newRow("transition type id")
+            << QStringLiteral("transitions/two words.json")
+            << QByteArray(R"({"format": "shoal-transition", "version": 1})")
+            << "transitions/two words.json: \"two words\" is not a valid transition type id (use "
+               "letters, digits, _ and -, starting with a letter or _)";
         QTest::newRow("state key")
             << paths::FLOW
             << QByteArray(R"({"format": "shoal-flow", "version": 1, "state": ["hp"]})")

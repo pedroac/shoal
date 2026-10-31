@@ -1,0 +1,15 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Screen Scroll",
+  "description": "Both scenes scroll together, as if the camera moved to the next screen.",
+  "options": [
+    {
+      "name": "direction",
+      "type": "string",
+      "choices": ["left", "right", "up", "down"],
+      "default": "left",
+      "description": "The way the scenes move: left brings the arriving one in from the right"
+    }
+  ]
+}

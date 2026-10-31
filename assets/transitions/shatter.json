@@ -1,0 +1,17 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Shatter",
+  "description": "The leaving scene breaks into shards that fall away, uncovering the arriving one.",
+  "options": [
+    {
+      "name": "pieces",
+      "type": "number",
+      "integer": true,
+      "min": 2,
+      "max": 10000,
+      "default": 24,
+      "description": "How many shards the leaving scene breaks into"
+    }
+  ]
+}

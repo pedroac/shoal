@@ -1,0 +1,17 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Pixelate",
+  "description": "The leaving scene breaks into ever larger blocks, which resolve into the arriving one.",
+  "options": [
+    {
+      "name": "block_size",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 4096,
+      "default": 32,
+      "description": "The largest block, in screen pixels"
+    }
+  ]
+}

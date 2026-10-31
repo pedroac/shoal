@@ -23,6 +23,7 @@
 #include "core/ProjectDocument.h"
 #include "core/ProjectTemplates.h"
 #include "editor/AssetBrowserPanel.h"
+#include "editor/ColorButton.h"
 #include "editor/FlowScene.h"
 #include "editor/FlowView.h"
 #include "editor/Icons.h"
@@ -36,14 +37,17 @@
 #include "editor/SceneView.h"
 #include "editor/ScenesPanel.h"
 #include "editor/Splitter.h"
+#include "editor/TransitionPanel.h"
 #include "editor/WorkspaceTabs.h"
 
 using namespace shoal::core;
+using shoal::editor::ColorButton;
 using shoal::editor::FlowView;
 using shoal::editor::Icon;
 using shoal::editor::MainWindow;
 using shoal::editor::ProjectDropArea;
 using shoal::editor::SceneSettingsPanel;
+using shoal::editor::TransitionPanel;
 
 namespace {
 
@@ -385,6 +389,105 @@ private slots:
         emit list->itemActivated(window.scenesPanel()->sceneRow(QStringLiteral("level_1")));
         QVERIFY(window.currentSceneView());
         QCOMPARE(window.currentSceneView()->canvas().sceneId(), QStringLiteral("level_1"));
+    }
+
+    void transitionPanelEditsTheSelectedTransitionsEffect()
+    {
+        QTemporaryDir dir;
+        QVERIFY(copyFixture(dir));
+        // A type of the project's own, beside the built-in ones.
+        QVERIFY(support::writeTree(
+            dir.path(), {{paths::transitionType(QStringLiteral("ripple")),
+                          R"({"format": "shoal-transition", "version": 1, "name": "Ripple",
+                              "description": "Rings spread.",
+                              "options": [{"name": "rings", "type": "number", "integer": true,
+                                           "min": 1, "default": 3},
+                                          {"name": "mask", "type": "path"}]})"}}));
+        MainWindow window;
+        QVERIFY(window.openProject(dir.path()).isEmpty());
+        window.show();
+        TransitionPanel* panel = window.transitionPanel();
+        const QString id = QStringLiteral("l1_to_l2");
+        const auto effect = [&] { return window.document()->findTransition(id)->effect; };
+        const auto choose = [](QComboBox* box, const QString& data) {
+            const int index = box->findData(data);
+            QVERIFY(index >= 0);
+            box->setCurrentIndex(index);
+            emit box->activated(index);
+        };
+
+        // The scene settings until one transition is selected, and nothing else.
+        QCOMPARE(window.contextPanel()->currentWidget(),
+                 static_cast<QWidget*>(window.sceneSettingsPanel()));
+        window.flowScene()->select({}, {id});
+        QCOMPARE(window.contextPanel()->currentWidget(), static_cast<QWidget*>(panel));
+        QVERIFY(panel->summary()->text().contains(QStringLiteral("level_1 → level_2")));
+        QCOMPARE(panel->typeBox()->currentData().toString(), QStringLiteral("fade"));
+        QCOMPARE(panel->typeBox()->currentText(), QStringLiteral("Fade"));
+        QVERIFY(panel->typeBox()->findData(QStringLiteral("ripple")) >= 0);
+        QVERIFY(panel->description()->text().contains(QStringLiteral("fades")));
+        QVERIFY(panel->preview()->isHidden());  // the built-in types have none yet
+        QCOMPARE(panel->durationBox()->value(), 400.0);
+        QCOMPARE(panel->easingBox()->currentData().toString(), QStringLiteral("ease_out"));
+        QVERIFY(qobject_cast<ColorButton*>(panel->optionField(QStringLiteral("color"))));
+        auto* hold = qobject_cast<QDoubleSpinBox*>(panel->optionField(QStringLiteral("hold")));
+        QVERIFY(hold);
+        QCOMPARE(hold->value(), 0.0);  // its default, unset in the file
+        hold->setValue(150);
+        QCOMPARE(effect()->params.value(QStringLiteral("hold")), QJsonValue(150));
+
+        // Another type keeps the timing, and its fields are its options.
+        choose(panel->typeBox(), QStringLiteral("slide"));
+        QCOMPARE(effect()->type, QStringLiteral("slide"));
+        QCOMPARE(effect()->durationMs, 400);
+        QCOMPARE(effect()->params,
+                 (QJsonObject{{QStringLiteral("direction"), QStringLiteral("left")}}));
+        QVERIFY(!panel->optionField(QStringLiteral("color")));
+        auto* direction = qobject_cast<QComboBox*>(panel->optionField(QStringLiteral("direction")));
+        QVERIFY(direction);
+        direction->setCurrentIndex(direction->findText(QStringLiteral("up")));
+        emit direction->activated(direction->currentIndex());
+        QCOMPARE(effect()->params.value(QStringLiteral("direction")),
+                 QJsonValue(QStringLiteral("up")));
+        panel->durationBox()->setValue(250);
+        QCOMPARE(effect()->durationMs, 250);
+        choose(panel->easingBox(), QString());  // linear, written as none
+        QVERIFY(effect()->easing.isEmpty());
+        QCOMPARE(window.document()->commands().undoText(),
+                 QStringLiteral("Set the effect of transition l1_to_l2"));
+        window.document()->commands().undo();
+        QCOMPARE(panel->easingBox()->currentData().toString(), QStringLiteral("ease_out"));
+
+        // None takes the effect away; a type brings a new one.
+        choose(panel->typeBox(), QString());
+        QVERIFY(!effect());
+        QVERIFY(!panel->durationBox()->isEnabled());
+        QVERIFY(!panel->optionField(QStringLiteral("direction")));
+        choose(panel->typeBox(), QStringLiteral("ripple"));
+        QCOMPARE(effect()->type, QStringLiteral("ripple"));
+        QCOMPARE(effect()->params, (QJsonObject{{QStringLiteral("rings"), 3}}));
+        QCOMPARE(panel->description()->text(), QStringLiteral("Rings spread."));
+        auto* mask = panel->optionField(QStringLiteral("mask"))->findChild<QLineEdit*>();
+        QVERIFY(mask);
+        mask->setText(QStringLiteral("fx/rings.png"));
+        mask->setModified(true);
+        emit mask->editingFinished();
+        QCOMPARE(effect()->params.value(QStringLiteral("mask")),
+                 QJsonValue(QStringLiteral("fx/rings.png")));
+
+        // A type the project doesn't have is shown by its id, without options.
+        Effect iris;
+        iris.type = QStringLiteral("iris");
+        iris.durationMs = 300;
+        window.flowScene()->setTransitionEffect(id, iris);
+        QCOMPARE(panel->typeBox()->currentText(), QStringLiteral("iris (unknown)"));
+        QCOMPARE(panel->durationBox()->value(), 300.0);
+        QVERIFY(!panel->optionField(QStringLiteral("rings")));
+
+        // A scene selected too: its settings again.
+        window.flowScene()->select({QStringLiteral("level_1")}, {id});
+        QCOMPARE(window.contextPanel()->currentWidget(),
+                 static_cast<QWidget*>(window.sceneSettingsPanel()));
     }
 
     void sceneSettingsEditTheSelectedScene()

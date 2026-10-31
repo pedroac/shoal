@@ -22,10 +22,12 @@ const QString FORMAT_PROJECT = QStringLiteral("shoal-project");
 const QString FORMAT_FLOW = QStringLiteral("shoal-flow");
 const QString FORMAT_CLASSES = QStringLiteral("shoal-classes");
 const QString FORMAT_PRESET = QStringLiteral("shoal-preset");
+const QString FORMAT_TRANSITION_TYPE = QStringLiteral("shoal-transition");
 const QString FORMAT_SCENE = QStringLiteral("shoal-scene");
 const QString FORMAT_MODIFIER = QStringLiteral("shoal-modifier");
 
 const QRegularExpression PRESET_PATH(QStringLiteral("^presets/([^/]+)\\.json$"));
+const QRegularExpression TRANSITION_TYPE_PATH(QStringLiteral("^transitions/([^/]+)\\.json$"));
 const QRegularExpression SCENE_PATH(QStringLiteral("^scenes/([^/]+)/scene\\.json$"));
 const QRegularExpression MODIFIER_PATH(QStringLiteral("^scenes/([^/]+)/modifiers/([^/]+)\\.json$"));
 const QRegularExpression COLOR(QStringLiteral("^#[0-9A-Fa-f]{6}$"));
@@ -1180,6 +1182,57 @@ QByteArray writeClasses(const ClassRegistry& registry)
     return writer.finish();
 }
 
+/// Writes the members of `object` named in `order` in that order, then the others.
+void writeOrdered(JsonWriter& writer, QJsonObject object, std::initializer_list<QStringView> order)
+{
+    for (const QStringView key : order) {
+        if (object.contains(key)) {
+            writer.key(key);
+            writer.value(object.take(key));
+        }
+    }
+    writeExtras(writer, object);
+}
+
+/// As people write them: what the type is first, and each option's name and type.
+QByteArray writeTransitionType(const TransitionType& type)
+{
+    JsonWriter writer;
+    writer.beginObject();
+    writeHeader(writer, FORMAT_TRANSITION_TYPE, TRANSITION_TYPE_FORMAT_VERSION);
+    QJsonObject content = type.content;
+    const QJsonValue options = content.take(QStringLiteral("options"));
+    for (const QStringView key : {u"name", u"description", u"preview"}) {
+        if (content.contains(key)) {
+            writer.key(key);
+            writer.value(content.take(key));
+        }
+    }
+    if (options.isArray()) {
+        writer.key(u"options");
+        writer.beginArray();
+        for (const QJsonValue& option : options.toArray()) {
+            if (!option.isObject()) {
+                writer.value(option);
+                continue;
+            }
+            writer.beginObject();
+            writeOrdered(writer, option.toObject(),
+                         {u"name", u"type", u"integer", u"choices", u"min", u"max", u"default",
+                          u"description"});
+            writer.endObject();
+        }
+        writer.endArray();
+    }
+    else if (!options.isUndefined()) {
+        writer.key(u"options");
+        writer.value(options);
+    }
+    writeExtras(writer, content);
+    writer.endObject();
+    return writer.finish();
+}
+
 QByteArray writePreset(const Preset& preset)
 {
     JsonWriter writer;
@@ -1529,13 +1582,19 @@ QString preset(const QString& presetId)
     return QStringLiteral("presets/%1.json").arg(presetId);
 }
 
+QString transitionType(const QString& typeId)
+{
+    return QStringLiteral("transitions/%1.json").arg(typeId);
+}
+
 }  // namespace paths
 
 bool isProjectFile(QStringView path)
 {
     return path == paths::MANIFEST || path == paths::FLOW || path == paths::CLASSES ||
-           PRESET_PATH.matchView(path).hasMatch() || SCENE_PATH.matchView(path).hasMatch() ||
-           MODIFIER_PATH.matchView(path).hasMatch();
+           PRESET_PATH.matchView(path).hasMatch() ||
+           TRANSITION_TYPE_PATH.matchView(path).hasMatch() ||
+           SCENE_PATH.matchView(path).hasMatch() || MODIFIER_PATH.matchView(path).hasMatch();
 }
 
 ParseResult parseProject(const ProjectFiles& files)
@@ -1586,6 +1645,19 @@ ParseResult parseProject(const ProjectFiles& files)
             }
             if (layerIds) {
                 format1Layers.insert(sceneId, *layerIds);
+            }
+        }
+        else if (const auto typeMatch = TRANSITION_TYPE_PATH.match(path); typeMatch.hasMatch()) {
+            const QString typeId = typeMatch.captured(1);
+            if (!checkPathId(path, typeId, QStringLiteral("transition type"), errors)) {
+                continue;
+            }
+            auto type = readFile<TransitionType>(path, bytes, errors, [](ObjectReader& reader) {
+                readHeader(reader, FORMAT_TRANSITION_TYPE, TRANSITION_TYPE_FORMAT_VERSION);
+                return TransitionType{reader.extras()};
+            });
+            if (type) {
+                project.transitionTypes.insert(typeId, std::move(*type));
             }
         }
         else if (const auto presetMatch = PRESET_PATH.match(path); presetMatch.hasMatch()) {
@@ -1643,6 +1715,9 @@ ProjectFiles serializeProject(const Project& project)
     }
     for (auto it = project.presets.begin(); it != project.presets.end(); ++it) {
         files[paths::preset(it.key())] = writePreset(it.value());
+    }
+    for (auto it = project.transitionTypes.begin(); it != project.transitionTypes.end(); ++it) {
+        files[paths::transitionType(it.key())] = writeTransitionType(it.value());
     }
     for (auto scene = project.scenes.begin(); scene != project.scenes.end(); ++scene) {
         files[paths::scene(scene.key())] = writeScene(scene.value());

@@ -1,0 +1,15 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Slide",
+  "description": "The arriving scene slides in over the leaving one.",
+  "options": [
+    {
+      "name": "direction",
+      "type": "string",
+      "choices": ["left", "right", "up", "down"],
+      "default": "left",
+      "description": "The way the arriving scene moves: left brings it in from the right"
+    }
+  ]
+}

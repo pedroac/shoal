@@ -133,4 +133,23 @@ private:
     Transition m_transition;
 };
 
+/// Sets a transition's effect, or takes it away (null).
+class SetTransitionEffectCommand : public Command {
+public:
+    SetTransitionEffectCommand(ProjectDocument& document, QString id, std::optional<Effect> effect,
+                               QString text);
+    QString text() const override { return m_text; }
+    void redo() override;
+    void undo() override;
+
+private:
+    void apply(const std::optional<Effect>& effect);
+
+    ProjectDocument& m_document;
+    QString m_id;
+    QString m_text;
+    std::optional<Effect> m_before;
+    std::optional<Effect> m_after;
+};
+
 }  // namespace shoal::core

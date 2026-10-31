@@ -1,0 +1,20 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Flashbang",
+  "description": "The screen flashes to a color, which fades away over the arriving scene.",
+  "options": [
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#ffffff",
+      "description": "The color of the flash"
+    },
+    {
+      "name": "hold",
+      "type": "time",
+      "default": 100,
+      "description": "How long the flash stays before it fades, within the duration"
+    }
+  ]
+}

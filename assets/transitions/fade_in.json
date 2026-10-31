@@ -1,0 +1,14 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Fade In",
+  "description": "The screen cuts to a color, then the arriving scene fades in from it.",
+  "options": [
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#000000",
+      "description": "The color the arriving scene fades in from"
+    }
+  ]
+}

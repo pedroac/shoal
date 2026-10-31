@@ -250,4 +250,32 @@ void RemoveTransitionCommand::undo()
     m_document.insertTransition(m_transition);
 }
 
+// --- SetTransitionEffectCommand ---
+
+SetTransitionEffectCommand::SetTransitionEffectCommand(ProjectDocument& document, QString id,
+                                                       std::optional<Effect> effect, QString text)
+    : m_document(document), m_id(std::move(id)), m_text(std::move(text)), m_after(std::move(effect))
+{
+    const Transition* transition = m_document.findTransition(m_id);
+    Q_ASSERT(transition);
+    m_before = transition->effect;
+}
+
+void SetTransitionEffectCommand::redo()
+{
+    apply(m_after);
+}
+
+void SetTransitionEffectCommand::undo()
+{
+    apply(m_before);
+}
+
+void SetTransitionEffectCommand::apply(const std::optional<Effect>& effect)
+{
+    Transition transition = *m_document.findTransition(m_id);
+    transition.effect = effect;
+    m_document.setTransition(std::move(transition));
+}
+
 }  // namespace shoal::core

@@ -1,0 +1,16 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Camera Push",
+  "description": "The camera pushes in on the leaving scene as it gives way to the arriving one.",
+  "options": [
+    {
+      "name": "zoom",
+      "type": "number",
+      "min": 1,
+      "max": 100,
+      "default": 2,
+      "description": "How far the camera pushes in, as a scale"
+    }
+  ]
+}

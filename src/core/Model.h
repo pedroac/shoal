@@ -29,6 +29,7 @@ inline constexpr int FORMAT_VERSION = 1;
 inline constexpr int MANIFEST_FORMAT_VERSION = 2;
 inline constexpr int SCENE_FORMAT_VERSION = 3;
 inline constexpr int PRESET_FORMAT_VERSION = 3;
+inline constexpr int TRANSITION_TYPE_FORMAT_VERSION = 1;
 
 struct Point {
     double x = 0;
@@ -77,6 +78,10 @@ enum class VideoMode { Stretch, Fit, Fill };
 enum class TransitionMode { Replace, Push, PushModifier, Pop };
 enum class Underlying { Paused, Running, Hidden };
 enum class RestoreMode { Commit, Restore };
+/// The options of a transition type (see TransitionTypes.h), as its file names them.
+enum class OptionType { Time, Number, String, Path, Color };
+/// The easings the editor offers for an effect; a file may name others.
+enum class Easing { Linear, EaseIn, EaseOut, EaseInOut };
 /// The kinds of asset a project declares, each under a key of its own in `assets`.
 enum class AssetKind { Sheet, Image, Font, Audio, Video };
 
@@ -144,10 +149,10 @@ struct Trigger {
 };
 
 struct Effect {
-    QString type;
+    QString type;  ///< The transition type's id (see TransitionTypes.h).
     int durationMs = 0;
-    QString easing;  ///< Empty means the default, linear.
-    QJsonObject params;
+    QString easing;      ///< Empty means the default, linear.
+    QJsonObject params;  ///< The values of its type's options, by name, and any others.
     QJsonObject extras;
     bool operator==(const Effect&) const = default;
 };
@@ -203,6 +208,14 @@ struct ClassRegistry {
 struct Preset {
     QJsonObject content;  ///< Everything but `format` and `version`.
     bool operator==(const Preset&) const = default;
+};
+
+// --- transitions/<id>.json ---
+
+/// A transition type, kept as it is written, and read when it is used (see TransitionTypes.h).
+struct TransitionType {
+    QJsonObject content;  ///< Everything but `format` and `version`.
+    bool operator==(const TransitionType&) const = default;
 };
 
 // --- scenes/<id>/scene.json ---
@@ -431,7 +444,8 @@ struct Project {
     Flow flow;
     std::optional<ClassRegistry> classes;  ///< Absent when the project has no classes.json.
     QMap<QString, Preset> presets;
-    QMap<QString, Scene> scenes;  ///< Scene id (its folder name) -> scene.
+    QMap<QString, TransitionType> transitionTypes;  ///< The project's own, by id.
+    QMap<QString, Scene> scenes;                    ///< Scene id (its folder name) -> scene.
     bool operator==(const Project&) const = default;
 };
 
@@ -465,6 +479,8 @@ std::span<const EnumName<Lock>> enumNames(Lock);
 std::span<const EnumName<TransitionMode>> enumNames(TransitionMode);
 std::span<const EnumName<Underlying>> enumNames(Underlying);
 std::span<const EnumName<RestoreMode>> enumNames(RestoreMode);
+std::span<const EnumName<OptionType>> enumNames(OptionType);
+std::span<const EnumName<Easing>> enumNames(Easing);
 /// As the keys of `assets`: `sheets`, `images`, `fonts`, `audio`, `video`.
 std::span<const EnumName<AssetKind>> enumNames(AssetKind);
 

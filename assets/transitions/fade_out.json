@@ -1,0 +1,14 @@
+{
+  "format": "shoal-transition",
+  "version": 1,
+  "name": "Fade Out",
+  "description": "The leaving scene fades to a color, then the screen cuts to the arriving one.",
+  "options": [
+    {
+      "name": "color",
+      "type": "color",
+      "default": "#000000",
+      "description": "The color the leaving scene fades to"
+    }
+  ]
+}
