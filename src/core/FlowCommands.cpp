@@ -278,4 +278,47 @@ void SetTransitionEffectCommand::apply(const std::optional<Effect>& effect)
     m_document.setTransition(std::move(transition));
 }
 
+// --- SetTransitionCommand ---
+
+SetTransitionCommand::SetTransitionCommand(ProjectDocument& document, QString id,
+                                           Transition transition, QString text)
+    : m_document(document), m_text(std::move(text)), m_after(std::move(transition))
+{
+    const Transition* before = m_document.findTransition(id);
+    Q_ASSERT(before);
+    Q_ASSERT(m_after.id == id || !m_document.findTransition(m_after.id));
+    m_before = *before;
+}
+
+void SetTransitionCommand::redo()
+{
+    m_document.replaceTransition(m_before.id, m_after);
+}
+
+void SetTransitionCommand::undo()
+{
+    m_document.replaceTransition(m_after.id, m_before);
+}
+
+// --- SetStateKeysCommand ---
+
+SetStateKeysCommand::SetStateKeysCommand(ProjectDocument& document, std::vector<StateKey> keys,
+                                         QString text)
+    : m_document(document),
+      m_text(std::move(text)),
+      m_before(document.project().flow.state),
+      m_after(std::move(keys))
+{
+}
+
+void SetStateKeysCommand::redo()
+{
+    m_document.setStateKeys(m_after);
+}
+
+void SetStateKeysCommand::undo()
+{
+    m_document.setStateKeys(m_before);
+}
+
 }  // namespace shoal::core

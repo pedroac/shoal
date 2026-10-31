@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Circle Wipe",
   "description": "A circle grows from a point until the arriving scene fills the screen.",
+  "preview": "circle_wipe.gif",
   "options": [
     {
       "name": "center_x",

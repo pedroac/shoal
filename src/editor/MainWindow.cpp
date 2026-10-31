@@ -37,6 +37,8 @@
 #include "editor/ScenesPanel.h"
 #include "editor/Splitter.h"
 #include "editor/TransitionPanel.h"
+#include "editor/TransitionTypePanel.h"
+#include "editor/TransitionTypesPanel.h"
 #include "editor/WorkspaceTabs.h"
 
 namespace shoal::editor {
@@ -82,6 +84,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_projectPanel->addTab(m_scenes, icon(Icon::Scene), tr("Scenes"));
     m_projectPanel->addTab(m_presets, icon(Icon::Preset), tr("Presets"));
     m_projectPanel->addTab(m_assetBrowser, icon(Icon::Assets), tr("Assets"));
+    m_transitionTypes = new TransitionTypesPanel(this);
+    m_transitionTypes->setObjectName(QStringLiteral("transitionTypesPanel"));
+    m_projectPanel->addTab(m_transitionTypes, icon(Icon::Transition), tr("Transitions"));
     m_sceneSettings = new SceneSettingsPanel(this);
     m_sceneTree = new SceneTreePanel(this);
     m_inspector = new InspectorPanel(this);
@@ -97,6 +102,24 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_transitionPanel = new TransitionPanel(this);
     m_transitionPanel->setObjectName(QStringLiteral("transitionPanel"));
     m_contextPanel->addWidget(m_transitionPanel);
+    m_transitionTypePanel = new TransitionTypePanel(this);
+    m_transitionTypePanel->setObjectName(QStringLiteral("transitionTypePanel"));
+    m_contextPanel->addWidget(m_transitionTypePanel);
+    // On the flow, the context panel shows what was chosen last: a type in the list, or
+    // what the flow selects.
+    connect(m_transitionTypes, &TransitionTypesPanel::currentTypeChanged, this,
+            [this](const QString& typeId) {
+                m_transitionTypePanel->setType(typeId);
+                m_flowContextIsType = !typeId.isEmpty();
+                updateFlowContext();
+            });
+    connect(m_projectPanel, &QTabWidget::currentChanged, this, [this] {
+        if (m_panelsFor == TabKind::Flow) {
+            m_flowContextIsType = m_projectPanel->currentWidget() == m_transitionTypes &&
+                                  !m_transitionTypes->currentType().isEmpty();
+            updateFlowContext();
+        }
+    });
     m_contextPanel->addWidget(m_entityPanel);
     m_sideWidths = {PROJECT_PANEL_WIDTH, CONTEXT_PANEL_WIDTH};
     // Until a project's tabs hold them, or they'd show in the window's corner.
@@ -335,6 +358,8 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     m_transitionPanel->setFlowScene(nullptr);
     m_inspector->setFlowScene(nullptr);
     m_presets->setDocument(nullptr);
+    m_transitionTypes->setDocument(nullptr);
+    m_transitionTypePanel->setDocument(nullptr);
     if (m_tabs) {
         disconnect(m_tabs, nullptr, this, nullptr);
         for (SceneView* view : sceneViews()) {
@@ -368,6 +393,8 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
     m_document = std::move(document);
     updateAssets();
     m_presets->setDocument(m_document.get());
+    m_transitionTypes->setDocument(m_document.get());
+    m_transitionTypePanel->setDocument(m_document.get());
 
     if (m_document) {
         m_flowScene = std::make_unique<FlowScene>(*m_document);
@@ -420,8 +447,12 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         connect(&commands, &core::CommandStack::cleanChanged, this, &MainWindow::updateTitle);
         connect(m_flowScene.get(), &QGraphicsScene::selectionChanged, this,
                 &MainWindow::updateActions);
-        connect(m_flowScene.get(), &QGraphicsScene::selectionChanged, this,
-                &MainWindow::updateFlowContext);
+        connect(m_flowScene.get(), &QGraphicsScene::selectionChanged, this, [this] {
+            if (!m_flowScene->selectedItems().isEmpty() || !m_flowScene->selectedExit().isEmpty()) {
+                m_flowContextIsType = false;
+            }
+            updateFlowContext();
+        });
         connect(m_document.get(), &core::ProjectDocument::startSceneChanged, this,
                 &MainWindow::updateActions);
         connect(m_document.get(), &core::ProjectDocument::changed, this, &MainWindow::updateAssets);
@@ -591,6 +622,7 @@ void MainWindow::updatePanels()
     m_projectPanel->setCurrentWidget(current);
     const bool flow = kind == TabKind::Flow;
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_scenes), flow);
+    m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_transitionTypes), flow);
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_presets), !flow);
     m_projectPanel->setTabVisible(m_projectPanel->indexOf(m_assetBrowser), !flow);
 }
@@ -598,6 +630,10 @@ void MainWindow::updatePanels()
 void MainWindow::updateFlowContext()
 {
     if (m_panelsFor != TabKind::Flow) {
+        return;
+    }
+    if (m_flowContextIsType && !m_transitionTypePanel->type().isEmpty()) {
+        m_contextPanel->setCurrentWidget(m_transitionTypePanel);
         return;
     }
     m_contextPanel->setCurrentWidget(m_transitionPanel->transitionId().isEmpty()

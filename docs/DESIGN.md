@@ -287,8 +287,9 @@ A transition type is a file, `transitions/<id>.json`, named after its id. Shoal 
 Fade, Fade In, Fade Out, Cross-Dissolve, Flashbang, Screen Scroll, Slide, Camera Push,
 Linear Wipe, Circle Wipe, Pattern Mask, Pixelate, Dissolve, Dither, Shatter and Glitch,
 as files of its own (`assets/transitions` in its source, where adding a file adds a
-built-in type). A project adds its own in its `transitions/` folder, and one with a
-built-in type's id replaces it.
+built-in type). Their preview GIFs are drawn by `tools/make_transition_previews.py`,
+from a daytime scene to a dusk one, with each type's default options. A project adds
+its own in its `transitions/` folder, and one with a built-in type's id replaces it.
 
 ```jsonc
 // transitions/ripple.json
@@ -995,7 +996,10 @@ Problems panel warns.
     underneath stays. Edges between the same two scenes bend apart; an edge from a
     scene to itself loops above it.
   - Transitions that lead to no scene (`pop`, `push_modifier`, a missing scene)
-    are listed on the node they leave from.
+    are listed on the node they leave from. Clicking one's line selects that
+    transition (the line is highlighted), as clicking an edge does; selecting
+    anything else, or clicking nothing, unselects it. An edit that takes a
+    transition's edge away, or gives it one, keeps it selected.
   - Dragging from a node's port to another node adds a `replace` transition with
     no trigger yet, named `<from>_to_<to>`. The context menu adds one to any
     scene, including the same one.
@@ -1240,15 +1244,39 @@ Problems panel warns.
   - Entities are drawn with their effective tint.
   - Screen-space entities are listed but not drawn until the UI layout step.
 - **Transition panel:** selecting one transition, and nothing else, in the flow
-  shows it in the context panel: where it goes, and its effect, a type from the
-  project's transition types or none, its duration and easing, and a field for each
-  option the type takes, made from the type's file (a box for a time or a number,
-  a list for choices, a line for a string, a line with a file chooser for a path, a
-  swatch for a color). The type's description and preview GIF show under it. Each
-  edit is one undo step. A type the project doesn't have shows by its id, with its
-  duration and easing; its values are kept. The edge's tooltip names the effect.
-- **Transition editor:** trigger and requirements, the persisted state, and the
-  mapping of entities to marks.
+  shows all of it in the context panel, each edit one undo step:
+  - Its **id**, which a taken or invalid one can't replace (the panel says why).
+    Renamed, it stays selected.
+  - Its **mode**, and what the mode needs: the destination for replace and push
+    (the scene itself until another is chosen), what the scene underneath does for
+    push, the modifier for push_modifier, one of the scene's (the mode can't be
+    chosen for a scene without one). A mode drops what it doesn't need.
+  - Its **trigger**: the event, and the conditions it requires, separated by
+    commas.
+  - Its **effect**: a type from the project's transition types or none, its
+    duration and easing, and a field for each option the type takes, made from the
+    type's file (a box for a time or a number, a list for choices, a line for a
+    string, a line with a file chooser for a path, a swatch for a color). The type's
+    description and preview GIF show under it. A type the project doesn't have
+    shows by its id, with its duration and easing; its values are kept. The edge's
+    tooltip names the effect.
+  - What it **carries**: the state keys the flow declares, checked when carried (a
+    key carried but not declared is listed too), and a line that declares a new key
+    and carries it, in one step; and, for replace and push, the entities of the
+    scene it leaves, each onto a mark of the destination (an entity with only a
+    transform), added, moved to another mark or dropped.
+- **Transition types:** on the flow, the project panel has a Transitions tab
+  beside the scenes: every type, built-in and the project's, by name, a customized
+  one marked so. New adds a project type with no options, Duplicate copies one
+  (without its preview), and Remove takes a project type away, or reverts a
+  customized one. Choosing one shows its file in the context panel, until the flow
+  selects something: its id (the project's own types only; renaming one renames it
+  in the effects of that type), name, description and preview, and its options, a
+  list to add to, remove from and reorder, with the chosen one's name, type,
+  default, range, whole numbers and choices, as its type allows, and description. A
+  built-in type is read-only until Customize copies it into the project; Revert
+  goes back to Shoal's. Each edit is one undo step, and one that would make a file
+  the editor can't read is refused, with why.
 - **Modifier editor:** the host scene's canvas with the action list underneath.
   Ghosts show start and end positions; paths are drawn on the canvas.
 - **Rehearsal:** a play mode that steps through the flow and scrubs modifiers with

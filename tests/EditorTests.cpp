@@ -10,12 +10,15 @@
 #include <QListWidget>
 #include <QMenuBar>
 #include <QMimeData>
+#include <QMovie>
+#include <QPushButton>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 #include <QUrl>
 
 #include "Support.h"
@@ -38,6 +41,8 @@
 #include "editor/ScenesPanel.h"
 #include "editor/Splitter.h"
 #include "editor/TransitionPanel.h"
+#include "editor/TransitionTypePanel.h"
+#include "editor/TransitionTypesPanel.h"
 #include "editor/WorkspaceTabs.h"
 
 using namespace shoal::core;
@@ -48,6 +53,8 @@ using shoal::editor::MainWindow;
 using shoal::editor::ProjectDropArea;
 using shoal::editor::SceneSettingsPanel;
 using shoal::editor::TransitionPanel;
+using shoal::editor::TransitionTypePanel;
+using shoal::editor::TransitionTypesPanel;
 
 namespace {
 
@@ -171,9 +178,10 @@ private slots:
 
     void iconsTakeThePalettesColor()
     {
-        for (const Icon which : {Icon::Add, Icon::Remove, Icon::Filter, Icon::Flow, Icon::Scene,
-                                 Icon::Preset, Icon::Assets, Icon::MoveUp, Icon::MoveDown,
-                                 Icon::DragHandle, Icon::Drop, Icon::Error, Icon::Warning}) {
+        for (const Icon which :
+             {Icon::Add, Icon::Remove, Icon::Filter, Icon::Flow, Icon::Scene, Icon::Preset,
+              Icon::Assets, Icon::Transition, Icon::MoveUp, Icon::MoveDown, Icon::DragHandle,
+              Icon::Drop, Icon::Error, Icon::Warning}) {
             const QImage image = shoal::editor::icon(which).pixmap(QSize(32, 32)).toImage();
             QVERIFY2(!image.isNull(), qPrintable(QString::number(int(which))));
             bool drawn = false;
@@ -314,18 +322,20 @@ private slots:
         QVERIFY(qobject_cast<shoal::editor::Splitter*>(splitter));  // its handles show dots
         QCOMPARE(splitter->widget(0), static_cast<QWidget*>(project));
         QCOMPARE(splitter->widget(2), static_cast<QWidget*>(context));
-        QCOMPARE(project->count(), 3);
+        QCOMPARE(project->count(), 4);
         QCOMPARE(project->widget(0), static_cast<QWidget*>(window.scenesPanel()));
         QCOMPARE(project->widget(1), static_cast<QWidget*>(window.presetsPanel()));
         QCOMPARE(project->widget(2), static_cast<QWidget*>(window.assetBrowser()));
+        QCOMPARE(project->widget(3), static_cast<QWidget*>(window.transitionTypesPanel()));
 
         const auto shows = [project](QWidget* list) {
             return project->isTabVisible(project->indexOf(list));
         };
 
-        // The flow: only the scenes, and the selected scene's settings.
+        // The flow: the scenes and the transition types, and the selected scene's settings.
         QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.scenesPanel()));
         QVERIFY(shows(window.scenesPanel()));
+        QVERIFY(shows(window.transitionTypesPanel()));
         QVERIFY(!shows(window.presetsPanel()));
         QVERIFY(!shows(window.assetBrowser()));
         QCOMPARE(context->currentWidget(), static_cast<QWidget*>(window.sceneSettingsPanel()));
@@ -333,6 +343,7 @@ private slots:
         // A scene: what to place, the sheets first, and the entity tree over the inspector.
         window.openScene(QStringLiteral("level_1"));
         QVERIFY(!shows(window.scenesPanel()));
+        QVERIFY(!shows(window.transitionTypesPanel()));
         QVERIFY(shows(window.presetsPanel()));
         QVERIFY(shows(window.assetBrowser()));
         QCOMPARE(project->currentWidget(), static_cast<QWidget*>(window.assetBrowser()));
@@ -426,7 +437,10 @@ private slots:
         QCOMPARE(panel->typeBox()->currentText(), QStringLiteral("Fade"));
         QVERIFY(panel->typeBox()->findData(QStringLiteral("ripple")) >= 0);
         QVERIFY(panel->description()->text().contains(QStringLiteral("fades")));
-        QVERIFY(panel->preview()->isHidden());  // the built-in types have none yet
+        QVERIFY(!panel->preview()->isHidden());  // its GIF, playing
+        QVERIFY(panel->preview()->movie());
+        QVERIFY(panel->preview()->movie()->isValid());
+        QCOMPARE(panel->preview()->movie()->state(), QMovie::Running);
         QCOMPARE(panel->durationBox()->value(), 400.0);
         QCOMPARE(panel->easingBox()->currentData().toString(), QStringLiteral("ease_out"));
         QVERIFY(qobject_cast<ColorButton*>(panel->optionField(QStringLiteral("color"))));
@@ -467,6 +481,7 @@ private slots:
         QCOMPARE(effect()->type, QStringLiteral("ripple"));
         QCOMPARE(effect()->params, (QJsonObject{{QStringLiteral("rings"), 3}}));
         QCOMPARE(panel->description()->text(), QStringLiteral("Rings spread."));
+        QVERIFY(panel->preview()->isHidden());  // it has none
         auto* mask = panel->optionField(QStringLiteral("mask"))->findChild<QLineEdit*>();
         QVERIFY(mask);
         mask->setText(QStringLiteral("fx/rings.png"));
@@ -488,6 +503,220 @@ private slots:
         window.flowScene()->select({QStringLiteral("level_1")}, {id});
         QCOMPARE(window.contextPanel()->currentWidget(),
                  static_cast<QWidget*>(window.sceneSettingsPanel()));
+    }
+
+    void transitionPanelEditsTheWholeTransition()
+    {
+        QTemporaryDir dir;
+        QVERIFY(copyFixture(dir));
+        MainWindow window;
+        QVERIFY(window.openProject(dir.path()).isEmpty());
+        window.show();
+        TransitionPanel* panel = window.transitionPanel();
+        ProjectDocument& document = *window.document();
+        QString id = QStringLiteral("l1_to_l2");
+        const auto current = [&] { return *document.findTransition(id); };
+        const auto choose = [](QComboBox* box, const QString& data) {
+            const int index = box->findData(data);
+            QVERIFY(index >= 0);
+            box->setCurrentIndex(index);
+            emit box->activated(index);
+        };
+        const auto type = [](QLineEdit* field, const QString& text) {
+            field->setText(text);
+            field->setModified(true);
+            emit field->editingFinished();
+        };
+        window.flowScene()->select({}, {id});
+
+        // Its id: one taken is refused, with why; another renames it, still selected.
+        QCOMPARE(panel->idField()->text(), id);
+        type(panel->idField(), QStringLiteral("l1_pause"));
+        QVERIFY(panel->message().contains(QStringLiteral("l1_pause")));
+        QVERIFY(document.findTransition(id));
+        type(panel->idField(), QStringLiteral("west_door"));
+        QVERIFY(panel->message().isEmpty());
+        QVERIFY(!document.findTransition(id));
+        id = QStringLiteral("west_door");
+        QCOMPARE(window.flowScene()->selectedTransitionIds(), QStringList{id});
+        QCOMPARE(panel->transitionId(), id);
+
+        // Where it goes, by mode.
+        QCOMPARE(panel->toBox()->currentData().toString(), QStringLiteral("level_2"));
+        choose(panel->toBox(), QStringLiteral("options"));
+        QCOMPARE(current().to, QStringLiteral("options"));
+        document.commands().undo();
+        choose(panel->modeBox(), QStringLiteral("push"));
+        QCOMPARE(current().mode, TransitionMode::Push);
+        QVERIFY(panel->underlyingBox()->isVisible());
+        choose(panel->underlyingBox(), QStringLiteral("running"));
+        QCOMPARE(current().underlying, Underlying::Running);
+        choose(panel->modeBox(), QStringLiteral("pop"));
+        QVERIFY(current().to.isEmpty());
+        QVERIFY(!panel->toBox()->isVisible());
+        QVERIFY(!panel->carryButton()->isVisible());  // a pop lands on no marks
+        choose(panel->modeBox(), QStringLiteral("push_modifier"));
+        QCOMPARE(current().modifier, QStringLiteral("altar_reveal"));  // the scene's first
+        choose(panel->modifierBox(), QStringLiteral("earthquake"));
+        QCOMPARE(current().modifier, QStringLiteral("earthquake"));
+        // Back to replace: the scene itself until another is chosen.
+        choose(panel->modeBox(), QStringLiteral("replace"));
+        QCOMPARE(current().to, QStringLiteral("level_1"));
+        QVERIFY(current().modifier.isEmpty());
+        choose(panel->toBox(), QStringLiteral("level_2"));
+
+        // Its trigger.
+        QCOMPARE(panel->eventField()->text(), QStringLiteral("door_west_entered"));
+        QCOMPARE(panel->requiresField()->text(), QStringLiteral("has_key"));
+        type(panel->requiresField(), QStringLiteral(" has_key, lamp_lit,, has_key "));
+        QCOMPARE(current().trigger.requirements,
+                 (QStringList{QStringLiteral("has_key"), QStringLiteral("lamp_lit")}));
+        QCOMPARE(panel->requiresField()->text(), QStringLiteral("has_key, lamp_lit"));
+        type(panel->eventField(), QStringLiteral("door_opened"));
+        QCOMPARE(current().trigger.event, QStringLiteral("door_opened"));
+
+        // The state it carries, from the keys the flow declares.
+        QListWidget* state = panel->stateList();
+        QCOMPARE(state->count(), 2);
+        QCOMPARE(state->item(0)->checkState(), Qt::Checked);
+        state->item(0)->setCheckState(Qt::Unchecked);  // inventory
+        QCOMPARE(current().persist.state, QStringList{QStringLiteral("player.hp")});
+        panel->newStateField()->setText(QStringLiteral("coins"));
+        emit panel->newStateField()->returnPressed();
+        QCOMPARE(document.project().flow.state.size(), size_t{3});
+        QCOMPARE(document.project().flow.state.at(0).key, QStringLiteral("coins"));  // sorted
+        QVERIFY(current().persist.state.contains(QStringLiteral("coins")));
+        QVERIFY(panel->newStateField()->text().isEmpty());
+        QCOMPARE(document.commands().undoText(), QStringLiteral("Declare state key coins"));
+        document.commands().undo();  // one step
+        QCOMPARE(document.project().flow.state.size(), size_t{2});
+        QVERIFY(!current().persist.state.contains(QStringLiteral("coins")));
+
+        // The entities it carries, each onto a mark of the destination.
+        QComboBox* mark = panel->markBox(QStringLiteral("player"));
+        QVERIFY(mark);
+        QCOMPARE(mark->currentData().toString(), QStringLiteral("spawn_west_door"));
+        QVERIFY(panel->carryEntityBox()->findData(QStringLiteral("player")) < 0);
+        QVERIFY(panel->carryEntityBox()->findData(QStringLiteral("torch")) >= 0);
+        QCOMPARE(panel->carryMarkBox()->currentData().toString(),
+                 QStringLiteral("spawn_west_door"));
+        choose(panel->carryEntityBox(), QStringLiteral("torch"));
+        panel->carryButton()->click();
+        QCOMPARE(current().persist.entities.value(QStringLiteral("torch")),
+                 QStringLiteral("spawn_west_door"));
+        QTRY_VERIFY(panel->markBox(QStringLiteral("torch")));
+        document.commands().undo();
+        QTRY_VERIFY(!panel->markBox(QStringLiteral("torch")));
+        QCOMPARE(current().persist.entities.size(), 1);
+    }
+
+    void transitionTypesAreEditedInTheProject()
+    {
+        QTemporaryDir dir;
+        QVERIFY(copyFixture(dir));
+        MainWindow window;
+        QVERIFY(window.openProject(dir.path()).isEmpty());
+        window.show();
+        ProjectDocument& document = *window.document();
+        TransitionTypesPanel* list = window.transitionTypesPanel();
+        TransitionTypePanel* panel = window.transitionTypePanel();
+        const auto type = [](QLineEdit* field, const QString& text) {
+            field->setText(text);
+            field->setModified(true);
+            emit field->editingFinished();
+        };
+        const auto file = [&](const QString& id) {
+            return document.project().transitionTypes.value(id).content;
+        };
+
+        // A built-in type, chosen in the list, shows read-only until it is customized.
+        window.projectPanel()->setCurrentWidget(list);
+        list->setCurrentType(QStringLiteral("fade"));
+        QCOMPARE(window.contextPanel()->currentWidget(), static_cast<QWidget*>(panel));
+        QCOMPARE(panel->nameField()->text(), QStringLiteral("Fade"));
+        QVERIFY(!panel->nameField()->isEnabled());
+        QCOMPARE(panel->optionList()->count(), 2);
+        QVERIFY(!panel->customizeButton()->isHidden());
+        panel->customizeButton()->click();
+        QVERIFY(document.project().transitionTypes.contains(QStringLiteral("fade")));
+        QVERIFY(panel->nameField()->isEnabled());
+        QVERIFY(!panel->idField()->isEnabled());  // a customized one keeps its id
+        QCOMPARE(list->typeRow(QStringLiteral("fade"))->text(),
+                 QStringLiteral("Fade (customized)"));
+        panel->revertButton()->click();
+        QVERIFY(!document.project().transitionTypes.contains(QStringLiteral("fade")));
+
+        // A new one of the project's own: its name, id and options.
+        list->newButton()->click();
+        QString id = list->currentType();
+        QCOMPARE(id, QStringLiteral("transition"));
+        QCOMPARE(panel->type(), id);
+        type(panel->nameField(), QStringLiteral("Ripple"));
+        QCOMPARE(file(id).value(QStringLiteral("name")), QJsonValue(QStringLiteral("Ripple")));
+        type(panel->descriptionField(), QStringLiteral("Rings spread."));
+        panel->addOptionButton()->click();
+        panel->addOptionButton()->click();
+        QCOMPARE(panel->optionList()->count(), 2);
+        QCOMPARE(panel->optionList()->currentRow(), 1);
+        QCOMPARE(panel->optionNameField()->text(), QStringLiteral("option_2"));
+        type(panel->optionNameField(), QStringLiteral("direction"));
+        const int string = panel->optionTypeBox()->findData(QStringLiteral("string"));
+        panel->optionTypeBox()->setCurrentIndex(string);
+        emit panel->optionTypeBox()->activated(string);
+        QVERIFY(!panel->optionChoicesField()->isHidden());
+        type(panel->optionChoicesField(), QStringLiteral("in, out"));
+        type(panel->optionDefaultField(), QStringLiteral("out"));
+        QCOMPARE(file(id).value(QStringLiteral("options")).toArray().at(1).toObject(),
+                 (QJsonObject{{QStringLiteral("name"), QStringLiteral("direction")},
+                              {QStringLiteral("type"), QStringLiteral("string")},
+                              {QStringLiteral("choices"), QJsonArray{"in", "out"}},
+                              {QStringLiteral("default"), QStringLiteral("out")}}));
+        // One it couldn't read is refused, with why.
+        type(panel->optionDefaultField(), QStringLiteral("sideways"));
+        QVERIFY(panel->message().contains(QStringLiteral("sideways")));
+        QCOMPARE(file(id)
+                     .value(QStringLiteral("options"))
+                     .toArray()
+                     .at(1)
+                     .toObject()
+                     .value(QStringLiteral("default")),
+                 QJsonValue(QStringLiteral("out")));
+        QCOMPARE(panel->optionDefaultField()->text(), QStringLiteral("out"));
+        panel->moveOptionUpButton()->click();
+        QCOMPARE(file(id)
+                     .value(QStringLiteral("options"))
+                     .toArray()
+                     .at(0)
+                     .toObject()
+                     .value(QStringLiteral("name")),
+                 QJsonValue(QStringLiteral("direction")));
+        QCOMPARE(panel->optionList()->currentRow(), 0);
+
+        // An effect of the type follows it when it is renamed.
+        Effect effect;
+        effect.type = id;
+        window.flowScene()->setTransitionEffect(QStringLiteral("l1_to_l2"), effect);
+        type(panel->idField(), QStringLiteral("fade"));  // taken
+        QVERIFY(panel->message().contains(QStringLiteral("fade")));
+        type(panel->idField(), QStringLiteral("ripple"));
+        id = QStringLiteral("ripple");
+        QCOMPARE(list->currentType(), id);
+        QCOMPARE(panel->type(), id);
+        QCOMPARE(document.findTransition(u"l1_to_l2")->effect->type, id);
+
+        // Selecting a transition in the flow shows it instead; the list shows the type again.
+        window.flowScene()->select({}, {QStringLiteral("l1_to_l2")});
+        QCOMPARE(window.contextPanel()->currentWidget(),
+                 static_cast<QWidget*>(window.transitionPanel()));
+        QCOMPARE(window.transitionPanel()->typeBox()->currentText(), QStringLiteral("Ripple"));
+        list->setCurrentType(QStringLiteral("fade"));
+        QCOMPARE(window.contextPanel()->currentWidget(), static_cast<QWidget*>(panel));
+
+        // Removed, it's gone; the effect keeps its id, as one the project doesn't have.
+        list->setCurrentType(id);
+        list->removeButton()->click();
+        QVERIFY(!list->typeRow(id));
+        QVERIFY(!document.project().transitionTypes.contains(id));
     }
 
     void sceneSettingsEditTheSelectedScene()

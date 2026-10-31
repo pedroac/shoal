@@ -30,6 +30,8 @@ add_library(shoal_core STATIC
     core/SceneCommands.h
     core/SceneTree.cpp
     core/SceneTree.h
+    core/TransitionTypeCommands.cpp
+    core/TransitionTypeCommands.h
     core/TransitionTypes.cpp
     core/TransitionTypes.h
     core/Version.cpp
@@ -124,6 +126,10 @@ add_library(shoal_editor STATIC
     editor/TextLayout.cpp
     editor/TextLayout.h
     editor/TransitionPanel.cpp
+    editor/TransitionTypePanel.cpp
+    editor/TransitionTypePanel.h
+    editor/TransitionTypesPanel.cpp
+    editor/TransitionTypesPanel.h
     editor/TransitionPanel.h
     editor/TileGridOverlay.cpp
     editor/TileGridOverlay.h
@@ -147,6 +153,7 @@ set(shoal_icons
     "cinema-clapper-director-scene-movie-svgrepo-com.svg=scene.svg"
     "template-20px-svgrepo-com.svg=preset.svg"
     "images-967-svgrepo-com.svg=assets.svg"
+    "animation-svgrepo-com.svg=transition.svg"
     "gui-arrow-up-svgrepo-com.svg=move-up.svg"
     "gui-arrow-down-svgrepo-com.svg=move-down.svg"
     "drag-handle-dots-1-svgrepo-com.svg=drag-handle.svg"

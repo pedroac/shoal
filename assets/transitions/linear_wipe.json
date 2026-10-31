@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Linear Wipe",
   "description": "A straight edge sweeps across the screen, revealing the arriving scene.",
+  "preview": "linear_wipe.gif",
   "options": [
     {
       "name": "direction",

@@ -40,8 +40,12 @@ public:
     QGraphicsItem* itemAt(QPointF position) const;
 
     QStringList selectedSceneIds() const;
+    /// The selected edges' transitions, and the selected exit's.
     QStringList selectedTransitionIds() const;
-    /// Selects exactly these scenes and transitions.
+    /// The selected transition that has no edge, listed on its node as an exit, or empty.
+    QString selectedExit() const { return m_selectedExit; }
+    /// Selects exactly these scenes and transitions; a transition without an edge, the first
+    /// one, is selected as its node's exit.
     void select(const QStringList& sceneIds, const QStringList& transitionIds = {});
 
     // --- edits, each one undo step ---
@@ -59,6 +63,16 @@ public:
     void setSceneSettings(const QString& sceneId, core::Size size, std::optional<core::Fit> fit);
     /// Adds a `replace` transition with no trigger yet; returns its id.
     QString addTransition(const QString& from, const QString& to);
+    /// Replaces the transition `transitionId` with `transition`, as `text` on the undo stack,
+    /// and keeps it selected if its id changes; false, changing nothing, if its new id isn't
+    /// valid or another transition has it. Nothing if it is the same.
+    bool setTransition(const QString& transitionId, const core::Transition& transition,
+                       const QString& text);
+    /// Why setTransition() refused the id `to`, for the user.
+    static QString transitionRenameRefusal(const QString& to);
+    /// Declares the state key `key` in the flow, and has the transition carry it, in one
+    /// step; false if it isn't a key, or the flow already declares it.
+    bool declareStateKey(const QString& transitionId, const QString& key);
     /// Sets a transition's effect, or takes it away (null); nothing if it is the same.
     void setTransitionEffect(const QString& transitionId,
                              const std::optional<core::Effect>& effect);
@@ -77,8 +91,12 @@ signals:
     /// A scene node was double-clicked.
     void sceneActivated(const QString& sceneId);
 
+protected:
+    void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
+
 private:
     void onSceneRenamed(const QString& from, const QString& to);
+    void setSelectedExit(const QString& transitionId);
     /// Brings the items in line with the document.
     void sync();
     void syncNodes();
@@ -90,6 +108,10 @@ private:
     QHash<QString, SceneNodeItem*> m_nodes;
     QHash<QString, TransitionEdgeItem*> m_edges;
     QHash<QString, QPointF> m_placed;  ///< Where nodes without a stored position are shown.
+    /// A transition without an edge, selected on its node's line. Selecting anything else, or
+    /// clicking elsewhere, unselects it.
+    QString m_selectedExit;
+    bool m_selecting = false;  ///< In select().
     QGraphicsPathItem* m_connection = nullptr;
     QString m_connectionFrom;
 };

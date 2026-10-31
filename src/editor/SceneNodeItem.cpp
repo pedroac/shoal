@@ -66,12 +66,24 @@ void SceneNodeItem::setModifierCount(int count)
     }
 }
 
-void SceneNodeItem::setExits(const QStringList& exits)
+void SceneNodeItem::setExits(const QStringList& exits, const QStringList& transitionIds)
 {
+    m_exitIds = transitionIds;
     if (m_exits != exits) {
         m_exits = exits;
         relayout();
     }
+    update();
+}
+
+QRectF SceneNodeItem::exitRect(const QString& transitionId) const
+{
+    const qsizetype index = m_exitIds.indexOf(transitionId);
+    if (index < 0) {
+        return {};
+    }
+    const int line = int(index) + (m_modifierCount > 0 ? 1 : 0);
+    return {PADDING / 2, TITLE_HEIGHT + line * LINE_HEIGHT, WIDTH - PADDING, LINE_HEIGHT};
 }
 
 void SceneNodeItem::relayout()
@@ -127,11 +139,27 @@ void SceneNodeItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* opt
                       : QCoreApplication::translate("shoal::editor::SceneNodeItem", "%n modifiers",
                                                     nullptr, m_modifierCount));
     }
-    lines << m_exits;
     const QFontMetricsF metrics(baseFont);
-    for (const QString& line : lines) {
+    for (const QString& line : std::as_const(lines)) {
         painter->drawText(lineRect, Qt::AlignVCenter | Qt::AlignLeft,
                           metrics.elidedText(line, Qt::ElideRight, lineRect.width()));
+        lineRect.translate(0, LINE_HEIGHT);
+    }
+    // An exit's transition is selected on its line.
+    for (qsizetype i = 0; i < m_exits.size(); ++i) {
+        const bool chosen = m_flowScene.selectedExit() == m_exitIds.value(i);
+        if (chosen) {
+            const QRectF rect = exitRect(m_exitIds[i]);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(palette.color(QPalette::Highlight));
+            painter->drawRoundedRect(rect, 3, 3);
+            painter->setPen(palette.color(QPalette::HighlightedText));
+        }
+        else {
+            painter->setPen(palette.color(QPalette::PlaceholderText));
+        }
+        painter->drawText(lineRect, Qt::AlignVCenter | Qt::AlignLeft,
+                          metrics.elidedText(m_exits[i], Qt::ElideRight, lineRect.width()));
         lineRect.translate(0, LINE_HEIGHT);
     }
 
@@ -156,11 +184,22 @@ void SceneNodeItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
         event->accept();
         return;
     }
+    for (const QString& id : std::as_const(m_exitIds)) {
+        if (event->button() == Qt::LeftButton && exitRect(id).contains(event->pos())) {
+            m_flowScene.select({}, {id});
+            m_exitPressed = true;
+            event->accept();
+            return;
+        }
+    }
     QGraphicsItem::mousePressEvent(event);
 }
 
 void SceneNodeItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
 {
+    if (m_exitPressed) {
+        return;  // a click on a line doesn't drag the node
+    }
     if (m_connecting) {
         m_flowScene.updateConnection(event->scenePos());
         return;
@@ -173,6 +212,10 @@ void SceneNodeItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
     if (m_connecting) {
         m_connecting = false;
         m_flowScene.finishConnection(event->scenePos());
+        return;
+    }
+    if (m_exitPressed) {
+        m_exitPressed = false;  // and the node stays unselected
         return;
     }
     QGraphicsItem::mouseReleaseEvent(event);

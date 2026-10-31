@@ -118,6 +118,60 @@ private slots:
                     .contains(QStringLiteral("l1_to_l2 → level_9 (missing)")));
     }
 
+    void selectsATransitionWithoutAnEdgeOnItsLine()
+    {
+        Fixture f;
+        const QString id = QStringLiteral("pause_close");
+        SceneNodeItem* pause = f.scene.node(QStringLiteral("pause"));
+        QCOMPARE(pause->exitIds(), QStringList{id});
+        const QPoint line = f.at(pause->mapToScene(pause->exitRect(id).center()));
+        QTest::mouseClick(f.view.viewport(), Qt::LeftButton, {}, line);
+        QCOMPARE(f.scene.selectedExit(), id);
+        QCOMPARE(f.scene.selectedTransitionIds(), QStringList{id});
+        QVERIFY(f.scene.selectedSceneIds().isEmpty());  // not the node
+
+        // Selecting something else, or clicking nothing, unselects it.
+        f.scene.select({QStringLiteral("level_1")});
+        QVERIFY(f.scene.selectedExit().isEmpty());
+        QTest::mouseClick(f.view.viewport(), Qt::LeftButton, {}, line);
+        QSignalSpy changed(&f.scene, &QGraphicsScene::selectionChanged);
+        QTest::mouseClick(f.view.viewport(), Qt::LeftButton, {}, f.at(QPointF(-2000, -2000)));
+        QVERIFY(f.scene.selectedTransitionIds().isEmpty());
+        QVERIFY(!changed.isEmpty());
+
+        // Removing the selection removes it.
+        f.scene.select({}, {id});
+        f.scene.removeSelection();
+        QVERIFY(!f.document.findTransition(id));
+        QVERIFY(f.scene.selectedExit().isEmpty());
+    }
+
+    void anEditKeepsTheTransitionSelected()
+    {
+        Fixture f;
+        const QString id = QStringLiteral("l1_to_l2");
+        f.scene.select({}, {id});
+        // Popping, it loses its edge: its exit is selected.
+        Transition pop = *f.document.findTransition(id);
+        pop.mode = TransitionMode::Pop;
+        pop.to.clear();
+        QVERIFY(f.scene.setTransition(id, pop, QStringLiteral("Pop")));
+        QVERIFY(!f.scene.edge(id));
+        QCOMPARE(f.scene.selectedExit(), id);
+        // Renamed, under its new id; an id taken is refused.
+        Transition renamed = pop;
+        renamed.id = QStringLiteral("l1_back");
+        QVERIFY(f.scene.setTransition(id, renamed, QStringLiteral("Rename")));
+        QCOMPARE(f.scene.selectedTransitionIds(), QStringList{QStringLiteral("l1_back")});
+        Transition taken = renamed;
+        taken.id = QStringLiteral("l1_pause");
+        QVERIFY(!f.scene.setTransition(QStringLiteral("l1_back"), taken, QStringLiteral("Taken")));
+        // Back to a destination: its edge again.
+        f.document.commands().undo();
+        f.document.commands().undo();
+        QVERIFY(f.scene.edge(id));
+    }
+
     void edgesBetweenTheSameScenesBendApart()
     {
         ProjectDocument document(fixtureProject());

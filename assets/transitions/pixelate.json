@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Pixelate",
   "description": "The leaving scene breaks into ever larger blocks, which resolve into the arriving one.",
+  "preview": "pixelate.gif",
   "options": [
     {
       "name": "block_size",

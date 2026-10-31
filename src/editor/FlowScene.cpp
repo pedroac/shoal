@@ -1,6 +1,7 @@
 #include "editor/FlowScene.h"
 
 #include <QGraphicsPathItem>
+#include <QGraphicsSceneMouseEvent>
 #include <QPainterPath>
 #include <QPalette>
 #include <QPen>
@@ -39,6 +40,12 @@ FlowScene::FlowScene(core::ProjectDocument& document, QObject* parent)
 {
     connect(&m_document, &core::ProjectDocument::sceneRenamed, this, &FlowScene::onSceneRenamed);
     connect(&m_document, &core::ProjectDocument::changed, this, &FlowScene::sync);
+    // Selecting items takes the selection away from an exit.
+    connect(this, &QGraphicsScene::selectionChanged, this, [this] {
+        if (!m_selecting && !m_selectedExit.isEmpty() && !selectedItems().isEmpty()) {
+            setSelectedExit({});
+        }
+    });
     sync();
 }
 
@@ -95,6 +102,9 @@ QStringList FlowScene::selectedTransitionIds() const
             ids << static_cast<TransitionEdgeItem*>(item)->transitionId();
         }
     }
+    if (!m_selectedExit.isEmpty()) {
+        ids << m_selectedExit;
+    }
     ids.sort();
     return ids;
 }
@@ -102,19 +112,48 @@ QStringList FlowScene::selectedTransitionIds() const
 void FlowScene::select(const QStringList& sceneIds, const QStringList& transitionIds)
 {
     QSignalBlocker blocker(this);  // one selectionChanged() for the whole change
+    m_selecting = true;
     clearSelection();
     for (const QString& id : sceneIds) {
         if (SceneNodeItem* item = node(id)) {
             item->setSelected(true);
         }
     }
+    QString exit;
     for (const QString& id : transitionIds) {
         if (TransitionEdgeItem* item = edge(id)) {
             item->setSelected(true);
         }
+        else if (exit.isEmpty() && m_document.findTransition(id)) {
+            exit = id;
+        }
     }
+    setSelectedExit(exit);
+    m_selecting = false;
     blocker.unblock();
     emit selectionChanged();
+}
+
+void FlowScene::setSelectedExit(const QString& transitionId)
+{
+    if (m_selectedExit == transitionId) {
+        return;
+    }
+    m_selectedExit = transitionId;
+    for (SceneNodeItem* item : std::as_const(m_nodes)) {
+        item->update();
+    }
+}
+
+void FlowScene::mousePressEvent(QGraphicsSceneMouseEvent* event)
+{
+    // A click on nothing unselects an exit too, though no item's selection changes.
+    const QString exit = m_selectedExit;
+    QGraphicsScene::mousePressEvent(event);
+    if (!exit.isEmpty() && m_selectedExit == exit && !itemAt(event->scenePos())) {
+        setSelectedExit({});
+        emit selectionChanged();
+    }
 }
 
 // --- edits ---
@@ -202,6 +241,61 @@ void FlowScene::setSceneSettings(const QString& sceneId, core::Size size,
                                           : tr("Set the fit of scene %1").arg(sceneId);
     m_document.commands().push(
         std::make_unique<core::SetSceneSettingsCommand>(m_document, sceneId, size, fit, text));
+}
+
+bool FlowScene::setTransition(const QString& transitionId, const Transition& transition,
+                              const QString& text)
+{
+    const Transition* before = m_document.findTransition(transitionId);
+    if (!before) {
+        return false;
+    }
+    if (*before == transition) {
+        return true;
+    }
+    const bool renamed = transition.id != transitionId;
+    if (renamed && (!core::isValidId(transition.id) || m_document.findTransition(transition.id))) {
+        return false;
+    }
+    const bool selected = selectedTransitionIds() == QStringList{transitionId};
+    m_document.commands().push(
+        std::make_unique<core::SetTransitionCommand>(m_document, transitionId, transition, text));
+    // Still selected, under its new id, or as an exit once it has no edge, or the other way.
+    if (selected && selectedTransitionIds() != QStringList{transition.id}) {
+        select({}, {transition.id});
+    }
+    return true;
+}
+
+QString FlowScene::transitionRenameRefusal(const QString& to)
+{
+    return core::isValidId(to)
+               ? tr("Another transition is already called %1.").arg(to)
+               : tr("An id starts with a letter or an underscore, followed by letters, digits, "
+                    "underscores or hyphens.");
+}
+
+bool FlowScene::declareStateKey(const QString& transitionId, const QString& key)
+{
+    const Transition* transition = m_document.findTransition(transitionId);
+    std::vector<core::StateKey> keys = m_document.project().flow.state;
+    const bool declared = std::any_of(keys.begin(), keys.end(),
+                                      [&](const core::StateKey& k) { return k.key == key; });
+    if (!transition || key.trimmed().isEmpty() || key != key.trimmed() || declared) {
+        return false;
+    }
+    Transition carrying = *transition;
+    if (!carrying.persist.state.contains(key)) {
+        carrying.persist.state << key;
+    }
+    core::CommandStack& commands = m_document.commands();
+    commands.beginMacro(tr("Declare state key %1").arg(key));
+    keys.push_back(core::StateKey{key, {}, {}});
+    commands.push(std::make_unique<core::SetStateKeysCommand>(m_document, keys, QString()));
+    commands.push(std::make_unique<core::SetTransitionCommand>(m_document, transitionId, carrying,
+                                                               QString()));
+    commands.endMacro();
+    return true;
 }
 
 void FlowScene::setTransitionEffect(const QString& transitionId,
@@ -333,18 +427,28 @@ void FlowScene::syncNodes()
 
     // Transitions that lead to no node are listed on the node they leave from.
     QHash<QString, QStringList> exits;
+    QHash<QString, QStringList> exitIds;
     for (const Transition& transition : project.flow.transitions) {
+        QString exit;
         if (transition.mode == TransitionMode::Pop) {
-            exits[transition.from] << tr("%1 → back").arg(transition.id);
+            exit = tr("%1 → back").arg(transition.id);
         }
         else if (transition.mode == TransitionMode::PushModifier) {
-            exits[transition.from]
-                << tr("%1 → modifier %2").arg(transition.id, transition.modifier);
+            exit = tr("%1 → modifier %2").arg(transition.id, transition.modifier);
         }
         else if (!project.scenes.contains(transition.to)) {
-            exits[transition.from] << tr("%1 → %2 (missing)").arg(transition.id, transition.to);
+            exit = tr("%1 → %2 (missing)").arg(transition.id, transition.to);
+        }
+        if (!exit.isEmpty()) {
+            exits[transition.from] << exit;
+            exitIds[transition.from] << transition.id;
         }
     }
+    // A selected exit whose transition has gone, or got an edge, isn't one any more.
+    const bool exitGone =
+        !m_selectedExit.isEmpty() &&
+        !std::any_of(exitIds.cbegin(), exitIds.cend(),
+                     [&](const QStringList& ids) { return ids.contains(m_selectedExit); });
 
     for (auto it = project.scenes.cbegin(); it != project.scenes.cend(); ++it) {
         SceneNodeItem* item = m_nodes.value(it.key());
@@ -355,7 +459,11 @@ void FlowScene::syncNodes()
         }
         item->setStart(project.manifest.start == it.key());
         item->setModifierCount(int(it->modifiers.size()));
-        item->setExits(exits.value(it.key()));
+        item->setExits(exits.value(it.key()), exitIds.value(it.key()));
+    }
+    if (exitGone) {
+        setSelectedExit({});
+        emit selectionChanged();
     }
 
     placeUnpositionedNodes();

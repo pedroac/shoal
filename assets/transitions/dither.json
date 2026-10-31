@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Dither",
   "description": "The arriving scene appears through an ordered dither pattern.",
+  "preview": "dither.gif",
   "options": [
     {
       "name": "block_size",

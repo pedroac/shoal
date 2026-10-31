@@ -45,6 +45,9 @@ private slots:
             const TransitionTypeRead read = readTransitionType(it.key(), *it);
             QVERIFY2(read.definition, qPrintable(it.key() + u": " + read.error));
             QVERIFY2(!read.definition->description.isEmpty(), qPrintable(it.key()));
+            // And its preview, beside it.
+            QCOMPARE(read.definition->preview, it.key() + QStringLiteral(".gif"));
+            QVERIFY(QFile::exists(builtInTransitionTypesDir() + u'/' + read.definition->preview));
             Project project;
             project.transitionTypes.insert(it.key(), *it);
             QFile file(builtInTransitionTypesDir() + u'/' + it.key() + QStringLiteral(".json"));
@@ -86,11 +89,12 @@ private slots:
         QTest::addColumn<QByteArray>("json");
         QTest::addColumn<QString>("error");
         QTest::newRow("all kinds")
-            << QByteArray(R"({"options": [{"name": "t", "type": "time", "default": 100},)"
-                          R"({"name": "n", "type": "number", "min": -1, "max": 1, "default": 0.5},)"
-                          R"({"name": "s", "type": "string", "choices": ["a", "b"], "default": "b"},)"
-                          R"({"name": "p", "type": "path"},)"
-                          R"({"name": "c", "type": "color", "default": "\u0023123456"}]})")
+            << QByteArray(
+                   R"({"options": [{"name": "t", "type": "time", "default": 100},)"
+                   R"({"name": "n", "type": "number", "min": -1, "max": 1, "default": 0.5},)"
+                   R"({"name": "s", "type": "string", "choices": ["a", "b"], "default": "b"},)"
+                   R"({"name": "p", "type": "path"},)"
+                   R"({"name": "c", "type": "color", "default": "\u0023123456"}]})")
             << QString();
         QTest::newRow("no type")
             << QByteArray(R"({"options": [{"name": "x"}]})")

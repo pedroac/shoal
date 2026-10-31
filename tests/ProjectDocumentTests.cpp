@@ -8,6 +8,7 @@
 #include "core/FlowCommands.h"
 #include "core/ProjectDocument.h"
 #include "core/ProjectTemplates.h"
+#include "core/TransitionTypeCommands.h"
 #include "core/TransitionTypes.h"
 
 using namespace shoal::core;
@@ -232,6 +233,59 @@ private slots:
         document.commands().push(std::make_unique<SetTransitionEffectCommand>(
             document, id, std::nullopt, QStringLiteral("None")));
         QVERIFY(!document.findTransition(id)->effect);
+        document.commands().undo();
+        document.commands().undo();
+        QCOMPARE(document.project(), before);
+    }
+
+    void replacesATransitionUnderAnotherId()
+    {
+        ProjectDocument document(fixtureProject());
+        const Project before = document.project();
+        Transition renamed = *document.findTransition(u"l1_to_l2");
+        renamed.id = QStringLiteral("a_first");
+        renamed.trigger.event = QStringLiteral("door_opened");
+        document.commands().push(std::make_unique<SetTransitionCommand>(
+            document, QStringLiteral("l1_to_l2"), renamed, QStringLiteral("Rename")));
+        QVERIFY(!document.findTransition(u"l1_to_l2"));
+        // In its place in id order.
+        QCOMPARE(document.project().flow.transitions.front(), renamed);
+        document.commands().undo();
+        QCOMPARE(document.project(), before);
+    }
+
+    void setsTheFlowsStateKeys()
+    {
+        ProjectDocument document(fixtureProject());
+        const Project before = document.project();
+        std::vector<StateKey> keys = before.flow.state;
+        keys.push_back(StateKey{QStringLiteral("coins"), {}, {}});
+        document.commands().push(
+            std::make_unique<SetStateKeysCommand>(document, keys, QStringLiteral("Declare")));
+        QCOMPARE(document.project().flow.state.front().key, QStringLiteral("coins"));
+        document.commands().undo();
+        QCOMPARE(document.project(), before);
+    }
+
+    void renamesATransitionTypeAndTheEffectsOfIt()
+    {
+        ProjectDocument document(fixtureProject());
+        const Project before = document.project();
+        document.commands().push(std::make_unique<SetTransitionTypeCommand>(
+            document, QStringLiteral("ripple"), TransitionType{}, QStringLiteral("Add")));
+        Transition transition = *document.findTransition(u"l1_to_l2");
+        transition.effect->type = QStringLiteral("ripple");
+        document.commands().push(std::make_unique<SetTransitionCommand>(
+            document, transition.id, transition, QStringLiteral("Ripple")));
+        QSignalSpy renamed(&document, &ProjectDocument::transitionTypeRenamed);
+        document.commands().push(std::make_unique<RenameTransitionTypeCommand>(
+            document, QStringLiteral("ripple"), QStringLiteral("rings")));
+        QCOMPARE(renamed.count(), 1);
+        QVERIFY(document.project().transitionTypes.contains(QStringLiteral("rings")));
+        QVERIFY(!document.project().transitionTypes.contains(QStringLiteral("ripple")));
+        QCOMPARE(document.findTransition(u"l1_to_l2")->effect->type, QStringLiteral("rings"));
+        document.commands().undo();
+        QCOMPARE(document.findTransition(u"l1_to_l2")->effect->type, QStringLiteral("ripple"));
         document.commands().undo();
         document.commands().undo();
         QCOMPARE(document.project(), before);

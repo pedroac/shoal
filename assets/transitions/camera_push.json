@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Camera Push",
   "description": "The camera pushes in on the leaving scene as it gives way to the arriving one.",
+  "preview": "camera_push.gif",
   "options": [
     {
       "name": "zoom",

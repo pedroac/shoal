@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Pattern Mask",
   "description": "An image's brightness orders the reveal: its dark parts give way first.",
+  "preview": "pattern_mask.gif",
   "options": [
     {
       "name": "mask",

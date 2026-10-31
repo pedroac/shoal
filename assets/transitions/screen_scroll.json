@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Screen Scroll",
   "description": "Both scenes scroll together, as if the camera moved to the next screen.",
+  "preview": "screen_scroll.gif",
   "options": [
     {
       "name": "direction",

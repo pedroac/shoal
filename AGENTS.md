@@ -41,7 +41,8 @@ changes.
     `FlowCommands`: the commands that change scenes and transitions, effects included.
     `TransitionTypes`: transition types, read from their files when used: the built-in
     ones (`assets/transitions/`, built into core as resources) and the project's own
-    (`transitions/`); and effects made from them.
+    (`transitions/`); and effects made from them. `TransitionTypeCommands`: adding,
+    customizing, renaming and removing them.
     `SceneCommands`: the commands that change entities, which `SceneTree`
     addresses by `EntityPath`. `SceneTree` also places entities: their rects and
     pivots, positions and sizes in px, % or tiles against their parent's `Frame`,
@@ -100,8 +101,11 @@ changes.
     under short names; the plain ones take the palette's colors. `Splitter` shows the
     drag handle's dots on its handles. `ProjectDropArea` is what the window shows with no
     project open, and opens a project folder dropped on it.
-  - `TransitionPanel`: the context panel for the flow's selected transition: its
-    effect, with a field for each option its type's file declares.
+  - `TransitionPanel`: the context panel for the flow's selected transition: its id,
+    mode and destination, trigger, effect (a field for each option its type's file
+    declares) and what it carries. `FlowScene` selects a transition without an edge
+    on its node's line (`selectedExit()`). `TransitionTypesPanel` lists the
+    transition types, on the flow, and `TransitionTypePanel` edits one's file.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the
@@ -113,6 +117,8 @@ changes.
   exactly. `tests/fixtures/sheets/` is a hand-written sprat sheet and atlas, described
   in its README. Editor tests drive views with real mouse events (`QTest::mousePress`
   and friends on the viewport) where the behavior is about the mouse.
+- `tools/`: developer scripts, such as `make_transition_previews.py`, which draws the
+  built-in transition types' preview GIFs (Pillow and numpy).
 - `docs/`: the design specification, and the file format specifications as they
   are written.
 

@@ -18,6 +18,7 @@ enum class Icon {
     Scene,       ///< A scene, or the scenes.
     Preset,      ///< Presets.
     Assets,      ///< The project's assets.
+    Transition,  ///< Transition types.
     MoveUp,      ///< Moves an item up its ordered list.
     MoveDown,    ///< Moves an item down its ordered list.
     DragHandle,  ///< What can be dragged, such as a splitter's handle; its dots run upright.

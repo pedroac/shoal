@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Flashbang",
   "description": "The screen flashes to a color, which fades away over the arriving scene.",
+  "preview": "flashbang.gif",
   "options": [
     {
       "name": "color",

@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Slide",
   "description": "The arriving scene slides in over the leaving one.",
+  "preview": "slide.gif",
   "options": [
     {
       "name": "direction",

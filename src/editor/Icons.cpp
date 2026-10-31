@@ -29,6 +29,8 @@ QString fileOf(Icon which)
             return QStringLiteral(":/icons/preset.svg");
         case Icon::Assets:
             return QStringLiteral(":/icons/assets.svg");
+        case Icon::Transition:
+            return QStringLiteral(":/icons/transition.svg");
         case Icon::MoveUp:
             return QStringLiteral(":/icons/move-up.svg");
         case Icon::MoveDown:

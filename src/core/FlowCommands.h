@@ -133,6 +133,37 @@ private:
     Transition m_transition;
 };
 
+/// Replaces a transition with `transition`, which may have another id.
+class SetTransitionCommand : public Command {
+public:
+    SetTransitionCommand(ProjectDocument& document, QString id, Transition transition,
+                         QString text);
+    QString text() const override { return m_text; }
+    void redo() override;
+    void undo() override;
+
+private:
+    ProjectDocument& m_document;
+    QString m_text;
+    Transition m_before;
+    Transition m_after;
+};
+
+/// Replaces the state keys the flow declares.
+class SetStateKeysCommand : public Command {
+public:
+    SetStateKeysCommand(ProjectDocument& document, std::vector<StateKey> keys, QString text);
+    QString text() const override { return m_text; }
+    void redo() override;
+    void undo() override;
+
+private:
+    ProjectDocument& m_document;
+    QString m_text;
+    std::vector<StateKey> m_before;
+    std::vector<StateKey> m_after;
+};
+
 /// Sets a transition's effect, or takes it away (null).
 class SetTransitionEffectCommand : public Command {
 public:

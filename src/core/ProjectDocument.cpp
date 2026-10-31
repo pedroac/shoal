@@ -308,6 +308,24 @@ void ProjectDocument::insertTransition(Transition transition)
     emit changed();
 }
 
+void ProjectDocument::replaceTransition(const QString& id, Transition transition)
+{
+    if (transition.id == id) {
+        setTransition(std::move(transition));
+        return;
+    }
+    removeTransition(id);
+    insertTransition(std::move(transition));
+}
+
+void ProjectDocument::setStateKeys(std::vector<StateKey> keys)
+{
+    std::stable_sort(keys.begin(), keys.end(),
+                     [](const StateKey& a, const StateKey& b) { return a.key < b.key; });
+    m_project.flow.state = std::move(keys);
+    emit changed();
+}
+
 Transition ProjectDocument::removeTransition(const QString& id)
 {
     std::vector<Transition>& transitions = m_project.flow.transitions;
@@ -371,6 +389,34 @@ void ProjectDocument::renamePreset(const QString& from, const QString& to)
     emit sceneContentChanged(presetTreeId(to));
     emit presetChanged(from);
     emit presetChanged(to);
+    emit changed();
+}
+
+void ProjectDocument::setTransitionType(const QString& id, std::optional<TransitionType> type)
+{
+    if (type) {
+        m_project.transitionTypes.insert(id, std::move(*type));
+    }
+    else {
+        m_project.transitionTypes.remove(id);
+    }
+    emit transitionTypeChanged(id);
+    emit changed();
+}
+
+void ProjectDocument::renameTransitionType(const QString& from, const QString& to)
+{
+    Q_ASSERT(m_project.transitionTypes.contains(from) && !m_project.transitionTypes.contains(to));
+    m_project.transitionTypes.insert(to, m_project.transitionTypes.take(from));
+    for (Transition& transition : m_project.flow.transitions) {
+        if (transition.effect && transition.effect->type == from) {
+            transition.effect->type = to;
+            emit transitionChanged(transition.id);
+        }
+    }
+    emit transitionTypeRenamed(from, to);
+    emit transitionTypeChanged(from);
+    emit transitionTypeChanged(to);
     emit changed();
 }
 

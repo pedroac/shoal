@@ -91,6 +91,11 @@ public:
     Transition removeTransition(const QString& id);
     /// Replaces the transition with the same id.
     void setTransition(Transition transition);
+    /// Replaces the transition `id` with `transition`, which may have another id: it is
+    /// then removed and added again, in its place in id order.
+    void replaceTransition(const QString& id, Transition transition);
+    /// Replaces the state keys the flow declares, which are kept sorted by key.
+    void setStateKeys(std::vector<StateKey> keys);
 
     /// Inserts `entity` so that it ends up at `path`.
     void insertEntity(const QString& sceneId, const EntityPath& path, Entity entity);
@@ -105,6 +110,11 @@ public:
     void setPreset(const QString& id, std::optional<Preset> preset);
     /// Gives a project preset another id.
     void renamePreset(const QString& from, const QString& to);
+    /// Adds, replaces or removes (null) a project transition type; a built-in one with the
+    /// same id is then replaced, or back as it ships.
+    void setTransitionType(const QString& id, std::optional<TransitionType> type);
+    /// Gives a project transition type another id, and the effects of that type with it.
+    void renameTransitionType(const QString& from, const QString& to);
     /// Declares an asset in the manifest, or changes its file; a null `file` removes it.
     void setAsset(AssetKind kind, const QString& alias, std::optional<QString> file);
     /// Replaces classes.json; null removes it.
@@ -127,6 +137,10 @@ signals:
     void presetChanged(const QString& id);
     /// Before presetChanged() for each.
     void presetRenamed(const QString& from, const QString& to);
+    /// A project transition type was added, changed, renamed (for both ids) or removed.
+    void transitionTypeChanged(const QString& id);
+    /// Before transitionTypeChanged() for each.
+    void transitionTypeRenamed(const QString& from, const QString& to);
     /// An asset was declared in the manifest, or its file changed, or it was removed.
     void assetsChanged();
     /// A class was declared, or its declaration changed or was removed.

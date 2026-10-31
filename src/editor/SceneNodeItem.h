@@ -31,9 +31,12 @@ public:
     int modifierCount() const { return m_modifierCount; }
     void setModifierCount(int count);
     /// Transitions that lead to no scene node (`pop`, `push_modifier`, a missing scene), one
-    /// line each.
+    /// line each, and the ids of those transitions. Clicking a line selects its transition.
     QStringList exits() const { return m_exits; }
-    void setExits(const QStringList& exits);
+    QStringList exitIds() const { return m_exitIds; }
+    void setExits(const QStringList& exits, const QStringList& transitionIds);
+    /// The line of the exit `transitionId`, in item coordinates; null if it has none.
+    QRectF exitRect(const QString& transitionId) const;
 
     /// The rectangle of the node's body, in item coordinates.
     QRectF bodyRect() const;
@@ -56,8 +59,10 @@ private:
     bool m_start = false;
     int m_modifierCount = 0;
     QStringList m_exits;
+    QStringList m_exitIds;
     double m_height = 0;
     bool m_connecting = false;
+    bool m_exitPressed = false;  ///< The press was on an exit's line, which it selected.
 };
 
 }  // namespace shoal::editor

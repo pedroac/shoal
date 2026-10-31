@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Glitch",
   "description": "The picture tears and jitters, and settles on the arriving scene.",
+  "preview": "glitch.gif",
   "options": [
     {
       "name": "intensity",

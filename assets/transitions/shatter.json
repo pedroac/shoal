@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Shatter",
   "description": "The leaving scene breaks into shards that fall away, uncovering the arriving one.",
+  "preview": "shatter.gif",
   "options": [
     {
       "name": "pieces",

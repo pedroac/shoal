@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Fade In",
   "description": "The screen cuts to a color, then the arriving scene fades in from it.",
+  "preview": "fade_in.gif",
   "options": [
     {
       "name": "color",

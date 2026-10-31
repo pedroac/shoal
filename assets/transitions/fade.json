@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Fade",
   "description": "The leaving scene fades to a color, then the arriving one fades in from it.",
+  "preview": "fade.gif",
   "options": [
     {
       "name": "color",

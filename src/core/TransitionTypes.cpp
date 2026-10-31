@@ -185,6 +185,25 @@ bool isBuiltInTransitionType(const Project& project, const QString& typeId)
     return !project.transitionTypes.contains(typeId) && builtInTransitionTypes().contains(typeId);
 }
 
+bool isTransitionTypeIdAvailable(const Project& project, QStringView id, QStringView ignoring)
+{
+    return isValidId(id) &&
+           (id == ignoring || !availableTransitionTypes(project).contains(id.toString()));
+}
+
+QString uniqueTransitionTypeId(const Project& project, const QString& base)
+{
+    if (isTransitionTypeIdAvailable(project, base)) {
+        return base;
+    }
+    for (int n = 2;; ++n) {
+        const QString candidate = QStringLiteral("%1_%2").arg(base).arg(n);
+        if (isTransitionTypeIdAvailable(project, candidate)) {
+            return candidate;
+        }
+    }
+}
+
 Effect makeEffect(const QString& typeId, const TransitionTypeDefinition& type)
 {
     Effect effect;

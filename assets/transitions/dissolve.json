@@ -3,6 +3,7 @@
   "version": 1,
   "name": "Dissolve",
   "description": "The arriving scene appears grain by grain, in random order.",
+  "preview": "dissolve.gif",
   "options": [
     {
       "name": "block_size",

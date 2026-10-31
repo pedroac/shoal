@@ -56,6 +56,12 @@ QMap<QString, TransitionType> availableTransitionTypes(const Project& project);
 /// Whether a type is one of Shoal's own: built in, and not overridden by the project.
 bool isBuiltInTransitionType(const Project& project, const QString& typeId);
 
+/// Whether `id` can name a new project type: a valid id no type, built-in or not, has.
+/// `ignoring` is the type being renamed, if any.
+bool isTransitionTypeIdAvailable(const Project& project, QStringView id, QStringView ignoring = {});
+/// `base` if it can name a new type, otherwise `base_2`, `base_3`, ...
+QString uniqueTransitionTypeId(const Project& project, const QString& base);
+
 /// How long a new effect lasts.
 inline constexpr int DEFAULT_EFFECT_MS = 500;
 
