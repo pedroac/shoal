@@ -93,6 +93,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     m_contextPanel->addWidget(m_sceneSettings);
     m_contextPanel->addWidget(m_entityPanel);
     m_sideWidths = {PROJECT_PANEL_WIDTH, CONTEXT_PANEL_WIDTH};
+    // Until a project's tabs hold them, or they'd show in the window's corner.
+    m_projectPanel->hide();
+    m_contextPanel->hide();
     connect(m_presets, &PresetsPanel::currentPresetChanged, this, [this](const QString& id) {
         if (m_presetsView) {
             m_presetsView->showPreset(id);

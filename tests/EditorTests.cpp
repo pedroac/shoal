@@ -68,6 +68,11 @@ private slots:
         QVERIFY(!action(window, "undoAction")->isEnabled());
         QVERIFY(!action(window, "addSceneAction")->isEnabled());
         QVERIFY(action(window, "newAction")->isEnabled());
+        // The side panels wait for a project's tabs.
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QVERIFY(!window.projectPanel()->isVisible());
+        QVERIFY(!window.contextPanel()->isVisible());
     }
 
     void hasItsMenus()
