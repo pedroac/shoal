@@ -57,6 +57,8 @@ shoal_set_warnings(shoal_assets)
 add_library(shoal_editor STATIC
     editor/AssetBrowserPanel.cpp
     editor/AssetBrowserPanel.h
+    editor/AssetField.cpp
+    editor/AssetField.h
     editor/CanvasView.cpp
     editor/CanvasView.h
     editor/ClickOrDragView.h
@@ -98,6 +100,8 @@ add_library(shoal_editor STATIC
     editor/ScenesPanel.h
     editor/SheetItem.cpp
     editor/SheetItem.h
+    editor/Thumbnails.cpp
+    editor/Thumbnails.h
     editor/TileGridOverlay.cpp
     editor/TileGridOverlay.h
     editor/TransformHandle.cpp

@@ -24,6 +24,7 @@ class ProjectDocument;
 
 namespace shoal::editor {
 
+class AssetField;
 class ColorButton;
 class FlowScene;
 class PointGrid;
@@ -37,8 +38,8 @@ class SceneSettingsPanel;
 ///
 /// An entity shows its id, its classes, whether it is active and
 /// visible, its position (with an offset, when it is relative), angle, scale and flips, then
-/// its parts: its size and pivot, its image, fill and tint, whether it clips, its container,
-/// and its space and parallax. Each edit is one undo step.
+/// its parts: its size and pivot, its image (an AssetField) and its mode, fill and tint, whether it
+/// clips, its container, and its space and parallax. Each edit is one undo step.
 ///
 /// Each axis of the position and of the size has a unit: pixels, a percentage of the
 /// parent's rect, or the parent's tiles, when it is a tiled container (see core::Unit).
@@ -96,8 +97,9 @@ public:
     PointGrid* pivotGrid() const { return m_pivotGrid; }
     QDoubleSpinBox* pivotXBox() const { return m_pivotXBox; }
     QDoubleSpinBox* pivotYBox() const { return m_pivotYBox; }
+    /// The entity's image, chosen by dropping, typing or browsing; clearing it removes it.
+    AssetField* imageField() const { return m_imageField; }
     QComboBox* imageModeBox() const { return m_imageModeBox; }
-    QToolButton* removeImageButton() const { return m_removeImageButton; }
     QCheckBox* fillBox() const { return m_fillBox; }
     ColorButton* fillButton() const { return m_fillButton; }
     ColorButton* tintButton() const { return m_tintButton; }
@@ -113,7 +115,7 @@ public:
     QCheckBox* parallaxBox() const { return m_parallaxBox; }
     QDoubleSpinBox* parallaxXBox() const { return m_parallaxXBox; }
     QDoubleSpinBox* parallaxYBox() const { return m_parallaxYBox; }
-    /// Whether the scale, the size and the image rows are shown.
+    /// Whether the scale, the size and the image's mode rows are shown.
     bool showsScale() const;
     bool showsSize() const;
     bool showsImage() const;
@@ -158,7 +160,7 @@ public slots:
     void applyPivot(std::optional<core::Point> pivot);
     void setImageMode(core::ImageMode mode);
     void removeImage();
-    /// Gives the entity `image`, as the sheets pick it, or none (see removeImage()). Its
+    /// Gives the entity `image`, as the image field chooses it, or none (see removeImage()). Its
     /// mode stays for another sprite; a size of its own stays.
     void setImage(const std::optional<core::Image>& image);
     void setFill(std::optional<core::Color> fill);
@@ -227,9 +229,8 @@ private:
     PointGrid* m_pivotGrid;
     QDoubleSpinBox* m_pivotXBox;
     QDoubleSpinBox* m_pivotYBox;
-    QLabel* m_imageLabel;
+    AssetField* m_imageField;
     QComboBox* m_imageModeBox;
-    QToolButton* m_removeImageButton;
     QCheckBox* m_fillBox;
     ColorButton* m_fillButton;
     ColorButton* m_tintButton;

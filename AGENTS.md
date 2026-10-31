@@ -63,7 +63,7 @@ changes.
     tabs (`WorkspaceTabs`: the tab bar over the project panel, the workspace and the
     context panel): the flow, the presets (`PresetsView`: a `SceneView` of the preset
     current in `PresetsPanel`), then the scenes. The project panel holds the scenes list
-    on the flow, the presets and sheets lists elsewhere; the context panel the scene
+    on the flow, the presets and assets lists elsewhere; the context panel the scene
     settings on the flow, or the entity tree over the inspector. Methods that take a path
     and don't show dialogs (`openProject`, `saveProjectAs`) are what tests call; the
     slots wrap them with dialogs.
@@ -77,15 +77,18 @@ changes.
     `TileGridOverlay` draws the tiled containers' grids above them, when they help.
     `CanvasView` holds the zoom and pan both views share.
   - `AssetBrowserPanel`: the project's assets, by kind: sheets with their sprites and
-    animations, and standalone images, as thumbnails; fonts, audio and video by alias.
-    A drag or a double-click hands a `SheetItem` to `SceneView`, which places it.
+    animations, and standalone images, as thumbnails (`Thumbnails`); fonts, audio and
+    video by alias. It only browses: a drag or a double-click hands a `SheetItem` to
+    `SceneView`, which places it, and a drag onto an `AssetField` gives it to the
+    selected entity.
     `PresetsPanel` does the same with presets, and adds, duplicates and removes them.
     Both tell a click from a drag (`ClickOrDragView`), so a drag leaves the current
     row. `InspectorPanel` edits the selected
     entity, with unit boxes for positions and sizes, a `PointGrid` for pivots and a
     `ColorButton` for tints and fills, or, with none selected, the top level's scene
-    settings (a `SceneSettingsPanel`), or a preset's (a `PresetSettingsPanel`). The
-    asset browser also picks the selected entity's image (`setChoice()`).
+    settings (a `SceneSettingsPanel`), or a preset's (a `PresetSettingsPanel`). Its
+    `AssetField` chooses the entity's image: dropped, typed with a completer, browsed
+    or cleared.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the

@@ -1,3 +1,4 @@
+#include <QAbstractItemView>
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
@@ -31,6 +32,7 @@
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
 #include "editor/AssetBrowserPanel.h"
+#include "editor/AssetField.h"
 #include "editor/EntityItem.h"
 #include "editor/FlowScene.h"
 #include "editor/InspectorPanel.h"
@@ -103,6 +105,24 @@ QByteArray readFile(const QString& path)
 {
     QFile file(path);
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+/// Drags `data` over `widget` and drops it there, as QDrag::exec() would send the events.
+bool dropOn(QWidget* widget, const QMimeData* data)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
+    const QPointF at(widget->rect().center());
+#else
+    const QPoint at = widget->rect().center();
+#endif
+    QDragEnterEvent enter(at, Qt::CopyAction, data, Qt::LeftButton, {});
+    QApplication::sendEvent(widget, &enter);
+    if (!enter.isAccepted()) {
+        return false;
+    }
+    QDropEvent drop(at, Qt::CopyAction, data, Qt::LeftButton, {});
+    QApplication::sendEvent(widget, &drop);
+    return drop.isAccepted();
 }
 
 /// The basic fixture with the hero sheet in art/, opened in a window on level_1.
@@ -840,16 +860,26 @@ private slots:
         QCOMPARE(rect->height, double(pixels.height()));
         QCOMPARE(f.canvas().item(path)->sceneBoundingRect().size().toSize(), pixels);
 
-        // With it selected, the browser shows it as the entity's image.
+        // With it selected, the image field shows it, and chooses among images too.
         f.canvas().select({path});
-        QCOMPARE(browser->tree()->currentItem(), browser->itemRow(item));
+        AssetField* field = f.window.inspector()->imageField();
+        QCOMPARE(field->item(), std::optional(item));
+        QCOMPARE(field->lineEdit()->text(), QStringLiteral("Images / title"));
         QCOMPARE(f.window.inspector()->summary()->text(), QStringLiteral("image · title"));
+        QVERIFY(field->choose(IDLE_SPRITE.path()));
+        QCOMPARE(entityAt(f.scene(), path)->image->sprite, IDLE_SPRITE.name);
+        QVERIFY(field->choose(QStringLiteral("images / TITLE")));
+        QCOMPARE(entityAt(f.scene(), path)->image->asset, title);
 
-        // Removed from the manifest, its row goes.
+        // Removed from the manifest, its row goes, and the entity's image is missing.
         f.document().commands().push(
             std::make_unique<SetAssetCommand>(f.document(), AssetKind::Image, title, std::nullopt));
         QVERIFY(!browser->itemRow(item));
         QVERIFY(!browser->kindRow(AssetKind::Image));
+        QVERIFY(field->isMissing());
+        field->completer()->setCompletionPrefix(title);
+        QCOMPARE(field->completer()->completionCount(), 0);
+        QVERIFY(!field->choose(QStringLiteral("Images / other")));
     }
 
     void droppingASpritePlacesItWhereTheCursorIs()
@@ -944,42 +974,97 @@ private slots:
         QVERIFY(!inspector->showsTopLevel());
     }
 
-    void theSheetsPickTheSelectedEntitysImage()
+    void theImageFieldChoosesTheSelectedEntitysImage()
     {
         Fixture f;
-        AssetBrowserPanel* sheets = f.window.assetBrowser();
-        QTreeWidget* tree = sheets->tree();
-        // Nothing selected: they only browse, and a double-click places.
-        QVERIFY(!sheets->isPicking());
-        QVERIFY(!sheets->noneButton()->isEnabled());
+        f.window.show();
+        InspectorPanel* inspector = f.window.inspector();
+        AssetField* field = inspector->imageField();
+        QLineEdit* edit = field->lineEdit();
+        // Nothing selected: nothing to choose for.
+        QVERIFY(!field->isEnabled());
 
-        // The player's sprite is the current row.
+        // The player's sprite, by its path in the asset browser.
         f.canvas().select({PLAYER});
-        QVERIFY(sheets->isPicking());
-        QCOMPARE(tree->currentItem(), sheets->itemRow(IDLE_SPRITE));
-        QVERIFY(!sheets->noneButton()->isChecked());
+        QVERIFY(field->isEnabled());
+        QCOMPARE(field->item(), std::optional(IDLE_SPRITE));
+        QCOMPARE(edit->text(), QStringLiteral("Sprites / hero / Sprites / hero/idle.png"));
+        QCOMPARE(IDLE_ANIMATION.path(), QStringLiteral("Sprites / hero / Animations / idle"));
+        QVERIFY(!field->isMissing());
 
-        // Another row is its image now, one undo step.
-        const SheetItem bush{SheetItem::Kind::Sprite, QStringLiteral("hero"),
-                             QStringLiteral("props/bush.png")};
-        tree->setCurrentItem(sheets->itemRow(bush));
+        // Typed, ignoring case: one undo step.
+        type(edit, QStringLiteral("sprites / hero / sprites / props/bush.png"));
         QCOMPARE(f.document().commands().undoText(), QStringLiteral("Set the image of player"));
-        QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, bush.name);
-        tree->setCurrentItem(sheets->itemRow(IDLE_ANIMATION));
-        QCOMPARE(entityAt(f.scene(), PLAYER)->image->animation, IDLE_ANIMATION.name);
-        // Activating a row while picking places nothing.
-        const size_t count = f.scene().entities.size();
-        emit tree->itemActivated(sheets->itemRow(IDLE_SPRITE), 0);
-        QCOMPARE(f.scene().entities.size(), count);
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, QStringLiteral("props/bush.png"));
+        QCOMPARE(edit->text(), QStringLiteral("Sprites / hero / Sprites / props/bush.png"));
 
-        // None takes it away, its size kept.
-        sheets->noneButton()->click();
+        // Text that names no asset is red and never chosen; Escape shows the image again.
+        const int commands = f.document().commands().count();
+        type(edit, QStringLiteral("nothing"));
+        QVERIFY(!field->isValid());
+        QCOMPARE(edit->palette().color(QPalette::Text), QColor(200, 60, 40));
+        QCOMPARE(f.document().commands().count(), commands);
+        QTest::keyClick(edit, Qt::Key_Escape);
+        QCOMPARE(edit->text(), QStringLiteral("Sprites / hero / Sprites / props/bush.png"));
+        QVERIFY(field->isValid());
+
+        // The popup lists the assets whose path contains the text, and chooses one.
+        QCompleter* completer = field->completer();
+        QCOMPARE(completer->filterMode(), Qt::MatchContains);
+        completer->setCompletionPrefix(QStringLiteral("IDLE"));
+        QCOMPARE(completer->completionCount(), 2);  // the sprite and the animation
+        QModelIndex animation;
+        for (int i = 0; i < completer->completionCount(); ++i) {
+            const QModelIndex index = completer->completionModel()->index(i, 0);
+            if (index.data().toString() == IDLE_ANIMATION.path()) {
+                animation = index;
+            }
+            QVERIFY(!index.data(Qt::DecorationRole).value<QIcon>().isNull());
+        }
+        QVERIFY(animation.isValid());
+        emit completer->activated(animation);
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->animation, IDLE_ANIMATION.name);
+        QCOMPARE(edit->text(), IDLE_ANIMATION.path());
+        // Browsing lists them all: the sheet's four sprites and its animation.
+        field->browseButton()->click();
+        QCOMPARE(completer->completionPrefix(), QString());
+        QCOMPARE(completer->completionCount(), 5);
+        completer->popup()->hide();
+
+        // Dropped from the asset browser.
+        const SheetItem door{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+                             QStringLiteral("props/door.png")};
+        const std::unique_ptr<QMimeData> data(door.toMimeData());
+        QVERIFY(dropOn(field, data.get()));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, door.name);
+        // Text isn't an asset.
+        QMimeData text;
+        text.setText(QStringLiteral("hero"));
+        QVERIFY(!dropOn(field, &text));
+
+        // Cleared: no image, its size kept.
+        field->clearButton()->click();
         QVERIFY(!entityAt(f.scene(), PLAYER)->image);
         QVERIFY(entityAt(f.scene(), PLAYER)->size);
-        QVERIFY(sheets->noneButton()->isChecked());
-        QVERIFY(!tree->currentItem());
+        QVERIFY(edit->text().isEmpty());
+        QVERIFY(!field->clearButton()->isEnabled());
+        QVERIFY(!inspector->showsImage());
+        // And given one again.
+        QVERIFY(dropOn(field, data.get()));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, door.name);
         f.document().commands().undo();
-        QCOMPARE(tree->currentItem(), sheets->itemRow(IDLE_ANIMATION));
+        f.document().commands().undo();
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, door.name);
+        QCOMPARE(field->item(), std::optional(door));
+
+        // An asset that is gone stays, shown as missing.
+        Image gone = door.toImage();
+        gone.sprite = QStringLiteral("props/gone.png");
+        inspector->setImage(gone);
+        QVERIFY(field->isMissing());
+        QCOMPARE(edit->text(),
+                 QStringLiteral("Sprites / hero / Sprites / props/gone.png (missing)"));
+        QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, gone.sprite);
 
         // A nine-slice stays one with another sprite.
         Entity panel = IDLE_SPRITE.toEntity();
@@ -987,40 +1072,42 @@ private slots:
         panel.image->mode = ImageMode::NineSlice;
         panel.size = Extent::px({30, 30});
         const EntityPath path = f.canvas().addEntity(panel, QPointF(100, 100));
-        tree->setCurrentItem(sheets->itemRow(bush));
+        f.canvas().select({path});
+        QVERIFY(dropOn(field, data.get()));
         QCOMPARE(entityAt(f.scene(), path)->image->mode, ImageMode::NineSlice);
 
-        // Several selected: browsing again.
+        // Several selected: nothing to choose for.
         f.canvas().select({PLAYER, DOOR});
-        QVERIFY(!sheets->isPicking());
+        QVERIFY(!field->isEnabled());
     }
 
-    void theSheetsTellAClickFromADrag()
+    void theAssetBrowserOnlyBrowses()
     {
         Fixture f;
         f.window.show();
         f.window.projectPanel()->setCurrentWidget(f.window.assetBrowser());
-        AssetBrowserPanel* sheets = f.window.assetBrowser();
-        QTreeWidget* tree = sheets->tree();
+        AssetBrowserPanel* assets = f.window.assetBrowser();
+        QTreeWidget* tree = assets->tree();
         const auto centerOf = [&](const SheetItem& item) {
-            QTreeWidgetItem* row = sheets->itemRow(item);
+            QTreeWidgetItem* row = assets->itemRow(item);
             tree->scrollToItem(row);
             return tree->visualItemRect(row).center();
         };
         f.canvas().select({PLAYER});
         const QPoint animation = centerOf(IDLE_ANIMATION);
 
-        // Pressed, to drag it away: the player keeps its image.
-        QTest::mousePress(tree->viewport(), Qt::LeftButton, {}, animation);
-        QCOMPARE(tree->currentItem(), sheets->itemRow(IDLE_SPRITE));
+        // A click selects the row; the selected entity keeps its image.
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, animation);
+        QCOMPARE(tree->currentItem(), assets->itemRow(IDLE_ANIMATION));
         QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, IDLE_SPRITE.name);
-        // Released where it was pressed, a click: its image now.
-        QTest::mouseRelease(tree->viewport(), Qt::LeftButton, {}, animation);
-        QCOMPARE(tree->currentItem(), sheets->itemRow(IDLE_ANIMATION));
-        QCOMPARE(entityAt(f.scene(), PLAYER)->image->animation, IDLE_ANIMATION.name);
+        QCOMPARE(f.document().commands().count(), 0);
 
-        // With nothing selected, a double-click places it.
-        f.canvas().select({});
+        // A press to drag away leaves the current row.
+        QTest::mousePress(tree->viewport(), Qt::LeftButton, {}, centerOf(IDLE_SPRITE));
+        QCOMPARE(tree->currentItem(), assets->itemRow(IDLE_ANIMATION));
+        QTest::mouseRelease(tree->viewport(), Qt::LeftButton, {}, centerOf(IDLE_SPRITE));
+
+        // A double-click places it, whatever is selected.
         const size_t count = f.scene().entities.size();
         QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, centerOf(IDLE_SPRITE));
         QCOMPARE(f.scene().entities.size(), count + 1);
@@ -1805,7 +1892,7 @@ private slots:
         QVERIFY(inspector->showsImage());
         inspector->setImageMode(ImageMode::NineSlice);
         QCOMPARE(entityAt(f.scene(), PLAYER)->image->mode, ImageMode::NineSlice);
-        inspector->removeImageButton()->click();
+        inspector->imageField()->clearButton()->click();
         const Entity* player = entityAt(f.scene(), PLAYER);
         QVERIFY(!player->image);
         QCOMPARE(player->size, std::optional(Extent::px({16, 24})));

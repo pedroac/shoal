@@ -7,7 +7,6 @@
 #include "editor/SheetItem.h"
 
 class QLineEdit;
-class QToolButton;
 class QMimeData;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -52,22 +51,13 @@ public:
     /// Shows only the assets whose path or name contains `text`.
     void setFilter(const QString& text);
 
-    /// Picks an entity's image, showing `current` (none for no image), or, with `picking`
-    /// false, only browses.
-    void setChoice(bool picking, const std::optional<SheetItem>& current);
-    bool isPicking() const { return m_picking; }
-    /// Checked for an entity with no image; clicking it removes the image.
-    QToolButton* noneButton() const { return m_noneButton; }
-
     /// The local files of a kind Shoal knows that `data` carries, such as files dragged
     /// from a file manager.
     static QStringList assetFiles(const QMimeData* data);
 
 signals:
-    /// A row was double-clicked or activated with the keyboard, while not picking.
+    /// A row was double-clicked or activated with the keyboard.
     void placeRequested(const shoal::editor::SheetItem& item);
-    /// While picking, the user chose `item`, or None.
-    void chosen(const std::optional<shoal::editor::SheetItem>& item);
     /// Files of a kind Shoal knows were dropped on the panel, as absolute paths.
     void assetFilesDropped(const QStringList& files);
 
@@ -86,9 +76,6 @@ private:
     assets::SheetCache& m_sheets;
     Tree* m_tree;
     QLineEdit* m_filter;
-    QToolButton* m_noneButton;
-    bool m_picking = false;
-    bool m_syncing = false;  ///< While setChoice() moves the current row.
 };
 
 }  // namespace shoal::editor

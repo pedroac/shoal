@@ -1,5 +1,6 @@
 #include "editor/SheetItem.h"
 
+#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMimeData>
@@ -14,6 +15,21 @@ const QString SPRITE = QStringLiteral("sprite");
 const QString ANIMATION = QStringLiteral("animation");
 const QString IMAGE = QStringLiteral("image");
 }  // namespace
+
+QString SheetItem::path() const
+{
+    switch (kind) {
+        case Kind::Sprite:
+            return QCoreApplication::translate("SheetItem", "Sprites / %1 / Sprites / %2")
+                .arg(sheet, name);
+        case Kind::Animation:
+            return QCoreApplication::translate("SheetItem", "Sprites / %1 / Animations / %2")
+                .arg(sheet, name);
+        case Kind::Image:
+            return QCoreApplication::translate("SheetItem", "Images / %1").arg(sheet);
+    }
+    return {};
+}
 
 core::Entity SheetItem::toEntity() const
 {

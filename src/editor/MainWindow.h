@@ -117,7 +117,6 @@ private:
     void updateTitle();
     void updateActions();
     /// Shows the selected entity's image in the sheets, for them to pick another one.
-    void updateSheetChoice();
     void showAbout();
     CanvasView* currentCanvasView() const;
     /// The scenes' tabs.

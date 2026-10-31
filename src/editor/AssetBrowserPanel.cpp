@@ -3,18 +3,17 @@
 #include <QDir>
 #include <QDropEvent>
 #include <QFileInfo>
-#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QMimeData>
 #include <QPainter>
-#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <algorithm>
 
 #include "assets/SheetCache.h"
 #include "editor/ClickOrDragView.h"
+#include "editor/Thumbnails.h"
 
 namespace shoal::editor {
 
@@ -72,32 +71,6 @@ bool filterRow(QTreeWidgetItem* row, const QString& text)
     return shown;
 }
 
-/// `sprite` drawn whole in a square, upright and flipped as the canvas draws it, scaled to
-/// fill the square; pixel art stays sharp.
-QIcon thumbnail(const assets::Sheet& sheet, const assets::Sprite& sprite, const QPixmap& atlas,
-                bool flipX, bool flipY, double pixelRatio)
-{
-    const assets::SpritePlacement placement =
-        assets::placeSprite(sprite, 1.0 / sheet.scale, flipX, flipY);
-    const QRectF bounds = placement.bounds;
-    if (atlas.isNull() || bounds.isEmpty()) {
-        return {};
-    }
-    const int pixels = int(ICON_SIZE * pixelRatio);
-    QPixmap pixmap(pixels, pixels);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    const double factor = std::min(pixels / bounds.width(), pixels / bounds.height());
-    painter.translate(pixels / 2.0, pixels / 2.0);
-    painter.scale(factor, factor);
-    painter.translate(-bounds.center());
-    painter.setTransform(placement.transform, true);
-    painter.drawPixmap(placement.target, atlas, placement.source);
-    painter.end();
-    pixmap.setDevicePixelRatio(pixelRatio);
-    return QIcon(pixmap);
-}
-
 QTreeWidgetItem* groupRow(QTreeWidgetItem* sheetRow, const QString& text)
 {
     auto* row = new QTreeWidgetItem(sheetRow, {text});
@@ -108,8 +81,8 @@ QTreeWidgetItem* groupRow(QTreeWidgetItem* sheetRow, const QString& text)
 
 }  // namespace
 
-/// Drags a sprite or an animation, never a sheet or a group, without making it current
-/// (see ClickOrDragView), and takes drops of .sprat files only.
+/// Drags a sprite, an animation or an image, never a sheet or a group, without making it
+/// current (see ClickOrDragView), and takes drops of files of a kind Shoal knows only.
 class AssetBrowserPanel::Tree : public ClickOrDragView<QTreeWidget> {
 public:
     explicit Tree(AssetBrowserPanel* panel) : ClickOrDragView(panel), m_panel(panel) {}
@@ -170,16 +143,8 @@ private:
 };
 
 AssetBrowserPanel::AssetBrowserPanel(assets::SheetCache& sheets, QWidget* parent)
-    : QWidget(parent),
-      m_sheets(sheets),
-      m_tree(new Tree(this)),
-      m_filter(new QLineEdit(this)),
-      m_noneButton(new QToolButton(this))
+    : QWidget(parent), m_sheets(sheets), m_tree(new Tree(this)), m_filter(new QLineEdit(this))
 {
-    m_noneButton->setObjectName(QStringLiteral("noImageButton"));
-    m_noneButton->setText(tr("None"));
-    m_noneButton->setToolTip(tr("No image for the selected entity"));
-    m_noneButton->setCheckable(true);
     m_filter->setObjectName(QStringLiteral("assetFilter"));
     m_filter->setPlaceholderText(tr("Filter assets"));
     m_filter->setClearButtonEnabled(true);
@@ -193,32 +158,17 @@ AssetBrowserPanel::AssetBrowserPanel(assets::SheetCache& sheets, QWidget* parent
     m_tree->setAcceptDrops(true);  // .sprat files; Tree refuses everything else
     m_tree->viewport()->setAcceptDrops(true);
 
-    auto* top = new QHBoxLayout;
-    top->addWidget(m_filter);
-    top->addWidget(m_noneButton);
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addLayout(top);
+    layout->addWidget(m_filter);
     layout->addWidget(m_tree);
 
     connect(m_filter, &QLineEdit::textChanged, this, &AssetBrowserPanel::applyFilter);
     connect(m_tree, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* row) {
-        if (const std::optional<SheetItem> item = itemOf(row); item && !m_picking) {
+        if (const std::optional<SheetItem> item = itemOf(row)) {
             emit placeRequested(*item);
         }
     });
-    connect(m_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* row) {
-        if (const std::optional<SheetItem> item = itemOf(row); item && m_picking && !m_syncing) {
-            emit chosen(item);
-        }
-    });
-    connect(m_noneButton, &QToolButton::clicked, this, [this] {
-        if (m_picking) {
-            emit chosen(std::nullopt);
-        }
-        m_noneButton->setChecked(m_picking);  // it shows; the entity decides
-    });
-    setChoice(false, std::nullopt);
     connect(&m_sheets, &assets::SheetCache::sheetChanged, this, &AssetBrowserPanel::onSheetChanged);
     for (const QString& alias : m_sheets.aliases()) {
         onSheetChanged(alias);
@@ -329,23 +279,6 @@ std::optional<SheetItem> AssetBrowserPanel::itemOf(const QTreeWidgetItem* row)
                      row->data(0, SHEET).toString(), row->data(0, NAME).toString()};
 }
 
-void AssetBrowserPanel::setChoice(bool picking, const std::optional<SheetItem>& current)
-{
-    m_picking = picking;
-    m_syncing = true;
-    m_noneButton->setEnabled(picking);
-    m_noneButton->setChecked(picking && !current);
-    QTreeWidgetItem* row = picking && current ? itemRow(*current) : nullptr;
-    if (row) {
-        m_tree->setCurrentItem(row);
-        m_tree->scrollToItem(row);
-    }
-    else if (picking) {
-        m_tree->setCurrentItem(nullptr);
-    }
-    m_syncing = false;
-}
-
 void AssetBrowserPanel::setAssets(const core::Assets& assets, const QString& baseDirectory)
 {
     const QDir base(baseDirectory);
@@ -443,8 +376,8 @@ void AssetBrowserPanel::fillImageRow(QTreeWidgetItem* row, const QString& alias)
         const assets::Sprite& sprite = sheet->sprites.front();
         tips << QDir::toNativeSeparators(sheet->file)
              << tr("%1 × %2").arg(sprite.sourceSize.width()).arg(sprite.sourceSize.height());
-        row->setIcon(0, thumbnail(*sheet, sprite, QPixmap::fromImage(sheet->atlases.front()), false,
-                                  false, devicePixelRatioF()));
+        row->setIcon(0, spriteThumbnail(*sheet, sprite, QPixmap::fromImage(sheet->atlases.front()),
+                                        false, false, ICON_SIZE, devicePixelRatioF()));
         row->setData(0, FILE_PATH, QDir::fromNativeSeparators(sheet->file));
         row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
     }
@@ -515,8 +448,8 @@ void AssetBrowserPanel::fillSheetRow(QTreeWidgetItem* row, const QString& alias)
             spriteRow->setData(0, KIND, SPRITE_ROW);
             spriteRow->setData(0, SHEET, alias);
             spriteRow->setData(0, NAME, sprite.path);
-            spriteRow->setIcon(
-                0, thumbnail(*sheet, sprite, atlasOf(sprite), false, false, pixelRatio));
+            spriteRow->setIcon(0, spriteThumbnail(*sheet, sprite, atlasOf(sprite), false, false,
+                                                  ICON_SIZE, pixelRatio));
             spriteRow->setToolTip(
                 0, tr("%1 × %2").arg(sprite.sourceSize.width()).arg(sprite.sourceSize.height()));
             spriteRow->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
@@ -534,8 +467,9 @@ void AssetBrowserPanel::fillSheetRow(QTreeWidgetItem* row, const QString& alias)
             if (!animation.frames.empty() &&
                 size_t(animation.frames.front()) < sheet->sprites.size()) {
                 const assets::Sprite& first = sheet->sprites[size_t(animation.frames.front())];
-                animationRow->setIcon(0, thumbnail(*sheet, first, atlasOf(first), animation.flipX,
-                                                   animation.flipY, pixelRatio));
+                animationRow->setIcon(
+                    0, spriteThumbnail(*sheet, first, atlasOf(first), animation.flipX,
+                                       animation.flipY, ICON_SIZE, pixelRatio));
             }
             animationRow->setToolTip(
                 0, tr("%n frame(s) at %1 fps", nullptr, int(animation.frames.size()))

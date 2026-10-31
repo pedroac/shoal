@@ -22,8 +22,10 @@
 #include <QVBoxLayout>
 #include <cmath>
 
+#include "assets/SheetCache.h"
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
+#include "editor/AssetField.h"
 #include "editor/ColorButton.h"
 #include "editor/FormFields.h"
 #include "editor/PointGrid.h"
@@ -195,9 +197,8 @@ InspectorPanel::InspectorPanel(QWidget* parent)
       m_pivotGrid(new PointGrid(this)),
       m_pivotXBox(numberBox(this, QStringLiteral("pivotXBox"), MAX_FRACTION, 3, 0.25)),
       m_pivotYBox(numberBox(this, QStringLiteral("pivotYBox"), MAX_FRACTION, 3, 0.25)),
-      m_imageLabel(new QLabel(this)),
+      m_imageField(new AssetField(this)),
       m_imageModeBox(new QComboBox(this)),
-      m_removeImageButton(new QToolButton(this)),
       m_fillBox(new QCheckBox(this)),
       m_fillButton(new ColorButton(this)),
       m_tintButton(new ColorButton(this)),
@@ -260,8 +261,7 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     m_imageModeBox->setObjectName(QStringLiteral("imageModeBox"));
     addEnumItems(m_imageModeBox, {std::pair{core::ImageMode::Stretch, tr("Stretch")},
                                   std::pair{core::ImageMode::NineSlice, tr("Nine-slice")}});
-    m_removeImageButton->setObjectName(QStringLiteral("removeImageButton"));
-    m_removeImageButton->setText(tr("Remove"));
+    m_imageField->setObjectName(QStringLiteral("imageField"));
     m_fillBox->setObjectName(QStringLiteral("fillBox"));
     m_fillButton->setObjectName(QStringLiteral("fillButton"));
     m_tintButton->setObjectName(QStringLiteral("tintButton"));
@@ -360,8 +360,9 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     form->addRow(tr("Pivot"), pivotRow);
 
     form = addSection(entityLayout, tr("Look"));
-    m_imageRow = row(this, {m_imageLabel, m_imageModeBox, m_removeImageButton});
-    form->addRow(tr("Image"), m_imageRow);
+    form->addRow(tr("Image"), m_imageField);
+    m_imageRow = row(this, {m_imageModeBox});
+    form->addRow(tr("Mode"), m_imageRow);
     form->addRow(tr("Fill"), row(this, {m_fillBox, m_fillButton}));
     form->addRow(tr("Tint"), row(this, {m_tintButton, m_tintModeBox}));
 
@@ -450,7 +451,9 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     connect(m_pivotYBox, &QDoubleSpinBox::valueChanged, this, applyPivotBoxes);
     connect(m_imageModeBox, &QComboBox::activated, this,
             [this] { setImageMode(core::ImageMode(m_imageModeBox->currentData().toInt())); });
-    connect(m_removeImageButton, &QToolButton::clicked, this, &InspectorPanel::removeImage);
+    connect(m_imageField, &AssetField::chosen, this, [this](const std::optional<SheetItem>& item) {
+        setImage(item ? std::optional(item->toImage()) : std::nullopt);
+    });
     connect(m_fillBox, &QCheckBox::clicked, this, [this](bool fill) {
         setFill(fill ? std::optional(m_fillButton->color()) : std::nullopt);
     });
@@ -498,6 +501,7 @@ void InspectorPanel::setCanvas(SceneCanvas* canvas)
     }
     m_canvas = canvas;
     m_document = canvas ? &canvas->document() : nullptr;
+    m_imageField->setSheets(canvas ? &canvas->sheets() : nullptr);
     if (m_canvas) {
         connect(m_canvas, &SceneCanvas::contentChanged, this, &InspectorPanel::refresh);
         connect(m_canvas, &QGraphicsScene::selectionChanged, this, [this] {
@@ -1047,27 +1051,16 @@ void InspectorPanel::refresh()
                                         : m_topLevel);
     m_topLevel->setScene(topLevel && !preset ? std::optional(m_canvas->sceneId()) : std::nullopt);
     m_presetTopLevel->setPreset(m_document, topLevel && preset ? *preset : QString());
-    for (QWidget* field : std::initializer_list<QWidget*>{m_idField,       m_classesField,
-                                                          m_activeBox,     m_visibleBox,
-                                                          m_xBox,          m_yBox,
-                                                          m_xUnitBox,      m_yUnitBox,
-                                                          m_offsetXBox,    m_offsetYBox,
-                                                          m_angleBox,      m_scaleXBox,
-                                                          m_scaleYBox,     m_widthBox,
-                                                          m_heightBox,     m_widthUnitBox,
-                                                          m_heightUnitBox, m_flipXBox,
-                                                          m_flipYBox,      m_sizeBox,
-                                                          m_pivotBox,      m_pivotGrid,
-                                                          m_pivotXBox,     m_pivotYBox,
-                                                          m_imageModeBox,  m_removeImageButton,
-                                                          m_fillBox,       m_fillButton,
-                                                          m_tintButton,    m_tintModeBox,
-                                                          m_clipBox,       m_spaceBox,
-                                                          m_parallaxBox,   m_parallaxXBox,
-                                                          m_parallaxYBox,  m_containerBox,
-                                                          m_tileWidthBox,  m_tileHeightBox,
-                                                          m_tilePivotGrid, m_tilePivotXBox,
-                                                          m_tilePivotYBox}) {
+    for (QWidget* field : std::initializer_list<QWidget*>{
+             m_idField,      m_classesField,  m_activeBox,     m_visibleBox,    m_xBox,
+             m_yBox,         m_xUnitBox,      m_yUnitBox,      m_offsetXBox,    m_offsetYBox,
+             m_angleBox,     m_scaleXBox,     m_scaleYBox,     m_widthBox,      m_heightBox,
+             m_widthUnitBox, m_heightUnitBox, m_flipXBox,      m_flipYBox,      m_sizeBox,
+             m_pivotBox,     m_pivotGrid,     m_pivotXBox,     m_pivotYBox,     m_imageModeBox,
+             m_imageField,   m_fillBox,       m_fillButton,    m_tintButton,    m_tintModeBox,
+             m_clipBox,      m_spaceBox,      m_parallaxBox,   m_parallaxXBox,  m_parallaxYBox,
+             m_containerBox, m_tileWidthBox,  m_tileHeightBox, m_tilePivotGrid, m_tilePivotXBox,
+             m_tilePivotYBox}) {
         field->setEnabled(entity != nullptr);
     }
     if (!entity) {
@@ -1104,6 +1097,7 @@ void InspectorPanel::refresh()
             box->setChecked(false);
         }
         m_pivotGrid->setPoint(std::nullopt);
+        m_imageField->setItem(std::nullopt);
         m_sizeBox->setText(tr("Own"));  // as wide as with an entity, so nothing jumps
         m_tintButton->setColor(core::Color{});
         setRowVisible(m_sizeRow, true);
@@ -1185,9 +1179,10 @@ void InspectorPanel::refresh()
     m_pivotXBox->setEnabled(entity->pivot.has_value() || !entity->image);
     m_pivotYBox->setEnabled(entity->pivot.has_value() || !entity->image);
 
+    m_imageField->setItem(entity->image ? std::optional(SheetItem::fromImage(*entity->image))
+                                        : std::nullopt);
     setRowVisible(m_imageRow, entity->image.has_value());
     if (entity->image) {
-        m_imageLabel->setText(entity->image->isAnimation() ? tr("Animation") : tr("Sprite"));
         m_imageModeBox->setCurrentIndex(m_imageModeBox->findData(int(entity->image->mode)));
     }
     m_fillBox->setChecked(entity->fill.has_value());

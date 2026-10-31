@@ -102,10 +102,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
             [this](const QString& id) { openPresets(id); });
     connect(m_scenes, &ScenesPanel::sceneActivated, this, &MainWindow::openScene);
     connect(m_assetBrowser, &AssetBrowserPanel::placeRequested, this, &MainWindow::placeSheetItem);
-    connect(m_assetBrowser, &AssetBrowserPanel::chosen, this,
-            [this](const std::optional<SheetItem>& item) {
-                m_inspector->setImage(item ? std::optional(item->toImage()) : std::nullopt);
-            });
     connect(m_presets, &PresetsPanel::placeRequested, this, &MainWindow::placePreset);
     connect(m_assetBrowser, &AssetBrowserPanel::assetFilesDropped, this, &MainWindow::addAssets);
     createActions();
@@ -864,25 +860,6 @@ void MainWindow::updateActions()
     else {
         m_deleteAction->setEnabled(!scenes.isEmpty() || !transitions.isEmpty());
     }
-    updateSheetChoice();
-}
-
-void MainWindow::updateSheetChoice()
-{
-    // One entity selected, that can be changed: its image, or none.
-    SceneView* view = currentSceneView();
-    const QList<core::EntityPath> selected =
-        view ? view->canvas().selectedPaths() : QList<core::EntityPath>();
-    const core::Scene* scene = view ? view->canvas().scene() : nullptr;
-    const core::Entity* entity = scene && selected.size() == 1 && view->canvas().isEditable()
-                                     ? core::entityAt(*scene, selected.first())
-                                     : nullptr;
-    if (!entity) {
-        m_assetBrowser->setChoice(false, std::nullopt);
-        return;
-    }
-    m_assetBrowser->setChoice(
-        true, entity->image ? std::optional(SheetItem::fromImage(*entity->image)) : std::nullopt);
 }
 
 void MainWindow::showAbout()

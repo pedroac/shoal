@@ -1024,7 +1024,7 @@ Problems panel warns.
     resizes what is in percent of it.
   - The inspector edits the selected entity's id, classes, active and visible
     flags, position, angle (degrees), scale and flips, then its parts: its size
-    and pivot, its image (its mode, or removing it), its fill, its tint and tint mode,
+    and pivot, its image (its asset field, and its mode), its fill, its tint and tint mode,
     whether it clips, its container, its space and its parallax. A check box adds or removes each part that can be absent. Each change
     is one undo step. The fields are in sections, under the id, classes and flags:
     Transform (position, offset, angle, scale, flips), Rect (size, pivot), Look
@@ -1069,8 +1069,8 @@ Problems panel warns.
     step.
   - **The presets and the assets tell a click from a drag.** A row becomes current
     when the mouse is released on it, not when it is pressed, so dragging a row away
-    leaves the current one as it was: dragging a sprite onto a scene doesn't change
-    the selected entity's image, and dragging a preset into the one being edited
+    leaves the current one as it was: dragging a sprite onto a scene leaves the
+    browser's current row, and dragging a preset into the one being edited
     doesn't change which one that is. A double-click makes the row current too.
   - **The asset browser** (the project panel's Assets tab, in place of Sheets) lists
     the declared assets in groups: Sprites (each sheet, with its sprites by path, in
@@ -1080,19 +1080,30 @@ Problems panel warns.
     paths. An asset that didn't load says why. It follows the asset caches, so a
     sheet written again by sprat, or an image or a font saved again, shows up at
     once.
-  - **It picks for the selected entity.** With one entity selected that can be
-    changed, clicking a row gives the entity that asset, one undo step: a sprite or
-    an image becomes its image, a font its text's font, a clip its sound's or its
-    video's, adding the part if it has none, so picking a font shows the Text
-    section. Its image is the current row, or None is checked, and the other
-    assets it uses are in bold. None removes the image; the other parts are removed
-    from their inspector sections. A nine-slice stays one with another sprite, and
-    a size of its own stays; None keeps the size and pivot the image gave it.
-    Dragging a row still places a new entity, and leaves the selected one as it
-    was; double-clicking one places it only when no entity is picked for.
+  - **It only browses.** Clicking a row selects it and nothing else: the browser
+    looks like a library to take from, not a property of the selected entity, so a
+    click never changes one by accident. Dragging a row places a new entity, or,
+    dropped on an inspector field, gives the entity that asset; double-clicking one
+    places it.
+  - **An entity's assets are chosen in the inspector**, each part with a field of
+    its own kind: the image's field takes sprites, animations and images; the
+    text's will take fonts, the sound's clips and the video's videos. A field shows
+    the asset's thumbnail and its path in the browser, `Sprites / hero / Animations
+    / run` or `Images / title`, and chooses one, one undo step:
+    - dropped from the asset browser; one of another kind is refused;
+    - typed: a popup lists the assets whose path contains the text, ignoring case,
+      with thumbnails, and Enter or a click chooses one. Text that names no asset is
+      shown in red and never chosen; Escape, or leaving the field, shows the asset
+      again;
+    - browsed: `…` opens the whole list;
+    - cleared: `✕` removes the image, keeping the size and pivot it gave the
+      entity. An entity without an image shows the field empty, to give it one.
+    A nine-slice stays one with another sprite, and a size of its own stays. An
+    asset that is gone (its alias undeclared, or its sprite no longer in the sheet)
+    stays, shown in red as missing, so nothing is lost until another is chosen.
   - Until the text, audio and video parts come (roadmap step 5), fonts, clips and
     videos are listed by alias, with their file as a tooltip and a missing file
-    shown in red, and can't be placed or picked.
+    shown in red, and can't be placed or chosen.
   - Dropping files on the asset browser declares them in the manifest, in one undo
     step, each in the kind its extension says, under an alias made from its file
     name (characters an id can't have become `_`, and `_2`, `_3`, ... avoids a
