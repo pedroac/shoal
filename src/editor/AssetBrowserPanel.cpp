@@ -11,6 +11,7 @@
 #include <QVBoxLayout>
 #include <algorithm>
 
+#include "assets/FontCache.h"
 #include "assets/SheetCache.h"
 #include "editor/ClickOrDragView.h"
 #include "editor/Thumbnails.h"
@@ -22,7 +23,17 @@ namespace {
 constexpr int ICON_SIZE = 40;  ///< On screen, in pixels.
 
 enum Role { KIND = Qt::UserRole, SHEET, NAME, FILE_PATH, ASSET_KIND };
-enum Kind { KIND_ROW, SHEET_ROW, GROUP_ROW, SPRITE_ROW, ANIMATION_ROW, IMAGE_ROW, FILE_ROW };
+enum Kind {
+    KIND_ROW,
+    SHEET_ROW,
+    GROUP_ROW,
+    SPRITE_ROW,
+    ANIMATION_ROW,
+    IMAGE_ROW,
+    FONT_ROW,
+    AUDIO_ROW,
+    VIDEO_ROW
+};
 
 const QColor ERROR_COLOR(200, 60, 40);
 
@@ -81,8 +92,8 @@ QTreeWidgetItem* groupRow(QTreeWidgetItem* sheetRow, const QString& text)
 
 }  // namespace
 
-/// Drags a sprite, an animation or an image, never a sheet or a group, without making it
-/// current (see ClickOrDragView), and takes drops of files of a kind Shoal knows only.
+/// Drags a sprite, an animation, an image, a font or a video, never a sheet or a group, without
+/// making it current (see ClickOrDragView), and takes drops of files of a kind Shoal knows only.
 class AssetBrowserPanel::Tree : public ClickOrDragView<QTreeWidget> {
 public:
     explicit Tree(AssetBrowserPanel* panel) : ClickOrDragView(panel), m_panel(panel) {}
@@ -126,12 +137,12 @@ protected:
                             "them to the project."));
     }
 
-    QStringList mimeTypes() const override { return {QLatin1StringView(SheetItem::MIME_TYPE)}; }
+    QStringList mimeTypes() const override { return {QLatin1StringView(AssetItem::MIME_TYPE)}; }
 
     QMimeData* mimeData(const QList<QTreeWidgetItem*>& rows) const override
     {
         for (const QTreeWidgetItem* row : rows) {
-            if (const std::optional<SheetItem> item = itemOf(row)) {
+            if (const std::optional<AssetItem> item = itemOf(row)) {
                 return item->toMimeData();
             }
         }
@@ -142,8 +153,13 @@ private:
     AssetBrowserPanel* m_panel;
 };
 
-AssetBrowserPanel::AssetBrowserPanel(assets::SheetCache& sheets, QWidget* parent)
-    : QWidget(parent), m_sheets(sheets), m_tree(new Tree(this)), m_filter(new QLineEdit(this))
+AssetBrowserPanel::AssetBrowserPanel(assets::SheetCache& sheets, assets::FontCache& fonts,
+                                     QWidget* parent)
+    : QWidget(parent),
+      m_sheets(sheets),
+      m_fonts(fonts),
+      m_tree(new Tree(this)),
+      m_filter(new QLineEdit(this))
 {
     m_filter->setObjectName(QStringLiteral("assetFilter"));
     m_filter->setPlaceholderText(tr("Filter assets"));
@@ -165,13 +181,17 @@ AssetBrowserPanel::AssetBrowserPanel(assets::SheetCache& sheets, QWidget* parent
 
     connect(m_filter, &QLineEdit::textChanged, this, &AssetBrowserPanel::applyFilter);
     connect(m_tree, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* row) {
-        if (const std::optional<SheetItem> item = itemOf(row)) {
+        if (const std::optional<AssetItem> item = itemOf(row)) {
             emit placeRequested(*item);
         }
     });
     connect(&m_sheets, &assets::SheetCache::sheetChanged, this, &AssetBrowserPanel::onSheetChanged);
     for (const QString& alias : m_sheets.aliases()) {
         onSheetChanged(alias);
+    }
+    connect(&m_fonts, &assets::FontCache::fontChanged, this, &AssetBrowserPanel::onFontChanged);
+    for (const QString& alias : m_fonts.aliases()) {
+        onFontChanged(alias);
     }
 }
 
@@ -224,15 +244,20 @@ bool AssetBrowserPanel::hasAssets() const
     return false;
 }
 
-QTreeWidgetItem* AssetBrowserPanel::sheetRow(const QString& alias) const
+QTreeWidgetItem* AssetBrowserPanel::rowOf(core::AssetKind kind, const QString& alias) const
 {
-    QTreeWidgetItem* sheets = kindRow(core::AssetKind::Sheet);
-    for (int i = 0; sheets && i < sheets->childCount(); ++i) {
-        if (sheets->child(i)->data(0, SHEET).toString() == alias) {
-            return sheets->child(i);
+    QTreeWidgetItem* group = kindRow(kind);
+    for (int i = 0; group && i < group->childCount(); ++i) {
+        if (group->child(i)->data(0, SHEET).toString() == alias) {
+            return group->child(i);
         }
     }
     return nullptr;
+}
+
+QTreeWidgetItem* AssetBrowserPanel::sheetRow(const QString& alias) const
+{
+    return rowOf(core::AssetKind::Sheet, alias);
 }
 
 QTreeWidgetItem* AssetBrowserPanel::assetRow(const QString& alias) const
@@ -248,13 +273,12 @@ QTreeWidgetItem* AssetBrowserPanel::assetRow(const QString& alias) const
     return nullptr;
 }
 
-QTreeWidgetItem* AssetBrowserPanel::itemRow(const SheetItem& item) const
+QTreeWidgetItem* AssetBrowserPanel::itemRow(const AssetItem& item) const
 {
-    if (item.kind == SheetItem::Kind::Image) {
-        QTreeWidgetItem* row = assetRow(item.sheet);
-        return row && row->data(0, KIND).toInt() == IMAGE_ROW ? row : nullptr;
+    if (!item.isImage() || item.kind == AssetItem::Kind::Image) {
+        return rowOf(item.assetKind(), item.alias);
     }
-    QTreeWidgetItem* sheet = sheetRow(item.sheet);
+    QTreeWidgetItem* sheet = sheetRow(item.alias);
     for (int g = 0; sheet && g < sheet->childCount(); ++g) {
         QTreeWidgetItem* group = sheet->child(g);
         for (int i = 0; i < group->childCount(); ++i) {
@@ -266,24 +290,28 @@ QTreeWidgetItem* AssetBrowserPanel::itemRow(const SheetItem& item) const
     return nullptr;
 }
 
-std::optional<SheetItem> AssetBrowserPanel::itemOf(const QTreeWidgetItem* row)
+std::optional<AssetItem> AssetBrowserPanel::itemOf(const QTreeWidgetItem* row)
 {
     const int kind = row ? row->data(0, KIND).toInt() : SHEET_ROW;
-    if (kind == IMAGE_ROW) {
-        return SheetItem{SheetItem::Kind::Image, row->data(0, SHEET).toString(), {}};
+    if (kind == IMAGE_ROW || kind == FONT_ROW || kind == AUDIO_ROW || kind == VIDEO_ROW) {
+        return AssetItem{kind == IMAGE_ROW   ? AssetItem::Kind::Image
+                         : kind == FONT_ROW  ? AssetItem::Kind::Font
+                         : kind == AUDIO_ROW ? AssetItem::Kind::Audio
+                                             : AssetItem::Kind::Video,
+                         row->data(0, SHEET).toString(),
+                         {}};
     }
     if (kind != SPRITE_ROW && kind != ANIMATION_ROW) {
         return std::nullopt;
     }
-    return SheetItem{kind == ANIMATION_ROW ? SheetItem::Kind::Animation : SheetItem::Kind::Sprite,
+    return AssetItem{kind == ANIMATION_ROW ? AssetItem::Kind::Animation : AssetItem::Kind::Sprite,
                      row->data(0, SHEET).toString(), row->data(0, NAME).toString()};
 }
 
 void AssetBrowserPanel::setAssets(const core::Assets& assets, const QString& baseDirectory)
 {
     const QDir base(baseDirectory);
-    for (const core::AssetKind kind :
-         {core::AssetKind::Font, core::AssetKind::Audio, core::AssetKind::Video}) {
+    for (const core::AssetKind kind : {core::AssetKind::Audio, core::AssetKind::Video}) {
         const QMap<QString, QString>& declared = assets.of(kind);
         if (declared.isEmpty()) {
             delete kindRow(kind);
@@ -296,11 +324,13 @@ void AssetBrowserPanel::setAssets(const core::Assets& assets, const QString& bas
             const bool exists = QFileInfo::exists(file);
             auto* row =
                 new QTreeWidgetItem(group, {exists ? it.key() : tr("%1 (missing)").arg(it.key())});
-            row->setData(0, KIND, FILE_ROW);
+            // Shoal doesn't decode audio or video: a clip is placed by its alias, its file
+            // there or not.
+            row->setData(0, KIND, kind == core::AssetKind::Video ? VIDEO_ROW : AUDIO_ROW);
             row->setData(0, SHEET, it.key());
             row->setData(0, FILE_PATH, *it);
             row->setToolTip(0, QDir::toNativeSeparators(file));
-            row->setFlags(Qt::ItemIsEnabled);
+            row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
             if (!exists) {
                 row->setForeground(0, ERROR_COLOR);
             }
@@ -338,12 +368,8 @@ void AssetBrowserPanel::onSheetChanged(const QString& alias)
     const int kind = row ? row->data(0, KIND).toInt() : -1;
     if (row && kind != wanted && (kind == SHEET_ROW || kind == IMAGE_ROW)) {
         // No longer declared, or declared as the other kind.
-        QTreeWidgetItem* group = row->parent();
-        delete row;
+        removeRow(row);
         row = nullptr;
-        if (group->childCount() == 0) {
-            delete group;
-        }
     }
     if (!declared) {
         m_tree->viewport()->update();  // the hint, once the last asset is gone
@@ -364,6 +390,58 @@ void AssetBrowserPanel::onSheetChanged(const QString& alias)
     else {
         fillSheetRow(row, alias);
     }
+    applyFilter();
+}
+
+void AssetBrowserPanel::removeRow(QTreeWidgetItem* row)
+{
+    QTreeWidgetItem* group = row->parent();
+    delete row;
+    if (group && group->childCount() == 0) {
+        delete group;
+    }
+}
+
+void AssetBrowserPanel::onFontChanged(const QString& alias)
+{
+    QTreeWidgetItem* row = rowOf(core::AssetKind::Font, alias);
+    if (!m_fonts.aliases().contains(alias)) {
+        if (row) {
+            removeRow(row);
+        }
+        m_tree->viewport()->update();  // the hint, once the last asset is gone
+        return;
+    }
+    if (!row) {
+        row = new QTreeWidgetItem({alias});
+        row->setData(0, KIND, FONT_ROW);
+        row->setData(0, SHEET, alias);
+        insertByAlias(makeKindRow(core::AssetKind::Font), row);
+    }
+    // Shown in itself, and dragged once it is loaded.
+    const QString family = m_fonts.family(alias);
+    const QString error = m_fonts.error(alias);
+    const QString file = m_fonts.file(alias);
+    QStringList tips{QDir::toNativeSeparators(file)};
+    QFont font = this->font();
+    if (!family.isEmpty()) {
+        tips << family;
+        font = QFont(family);
+        font.setPixelSize(fontMetrics().height());
+        row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
+    }
+    else {
+        row->setFlags(Qt::ItemIsEnabled);
+    }
+    row->setFont(0, font);
+    if (!error.isEmpty()) {
+        tips << (family.isEmpty() ? tr("Couldn't load: %1") : tr("The last reload failed: %1"))
+                    .arg(error);
+    }
+    row->setData(0, FILE_PATH, QDir::fromNativeSeparators(file));
+    row->setToolTip(0, tips.join(u'\n'));
+    row->setText(0, family.isEmpty() ? tr("%1 (not loaded)").arg(alias) : alias);
+    row->setForeground(0, error.isEmpty() ? palette().color(QPalette::Text) : ERROR_COLOR);
     applyFilter();
 }
 

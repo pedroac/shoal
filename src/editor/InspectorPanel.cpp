@@ -12,6 +12,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -22,6 +23,7 @@
 #include <QVBoxLayout>
 #include <cmath>
 
+#include "assets/FontCache.h"
 #include "assets/SheetCache.h"
 #include "core/ProjectDocument.h"
 #include "core/SceneCommands.h"
@@ -44,6 +46,8 @@ constexpr double MAX_POSITION = 1000000;
 constexpr double MAX_FRACTION = 100;
 /// The size a rect starts at when it is given to an entity without an image.
 constexpr double NEW_RECT_SIZE = 64;
+/// The radius a sound is given when it is made positional, in pixels.
+constexpr double NEW_SOUND_RADIUS = 400;
 constexpr double MAX_CELL = 1 << 24;  // as the files allow
 constexpr core::Unit UNITS[] = {core::Unit::Px, core::Unit::Percent, core::Unit::Cell};
 
@@ -197,8 +201,30 @@ InspectorPanel::InspectorPanel(QWidget* parent)
       m_pivotGrid(new PointGrid(this)),
       m_pivotXBox(numberBox(this, QStringLiteral("pivotXBox"), MAX_FRACTION, 3, 0.25)),
       m_pivotYBox(numberBox(this, QStringLiteral("pivotYBox"), MAX_FRACTION, 3, 0.25)),
-      m_imageField(new AssetField(this)),
+      m_assetField(new AssetField(AssetField::Accepts::Any, this)),
       m_imageModeBox(new QComboBox(this)),
+      m_fontField(new AssetField(AssetField::Accepts::Fonts, this)),
+      m_textEdit(new QPlainTextEdit(this)),
+      m_textKeyField(new QLineEdit(this)),
+      m_textSizeBox(numberBox(this, QStringLiteral("textSizeBox"), MAX_SIZE, 2, 1)),
+      m_textColorButton(new ColorButton(this)),
+      m_textAlignGrid(new PointGrid(this)),
+      m_textWrapBox(new QComboBox(this)),
+      m_lineHeightBox(numberBox(this, QStringLiteral("lineHeightBox"), 10, 2, 0.1)),
+      m_textSection(new QWidget(this)),
+      m_audioField(new AssetField(AssetField::Accepts::Sounds, this)),
+      m_volumeBox(numberBox(this, QStringLiteral("volumeBox"), 1, 2, 0.1)),
+      m_audioLoopBox(new QCheckBox(tr("Loop"), this)),
+      m_audioAutoplayBox(new QCheckBox(tr("Autoplay"), this)),
+      m_positionalBox(new QCheckBox(tr("Positional"), this)),
+      m_radiusBox(numberBox(this, QStringLiteral("radiusBox"), MAX_SIZE, 0, 10)),
+      m_removeAudioButton(new QToolButton(this)),
+      m_audioSection(new QWidget(this)),
+      m_videoField(new AssetField(AssetField::Accepts::Videos, this)),
+      m_videoLoopBox(new QCheckBox(tr("Loop"), this)),
+      m_videoAutoplayBox(new QCheckBox(tr("Autoplay"), this)),
+      m_videoModeBox(new QComboBox(this)),
+      m_videoSection(new QWidget(this)),
       m_fillBox(new QCheckBox(this)),
       m_fillButton(new ColorButton(this)),
       m_tintButton(new ColorButton(this)),
@@ -261,7 +287,59 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     m_imageModeBox->setObjectName(QStringLiteral("imageModeBox"));
     addEnumItems(m_imageModeBox, {std::pair{core::ImageMode::Stretch, tr("Stretch")},
                                   std::pair{core::ImageMode::NineSlice, tr("Nine-slice")}});
-    m_imageField->setObjectName(QStringLiteral("imageField"));
+    m_assetField->setObjectName(QStringLiteral("assetField"));
+    m_assetField->setToolTip(
+        tr("What it draws: a sprite, an animation or an image makes it an image, a font a text"));
+    m_fontField->setObjectName(QStringLiteral("fontField"));
+    m_textEdit->setObjectName(QStringLiteral("textEdit"));
+    m_textEdit->setTabChangesFocus(true);
+    m_textEdit->setToolTip(tr("Applied on leaving it, or on Ctrl+Enter; Enter breaks a line"));
+    m_textEdit->setFixedHeight(m_textEdit->fontMetrics().lineSpacing() * 3 +
+                               2 * m_textEdit->frameWidth() + 8);
+    m_textKeyField->setObjectName(QStringLiteral("textKeyField"));
+    m_textKeyField->setPlaceholderText(tr("none: the text as written"));
+    m_textKeyField->setToolTip(
+        tr("A localization key the engine looks up; the text is then its sample and fallback"));
+    m_textSizeBox->setMinimum(1);
+    m_textSizeBox->setSuffix(QStringLiteral(" px"));
+    m_textSizeBox->setToolTip(tr("The font's size, its em, in pixels"));
+    m_textColorButton->setObjectName(QStringLiteral("textColorButton"));
+    m_textColorButton->setToolTip(tr("Multiplied by its tint"));
+    m_textAlignGrid->setObjectName(QStringLiteral("textAlignGrid"));
+    m_textAlignGrid->setToolTip(tr("Where the text sits in its rect"));
+    m_textWrapBox->setObjectName(QStringLiteral("textWrapBox"));
+    addEnumItems(m_textWrapBox, {std::pair{core::TextWrap::Word, tr("At words")},
+                                 std::pair{core::TextWrap::None, tr("Never")}});
+    m_textWrapBox->setToolTip(tr("Whether lines break at its rect's width"));
+    m_lineHeightBox->setMinimum(0.1);
+    m_lineHeightBox->setSuffix(QStringLiteral(" ×"));
+    m_lineHeightBox->setToolTip(tr("The distance between lines, as a multiple of the size"));
+    m_audioField->setObjectName(QStringLiteral("audioField"));
+    m_volumeBox->setMinimum(0);
+    m_volumeBox->setToolTip(tr("From 0 to 1: a hint, the engine's to mix"));
+    m_audioLoopBox->setObjectName(QStringLiteral("audioLoopBox"));
+    m_audioAutoplayBox->setObjectName(QStringLiteral("audioAutoplayBox"));
+    m_audioAutoplayBox->setToolTip(tr("Starts it when the entity becomes active"));
+    m_positionalBox->setObjectName(QStringLiteral("positionalBox"));
+    m_positionalBox->setToolTip(
+        tr("Heard from its origin, fading out to nothing at the radius; off, it is heard "
+           "everywhere"));
+    m_radiusBox->setMinimum(1);
+    m_radiusBox->setSuffix(QStringLiteral(" px"));
+    m_removeAudioButton->setObjectName(QStringLiteral("removeAudioButton"));
+    m_removeAudioButton->setText(tr("Remove"));
+    m_removeAudioButton->setToolTip(tr("Remove the sound"));
+    m_videoField->setObjectName(QStringLiteral("videoField"));
+    m_videoLoopBox->setObjectName(QStringLiteral("videoLoopBox"));
+    m_videoAutoplayBox->setObjectName(QStringLiteral("videoAutoplayBox"));
+    m_videoAutoplayBox->setToolTip(tr("Starts it when the entity becomes active"));
+    m_videoModeBox->setObjectName(QStringLiteral("videoModeBox"));
+    addEnumItems(m_videoModeBox, {std::pair{core::VideoMode::Stretch, tr("Stretch")},
+                                  std::pair{core::VideoMode::Fit, tr("Fit")},
+                                  std::pair{core::VideoMode::Fill, tr("Fill")}});
+    m_videoModeBox->setToolTip(
+        tr("How its frames fill the rect: stretched, inside it keeping their aspect ratio, or "
+           "covering it, cropped"));
     m_fillBox->setObjectName(QStringLiteral("fillBox"));
     m_fillButton->setObjectName(QStringLiteral("fillButton"));
     m_tintButton->setObjectName(QStringLiteral("tintButton"));
@@ -360,11 +438,44 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     form->addRow(tr("Pivot"), pivotRow);
 
     form = addSection(entityLayout, tr("Look"));
-    form->addRow(tr("Image"), m_imageField);
+    form->addRow(tr("Asset"), m_assetField);
     m_imageRow = row(this, {m_imageModeBox});
     form->addRow(tr("Mode"), m_imageRow);
     form->addRow(tr("Fill"), row(this, {m_fillBox, m_fillButton}));
     form->addRow(tr("Tint"), row(this, {m_tintButton, m_tintModeBox}));
+
+    // Only for an entity with a text.
+    auto* textLayout = new QVBoxLayout(m_textSection);
+    textLayout->setContentsMargins({});
+    entityLayout->addWidget(m_textSection);
+    form = addSection(textLayout, tr("Text"));
+    form->addRow(tr("Font"), m_fontField);
+    form->addRow(tr("Text"), m_textEdit);
+    form->addRow(tr("Key"), m_textKeyField);
+    form->addRow(tr("Size"), row(this, {m_textSizeBox, m_textColorButton}));
+    form->addRow(tr("Align"), m_textAlignGrid);
+    form->addRow(tr("Wrap"), m_textWrapBox);
+    form->addRow(tr("Line height"), m_lineHeightBox);
+
+    // Only for an entity with a sound.
+    auto* audioLayout = new QVBoxLayout(m_audioSection);
+    audioLayout->setContentsMargins({});
+    entityLayout->addWidget(m_audioSection);
+    form = addSection(audioLayout, tr("Audio"));
+    form->addRow(tr("Clip"), m_audioField);
+    form->addRow(tr("Volume"), m_volumeBox);
+    form->addRow(QString(), row(this, {m_audioLoopBox, m_audioAutoplayBox}));
+    form->addRow(QString(), row(this, {m_positionalBox, m_radiusBox}));
+    form->addRow(QString(), row(this, {m_removeAudioButton}));
+
+    // Only for an entity with a video.
+    auto* videoLayout = new QVBoxLayout(m_videoSection);
+    videoLayout->setContentsMargins({});
+    entityLayout->addWidget(m_videoSection);
+    form = addSection(videoLayout, tr("Video"));
+    form->addRow(tr("Clip"), m_videoField);
+    form->addRow(QString(), row(this, {m_videoLoopBox, m_videoAutoplayBox}));
+    form->addRow(tr("Mode"), m_videoModeBox);
 
     form = addSection(entityLayout, tr("Children"));
     form->addRow(tr("Clip"), m_clipBox);
@@ -451,8 +562,80 @@ InspectorPanel::InspectorPanel(QWidget* parent)
     connect(m_pivotYBox, &QDoubleSpinBox::valueChanged, this, applyPivotBoxes);
     connect(m_imageModeBox, &QComboBox::activated, this,
             [this] { setImageMode(core::ImageMode(m_imageModeBox->currentData().toInt())); });
-    connect(m_imageField, &AssetField::chosen, this, [this](const std::optional<SheetItem>& item) {
-        setImage(item ? std::optional(item->toImage()) : std::nullopt);
+    connect(m_assetField, &AssetField::chosen, this, &InspectorPanel::setAsset);
+    connect(m_fontField, &AssetField::chosen, this, [this](const std::optional<AssetItem>& item) {
+        setTextFont(item ? std::optional(item->alias) : std::nullopt);
+    });
+    m_textEdit->installEventFilter(this);
+    m_textKeyField->installEventFilter(this);
+    connect(m_textKeyField, &QLineEdit::editingFinished, this, &InspectorPanel::applyTextKey);
+    connect(m_textSizeBox, &QDoubleSpinBox::valueChanged, this, [this](double pixels) {
+        changeText([pixels](core::Text& text) { text.size = pixels; }, tr("Size the text of %1"));
+    });
+    connect(m_textColorButton, &ColorButton::colorChosen, this, [this](const core::Color& color) {
+        changeText([color](core::Text& text) { text.color = color; }, tr("Color the text of %1"));
+    });
+    connect(m_textAlignGrid, &PointGrid::pointChosen, this, [this](core::Point align) {
+        changeText([align](core::Text& text) { text.align = align; }, tr("Align the text of %1"));
+    });
+    connect(m_textWrapBox, &QComboBox::activated, this, [this] {
+        const auto wrap = core::TextWrap(m_textWrapBox->currentData().toInt());
+        changeText([wrap](core::Text& text) { text.wrap = wrap; }, tr("Wrap the text of %1"));
+    });
+    connect(m_lineHeightBox, &QDoubleSpinBox::valueChanged, this, [this](double height) {
+        changeText([height](core::Text& text) { text.lineHeight = height; },
+                   tr("Space the lines of %1"));
+    });
+    connect(m_audioField, &AssetField::chosen, this, [this](const std::optional<AssetItem>& item) {
+        setSoundClip(item ? std::optional(item->alias) : std::nullopt);
+    });
+    connect(m_volumeBox, &QDoubleSpinBox::valueChanged, this, [this](double volume) {
+        changeAudio([volume](core::Audio& audio) { audio.volume = volume; },
+                    tr("Set the volume of %1"));
+    });
+    connect(m_audioLoopBox, &QCheckBox::clicked, this, [this](bool loop) {
+        changeAudio([loop](core::Audio& audio) { audio.loop = loop; },
+                    loop ? tr("Loop the sound of %1") : tr("Play the sound of %1 once"));
+    });
+    connect(m_audioAutoplayBox, &QCheckBox::clicked, this, [this](bool autoplay) {
+        changeAudio(
+            [autoplay](core::Audio& audio) { audio.autoplay = autoplay; },
+            autoplay ? tr("Autoplay the sound of %1") : tr("Don't autoplay the sound of %1"));
+    });
+    connect(m_positionalBox, &QCheckBox::clicked, this, [this](bool positional) {
+        changeAudio(
+            [positional](core::Audio& audio) {
+                audio.radius = positional ? std::optional(NEW_SOUND_RADIUS) : std::nullopt;
+            },
+            positional ? tr("Position the sound of %1") : tr("Hear the sound of %1 everywhere"));
+    });
+    connect(m_radiusBox, &QDoubleSpinBox::valueChanged, this, [this](double radius) {
+        changeAudio(
+            [radius](core::Audio& audio) {
+                if (audio.radius) {
+                    audio.radius = radius;
+                }
+            },
+            tr("Set the radius of %1"));
+    });
+    connect(m_removeAudioButton, &QToolButton::clicked, this,
+            [this] { setSoundClip(std::nullopt); });
+    connect(m_videoField, &AssetField::chosen, this, [this](const std::optional<AssetItem>& item) {
+        setVideoClip(item ? std::optional(item->alias) : std::nullopt);
+    });
+    connect(m_videoLoopBox, &QCheckBox::clicked, this, [this](bool loop) {
+        changeVideo([loop](core::Video& video) { video.loop = loop; },
+                    loop ? tr("Loop the video of %1") : tr("Play the video of %1 once"));
+    });
+    connect(m_videoAutoplayBox, &QCheckBox::clicked, this, [this](bool autoplay) {
+        changeVideo(
+            [autoplay](core::Video& video) { video.autoplay = autoplay; },
+            autoplay ? tr("Autoplay the video of %1") : tr("Don't autoplay the video of %1"));
+    });
+    connect(m_videoModeBox, &QComboBox::activated, this, [this] {
+        const auto mode = core::VideoMode(m_videoModeBox->currentData().toInt());
+        changeVideo([mode](core::Video& video) { video.mode = mode; },
+                    tr("Set how the video of %1 fills it"));
     });
     connect(m_fillBox, &QCheckBox::clicked, this, [this](bool fill) {
         setFill(fill ? std::optional(m_fillButton->color()) : std::nullopt);
@@ -501,8 +684,13 @@ void InspectorPanel::setCanvas(SceneCanvas* canvas)
     }
     m_canvas = canvas;
     m_document = canvas ? &canvas->document() : nullptr;
-    m_imageField->setSheets(canvas ? &canvas->sheets() : nullptr);
+    for (AssetField* field : {m_assetField, m_fontField, m_audioField, m_videoField}) {
+        field->setCaches(canvas ? &canvas->sheets() : nullptr, canvas ? &canvas->fonts() : nullptr);
+    }
+    refreshClips();
     if (m_canvas) {
+        connect(m_document, &core::ProjectDocument::assetsChanged, this,
+                &InspectorPanel::refreshClips);
         connect(m_canvas, &SceneCanvas::contentChanged, this, &InspectorPanel::refresh);
         connect(m_canvas, &QGraphicsScene::selectionChanged, this, [this] {
             showMessage({});
@@ -864,6 +1052,370 @@ void InspectorPanel::setFill(std::optional<core::Color> fill)
               : tr("Remove the fill of %1").arg(core::describe(*entity)));
 }
 
+void InspectorPanel::setAsset(const std::optional<AssetItem>& item)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity) {
+        return;
+    }
+    const std::optional<AssetItem> current = assetOf(*entity);
+    if (!item) {
+        if (entity->image) {
+            removeImage();
+        }
+        else if (entity->video) {
+            setVideoClip(std::nullopt);
+        }
+        else if (entity->text) {
+            setTextFont(std::nullopt);
+        }
+        else {
+            setSoundClip(std::nullopt);
+        }
+        return;
+    }
+    enum Part { IMAGE, VIDEO, TEXT, SOUND };
+    const auto partOf = [](const AssetItem& asset) {
+        return asset.isImage()                        ? IMAGE
+               : asset.kind == AssetItem::Kind::Video ? VIDEO
+               : asset.kind == AssetItem::Kind::Font  ? TEXT
+                                                      : SOUND;
+    };
+    const Part wanted = partOf(*item);
+    if (!current || partOf(*current) == wanted) {
+        // Another asset for the same part, or a first one.
+        switch (wanted) {
+            case IMAGE:
+                setImage(item->toImage());
+                break;
+            case VIDEO:
+                setVideoClip(item->alias);
+                break;
+            case TEXT:
+                setTextFont(item->alias);
+                break;
+            case SOUND:
+                setSoundClip(item->alias);
+                break;
+        }
+        return;
+    }
+
+    // Its part replaces the entity's, in the rect that one was drawn in, so nothing moves.
+    const core::ImageMetricsFn metrics = m_canvas->imageMetrics();
+    Entity changed = *entity;
+    if (!changed.size) {
+        if (const auto size = core::entitySize(*entity, frameOf(path), metrics)) {
+            changed.size = core::Extent::px(*size);
+        }
+    }
+    if (changed.size) {
+        changed.pivot = core::entityPivot(*entity, metrics);
+    }
+    switch (partOf(*current)) {
+        case IMAGE:
+            changed.image.reset();
+            break;
+        case VIDEO:
+            changed.video.reset();
+            break;
+        case TEXT:
+            changed.text.reset();
+            break;
+        case SOUND:
+            changed.audio.reset();
+            break;
+    }
+    // An image takes its sprite's size and pivot, and a sound needs no rect, unless another
+    // part needs it.
+    const auto dropRect = [&] {
+        if (!changed.fill && !changed.clip && !changed.container && !changed.text &&
+            !changed.video) {
+            changed.size.reset();
+            changed.pivot.reset();
+        }
+    };
+    QString undoText;
+    switch (wanted) {
+        case IMAGE:
+            changed.image = item->toImage();
+            dropRect();
+            undoText = tr("Make %1 an image");
+            break;
+        case VIDEO: {
+            core::Video video = entity->video.value_or(core::Video{});
+            video.clip = item->alias;
+            changed.video = video;
+            if (!changed.size) {
+                changed.size = core::Extent::px(m_canvas->newVideoSize());
+            }
+            undoText = tr("Make %1 a video");
+            break;
+        }
+        case TEXT: {
+            core::Text text = entity->text.value_or(core::Text{});
+            if (!entity->text) {
+                text.string = tr("Text");
+            }
+            text.font = item->alias;
+            changed.text = text;
+            if (!changed.size) {
+                changed.size = textSize(text);
+            }
+            undoText = tr("Make %1 a text");
+            break;
+        }
+        case SOUND: {
+            core::Audio audio = entity->audio.value_or(core::Audio{});
+            audio.clip = item->alias;
+            changed.audio = audio;
+            dropRect();
+            undoText = tr("Make %1 a sound");
+            break;
+        }
+    }
+    push(path, std::move(changed), undoText.arg(core::describe(*entity)));
+}
+
+std::optional<AssetItem> InspectorPanel::assetOf(const Entity& entity)
+{
+    if (entity.image) {
+        return AssetItem::fromImage(*entity.image);
+    }
+    if (entity.video) {
+        return AssetItem{AssetItem::Kind::Video, entity.video->clip, {}};
+    }
+    if (entity.text) {
+        return AssetItem{AssetItem::Kind::Font, entity.text->font, {}};
+    }
+    if (entity.audio) {
+        return AssetItem{AssetItem::Kind::Audio, entity.audio->clip, {}};
+    }
+    return std::nullopt;
+}
+
+void InspectorPanel::setSoundClip(const std::optional<QString>& clip)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity || (!clip && !entity->audio) || (entity->audio && clip == entity->audio->clip)) {
+        return;
+    }
+    Entity changed = *entity;
+    if (!clip) {
+        changed.audio.reset();
+        push(path, std::move(changed), tr("Remove the sound of %1").arg(core::describe(*entity)));
+        return;
+    }
+    if (changed.audio) {
+        changed.audio->clip = *clip;
+        push(path, std::move(changed), tr("Set the sound of %1").arg(core::describe(*entity)));
+        return;
+    }
+    core::Audio audio;
+    audio.clip = *clip;
+    changed.audio = audio;
+    push(path, std::move(changed), tr("Add a sound to %1").arg(core::describe(*entity)));
+}
+
+void InspectorPanel::changeAudio(const std::function<void(core::Audio&)>& change,
+                                 const QString& text)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity || !entity->audio) {
+        return;
+    }
+    Entity changed = *entity;
+    change(*changed.audio);
+    if (changed.audio != entity->audio) {
+        push(path, std::move(changed), text.arg(core::describe(*entity)));
+    }
+}
+
+void InspectorPanel::refreshAudio(const Entity& entity)
+{
+    m_audioSection->setVisible(entity.audio.has_value());
+    const core::Audio shown = entity.audio.value_or(core::Audio{});
+    m_audioField->setItem(entity.audio
+                              ? std::optional(AssetItem{AssetItem::Kind::Audio, shown.clip, {}})
+                              : std::nullopt);
+    // The asset field shows the clip, unless it shows another part's asset.
+    setRowVisible(m_audioField, entity.audio && (entity.image || entity.video || entity.text));
+    showValue(m_volumeBox, shown.volume);
+    m_audioLoopBox->setChecked(shown.loop);
+    m_audioAutoplayBox->setChecked(shown.autoplay);
+    m_positionalBox->setChecked(shown.radius.has_value());
+    m_radiusBox->setVisible(shown.radius.has_value());
+    showValue(m_radiusBox, shown.radius.value_or(NEW_SOUND_RADIUS));
+}
+
+core::Extent InspectorPanel::textSize(core::Text text) const
+{
+    text.wrap = core::TextWrap::None;
+    const TextLayout layout = m_canvas->layOutText(text, 0);
+    return core::Extent::px({std::ceil(layout.size.width()), std::ceil(layout.size.height())});
+}
+
+void InspectorPanel::setVideoClip(const std::optional<QString>& clip)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity || (!clip && !entity->video) || (entity->video && clip == entity->video->clip)) {
+        return;
+    }
+    Entity changed = *entity;
+    if (!clip) {
+        changed.video.reset();
+        push(path, std::move(changed), tr("Remove the video of %1").arg(core::describe(*entity)));
+        return;
+    }
+    if (changed.video) {
+        changed.video->clip = *clip;
+        push(path, std::move(changed), tr("Set the video of %1").arg(core::describe(*entity)));
+        return;
+    }
+    core::Video video;
+    video.clip = *clip;
+    changed.video = video;
+    // A video needs a rect: a new one's, if it has none, keeping its origin.
+    if (!core::entityRect(*entity, frameOf(path), m_canvas->imageMetrics())) {
+        changed.size = core::Extent::px(m_canvas->newVideoSize());
+    }
+    push(path, std::move(changed), tr("Add a video to %1").arg(core::describe(*entity)));
+}
+
+void InspectorPanel::changeVideo(const std::function<void(core::Video&)>& change,
+                                 const QString& text)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity || !entity->video) {
+        return;
+    }
+    Entity changed = *entity;
+    change(*changed.video);
+    if (changed.video != entity->video) {
+        push(path, std::move(changed), text.arg(core::describe(*entity)));
+    }
+}
+
+void InspectorPanel::refreshClips()
+{
+    const core::Assets* assets = m_document ? &m_document->project().manifest.assets : nullptr;
+    const QStringList audio = assets ? assets->audio.keys() : QStringList();
+    const QStringList videos = assets ? assets->video.keys() : QStringList();
+    for (AssetField* field : {m_assetField, m_audioField, m_videoField}) {
+        field->setClips(audio, videos);
+    }
+}
+
+void InspectorPanel::refreshVideo(const Entity& entity)
+{
+    m_videoSection->setVisible(entity.video.has_value());
+    const core::Video shown = entity.video.value_or(core::Video{});
+    m_videoField->setItem(entity.video
+                              ? std::optional(AssetItem{AssetItem::Kind::Video, shown.clip, {}})
+                              : std::nullopt);
+    // The asset field shows the clip, unless it shows the image.
+    setRowVisible(m_videoField, entity.video && entity.image);
+    m_videoLoopBox->setChecked(shown.loop);
+    m_videoAutoplayBox->setChecked(shown.autoplay);
+    m_videoModeBox->setCurrentIndex(m_videoModeBox->findData(int(shown.mode)));
+}
+
+void InspectorPanel::setTextFont(const std::optional<QString>& font)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity || (!font && !entity->text) || (entity->text && font == entity->text->font)) {
+        return;
+    }
+    Entity changed = *entity;
+    if (!font) {
+        changed.text.reset();
+        push(path, std::move(changed), tr("Remove the text of %1").arg(core::describe(*entity)));
+        return;
+    }
+    if (changed.text) {
+        changed.text->font = *font;
+        push(path, std::move(changed), tr("Set the font of %1").arg(core::describe(*entity)));
+        return;
+    }
+    core::Text text;
+    text.font = *font;
+    text.string = tr("Text");
+    changed.text = text;
+    // A text needs a rect: one sized to it, if it has none, keeping its origin.
+    if (!core::entityRect(*entity, frameOf(path), m_canvas->imageMetrics())) {
+        changed.size = textSize(text);
+    }
+    push(path, std::move(changed), tr("Add a text to %1").arg(core::describe(*entity)));
+}
+
+void InspectorPanel::applyText()
+{
+    if (!m_textEdit->document()->isModified()) {
+        return;
+    }
+    m_textEdit->document()->setModified(false);
+    const QString string = m_textEdit->toPlainText();
+    changeText([&string](core::Text& text) { text.string = string; }, tr("Write the text of %1"));
+}
+
+void InspectorPanel::applyTextKey()
+{
+    if (!m_textKeyField->isModified()) {
+        return;
+    }
+    m_textKeyField->setModified(false);
+    const QString key = m_textKeyField->text().trimmed();
+    changeText([&key](core::Text& text) { text.key = key; }, tr("Set the text key of %1"));
+}
+
+void InspectorPanel::changeText(const std::function<void(core::Text&)>& change, const QString& text)
+{
+    EntityPath path;
+    const Entity* entity = selected(&path);
+    if (!entity || !entity->text) {
+        return;
+    }
+    Entity changed = *entity;
+    change(*changed.text);
+    if (changed.text != entity->text) {
+        push(path, std::move(changed), text.arg(core::describe(*entity)));
+    }
+}
+
+void InspectorPanel::refreshText(const Entity& entity)
+{
+    m_textSection->setVisible(entity.text.has_value());
+    const core::Text shown = entity.text.value_or(core::Text{});
+    m_fontField->setItem(entity.text
+                             ? std::optional(AssetItem{AssetItem::Kind::Font, shown.font, {}})
+                             : std::nullopt);
+    // The asset field shows the font, unless it shows the image or the video.
+    setRowVisible(m_fontField, entity.text && (entity.image || entity.video));
+    // Keep what is being typed.
+    if (!(m_textEdit->hasFocus() && m_textEdit->document()->isModified())) {
+        const QSignalBlocker blocker(m_textEdit);
+        if (m_textEdit->toPlainText() != shown.string) {
+            m_textEdit->setPlainText(shown.string);
+        }
+        m_textEdit->document()->setModified(false);
+    }
+    if (!(m_textKeyField->hasFocus() && m_textKeyField->isModified())) {
+        m_textKeyField->setText(shown.key);
+        m_textKeyField->setModified(false);
+    }
+    showValue(m_textSizeBox, shown.size);
+    m_textColorButton->setColor(shown.color);
+    m_textAlignGrid->setPoint(shown.align);
+    m_textWrapBox->setCurrentIndex(m_textWrapBox->findData(int(shown.wrap)));
+    showValue(m_lineHeightBox, shown.lineHeight);
+}
+
 void InspectorPanel::setTint(const core::Color& tint)
 {
     EntityPath path;
@@ -1026,6 +1578,25 @@ bool InspectorPanel::showsTilePivot() const
 
 bool InspectorPanel::eventFilter(QObject* watched, QEvent* event)
 {
+    // The text applies on leaving it, or on Ctrl+Enter; Escape drops what was typed.
+    if (watched == m_textEdit && event->type() == QEvent::FocusOut) {
+        applyText();
+    }
+    if ((watched == m_textEdit || watched == m_textKeyField) && event->type() == QEvent::KeyPress) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Escape) {
+            m_textEdit->document()->setModified(false);
+            m_textKeyField->setModified(false);
+            refresh();
+            return true;
+        }
+        if (watched == m_textEdit &&
+            (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) &&
+            key->modifiers().testFlag(Qt::ControlModifier)) {
+            applyText();
+            return true;
+        }
+    }
     // Escape drops what was typed.
     if ((watched == m_idField || watched == m_classesField) && event->type() == QEvent::KeyPress &&
         static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape &&
@@ -1052,15 +1623,21 @@ void InspectorPanel::refresh()
     m_topLevel->setScene(topLevel && !preset ? std::optional(m_canvas->sceneId()) : std::nullopt);
     m_presetTopLevel->setPreset(m_document, topLevel && preset ? *preset : QString());
     for (QWidget* field : std::initializer_list<QWidget*>{
-             m_idField,      m_classesField,  m_activeBox,     m_visibleBox,    m_xBox,
-             m_yBox,         m_xUnitBox,      m_yUnitBox,      m_offsetXBox,    m_offsetYBox,
-             m_angleBox,     m_scaleXBox,     m_scaleYBox,     m_widthBox,      m_heightBox,
-             m_widthUnitBox, m_heightUnitBox, m_flipXBox,      m_flipYBox,      m_sizeBox,
-             m_pivotBox,     m_pivotGrid,     m_pivotXBox,     m_pivotYBox,     m_imageModeBox,
-             m_imageField,   m_fillBox,       m_fillButton,    m_tintButton,    m_tintModeBox,
-             m_clipBox,      m_spaceBox,      m_parallaxBox,   m_parallaxXBox,  m_parallaxYBox,
-             m_containerBox, m_tileWidthBox,  m_tileHeightBox, m_tilePivotGrid, m_tilePivotXBox,
-             m_tilePivotYBox}) {
+             m_idField,       m_classesField,  m_activeBox,         m_visibleBox,
+             m_xBox,          m_yBox,          m_xUnitBox,          m_yUnitBox,
+             m_offsetXBox,    m_offsetYBox,    m_angleBox,          m_scaleXBox,
+             m_scaleYBox,     m_widthBox,      m_heightBox,         m_widthUnitBox,
+             m_heightUnitBox, m_flipXBox,      m_flipYBox,          m_sizeBox,
+             m_pivotBox,      m_pivotGrid,     m_pivotXBox,         m_pivotYBox,
+             m_imageModeBox,  m_assetField,    m_fontField,         m_textEdit,
+             m_textKeyField,  m_textSizeBox,   m_textColorButton,   m_textAlignGrid,
+             m_textWrapBox,   m_lineHeightBox, m_videoField,        m_videoLoopBox,
+             m_audioField,    m_volumeBox,     m_audioLoopBox,      m_audioAutoplayBox,
+             m_positionalBox, m_radiusBox,     m_removeAudioButton, m_videoAutoplayBox,
+             m_videoModeBox,  m_fillBox,       m_fillButton,        m_tintButton,
+             m_tintModeBox,   m_clipBox,       m_spaceBox,          m_parallaxBox,
+             m_parallaxXBox,  m_parallaxYBox,  m_containerBox,      m_tileWidthBox,
+             m_tileHeightBox, m_tilePivotGrid, m_tilePivotXBox,     m_tilePivotYBox}) {
         field->setEnabled(entity != nullptr);
     }
     if (!entity) {
@@ -1097,7 +1674,10 @@ void InspectorPanel::refresh()
             box->setChecked(false);
         }
         m_pivotGrid->setPoint(std::nullopt);
-        m_imageField->setItem(std::nullopt);
+        m_assetField->setItem(std::nullopt);
+        m_textSection->setVisible(false);
+        m_videoSection->setVisible(false);
+        m_audioSection->setVisible(false);
         m_sizeBox->setText(tr("Own"));  // as wide as with an entity, so nothing jumps
         m_tintButton->setColor(core::Color{});
         setRowVisible(m_sizeRow, true);
@@ -1179,9 +1759,11 @@ void InspectorPanel::refresh()
     m_pivotXBox->setEnabled(entity->pivot.has_value() || !entity->image);
     m_pivotYBox->setEnabled(entity->pivot.has_value() || !entity->image);
 
-    m_imageField->setItem(entity->image ? std::optional(SheetItem::fromImage(*entity->image))
-                                        : std::nullopt);
+    m_assetField->setItem(assetOf(*entity));
     setRowVisible(m_imageRow, entity->image.has_value());
+    refreshText(*entity);
+    refreshVideo(*entity);
+    refreshAudio(*entity);
     if (entity->image) {
         m_imageModeBox->setCurrentIndex(m_imageModeBox->findData(int(entity->image->mode)));
     }

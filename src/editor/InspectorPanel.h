@@ -3,9 +3,11 @@
 #include <QPointer>
 #include <QStringList>
 #include <QWidget>
+#include <functional>
 #include <optional>
 
 #include "core/SceneTree.h"
+#include "editor/AssetItem.h"
 
 class QCheckBox;
 class QComboBox;
@@ -14,6 +16,7 @@ class QDoubleSpinBox;
 class QFormLayout;
 class QLabel;
 class QLineEdit;
+class QPlainTextEdit;
 class QStackedWidget;
 class QStringListModel;
 class QToolButton;
@@ -97,8 +100,38 @@ public:
     PointGrid* pivotGrid() const { return m_pivotGrid; }
     QDoubleSpinBox* pivotXBox() const { return m_pivotXBox; }
     QDoubleSpinBox* pivotYBox() const { return m_pivotYBox; }
-    /// The entity's image, chosen by dropping, typing or browsing; clearing it removes it.
-    AssetField* imageField() const { return m_imageField; }
+    /// The entity's asset: its image's, or else its text's font. It takes any asset, and the
+    /// asset's kind says what the entity is (see setAsset()); clearing it removes that part.
+    AssetField* assetField() const { return m_assetField; }
+    /// The Text section's: shown for an entity with a text.
+    QWidget* textSection() const { return m_textSection; }
+    /// The text's font, for an entity whose asset is its image or its video: shown only then.
+    AssetField* fontField() const { return m_fontField; }
+    /// The Audio section's: shown for an entity with a sound.
+    QWidget* audioSection() const { return m_audioSection; }
+    /// The sound's clip, for an entity whose asset is another part's: shown only then.
+    AssetField* audioField() const { return m_audioField; }
+    QDoubleSpinBox* volumeBox() const { return m_volumeBox; }
+    QCheckBox* audioLoopBox() const { return m_audioLoopBox; }
+    QCheckBox* audioAutoplayBox() const { return m_audioAutoplayBox; }
+    /// Gives the sound a radius (400 px), or takes it away.
+    QCheckBox* positionalBox() const { return m_positionalBox; }
+    QDoubleSpinBox* radiusBox() const { return m_radiusBox; }
+    QToolButton* removeAudioButton() const { return m_removeAudioButton; }
+    /// The Video section's: shown for an entity with a video.
+    QWidget* videoSection() const { return m_videoSection; }
+    /// The video's clip, for an entity whose asset is its image: shown only then.
+    AssetField* videoField() const { return m_videoField; }
+    QCheckBox* videoLoopBox() const { return m_videoLoopBox; }
+    QCheckBox* videoAutoplayBox() const { return m_videoAutoplayBox; }
+    QComboBox* videoModeBox() const { return m_videoModeBox; }
+    QPlainTextEdit* textEdit() const { return m_textEdit; }
+    QLineEdit* textKeyField() const { return m_textKeyField; }
+    QDoubleSpinBox* textSizeBox() const { return m_textSizeBox; }
+    ColorButton* textColorButton() const { return m_textColorButton; }
+    PointGrid* textAlignGrid() const { return m_textAlignGrid; }
+    QComboBox* textWrapBox() const { return m_textWrapBox; }
+    QDoubleSpinBox* lineHeightBox() const { return m_lineHeightBox; }
     QComboBox* imageModeBox() const { return m_imageModeBox; }
     QCheckBox* fillBox() const { return m_fillBox; }
     ColorButton* fillButton() const { return m_fillButton; }
@@ -163,6 +196,28 @@ public slots:
     /// Gives the entity `image`, as the image field chooses it, or none (see removeImage()). Its
     /// mode stays for another sprite; a size of its own stays.
     void setImage(const std::optional<core::Image>& image);
+    /// Makes the entity what `item` is, as the asset field chooses it: an image, for a sprite,
+    /// an animation or an image (see setImage()), a video, for a video (see setVideoClip()),
+    /// a text, for a font (see setTextFont()), or a sound, for a clip (see setSoundClip()).
+    /// It replaces the entity's asset's part (see assetOf()) in the rect that was drawn, so
+    /// nothing moves; an image takes its sprite's size and pivot, and a sound leaves the rect
+    /// out, unless another part needs it. None removes that part.
+    void setAsset(const std::optional<AssetItem>& item);
+    /// What the asset field shows: the entity's image, else its video's clip, else its
+    /// text's font, else its sound's clip, or none.
+    static std::optional<AssetItem> assetOf(const core::Entity& entity);
+    /// Sets the clip of the entity's video, giving it a video if it has none, in a new
+    /// video's rect if it has none; null removes the video.
+    void setVideoClip(const std::optional<QString>& clip);
+    /// Sets the clip of the entity's sound, giving it one, heard everywhere, if it has none;
+    /// null removes the sound.
+    void setSoundClip(const std::optional<QString>& clip);
+    /// Sets the font of the entity's text, giving it a text, "Text", if it has none, in a rect
+    /// sized to it if it has none; null removes the text.
+    void setTextFont(const std::optional<QString>& font);
+    /// Applies the text area, and the key field.
+    void applyText();
+    void applyTextKey();
     void setFill(std::optional<core::Color> fill);
     void setTint(const core::Color& tint);
     void setTintMode(core::TintMode mode);
@@ -201,6 +256,20 @@ private:
     /// The section's form holding the row of `field`.
     QFormLayout* formOf(const QWidget* field) const;
     void setRowVisible(QWidget* field, bool visible);
+    /// Changes the entity's text by `change`, one undo step named `text` (with the entity
+    /// for %1); nothing for an entity without a text, or a change that changes nothing.
+    void changeText(const std::function<void(core::Text&)>& change, const QString& text);
+    void refreshText(const core::Entity& entity);
+    /// Like changeText(), for the video.
+    void changeVideo(const std::function<void(core::Video&)>& change, const QString& text);
+    void refreshVideo(const core::Entity& entity);
+    /// Like changeText(), for the sound.
+    void changeAudio(const std::function<void(core::Audio&)>& change, const QString& text);
+    void refreshAudio(const core::Entity& entity);
+    /// Tells the asset fields the audio and video the manifest declares.
+    void refreshClips();
+    /// A text's rect, sized to it on one line.
+    core::Extent textSize(core::Text text) const;
 
     QPointer<SceneCanvas> m_canvas;
     QPointer<core::ProjectDocument> m_document;
@@ -229,8 +298,30 @@ private:
     PointGrid* m_pivotGrid;
     QDoubleSpinBox* m_pivotXBox;
     QDoubleSpinBox* m_pivotYBox;
-    AssetField* m_imageField;
+    AssetField* m_assetField;
     QComboBox* m_imageModeBox;
+    AssetField* m_fontField;
+    QPlainTextEdit* m_textEdit;
+    QLineEdit* m_textKeyField;
+    QDoubleSpinBox* m_textSizeBox;
+    ColorButton* m_textColorButton;
+    PointGrid* m_textAlignGrid;
+    QComboBox* m_textWrapBox;
+    QDoubleSpinBox* m_lineHeightBox;
+    QWidget* m_textSection;
+    AssetField* m_audioField;
+    QDoubleSpinBox* m_volumeBox;
+    QCheckBox* m_audioLoopBox;
+    QCheckBox* m_audioAutoplayBox;
+    QCheckBox* m_positionalBox;
+    QDoubleSpinBox* m_radiusBox;
+    QToolButton* m_removeAudioButton;
+    QWidget* m_audioSection;
+    AssetField* m_videoField;
+    QCheckBox* m_videoLoopBox;
+    QCheckBox* m_videoAutoplayBox;
+    QComboBox* m_videoModeBox;
+    QWidget* m_videoSection;
     QCheckBox* m_fillBox;
     ColorButton* m_fillButton;
     ColorButton* m_tintButton;

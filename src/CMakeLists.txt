@@ -41,6 +41,8 @@ shoal_set_warnings(shoal_core)
 
 # assets: sprat sheets and their atlases, through sprat-lib.
 add_library(shoal_assets STATIC
+    assets/FontCache.cpp
+    assets/FontCache.h
     assets/SheetCache.cpp
     assets/SheetCache.h
     assets/SpratLibrary.cpp
@@ -59,6 +61,8 @@ add_library(shoal_editor STATIC
     editor/AssetBrowserPanel.h
     editor/AssetField.cpp
     editor/AssetField.h
+    editor/AssetItem.cpp
+    editor/AssetItem.h
     editor/CanvasView.cpp
     editor/CanvasView.h
     editor/ClickOrDragView.h
@@ -98,10 +102,10 @@ add_library(shoal_editor STATIC
     editor/SceneSettingsPanel.h
     editor/ScenesPanel.cpp
     editor/ScenesPanel.h
-    editor/SheetItem.cpp
-    editor/SheetItem.h
     editor/Thumbnails.cpp
     editor/Thumbnails.h
+    editor/TextLayout.cpp
+    editor/TextLayout.h
     editor/TileGridOverlay.cpp
     editor/TileGridOverlay.h
     editor/TransformHandle.cpp

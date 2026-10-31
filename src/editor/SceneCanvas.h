@@ -11,10 +11,12 @@
 
 #include "core/Model.h"
 #include "core/SceneTree.h"
+#include "editor/TextLayout.h"
 
 class QMenu;
 
 namespace shoal::assets {
+class FontCache;
 class SheetCache;
 struct Sprite;
 }  // namespace shoal::assets
@@ -40,12 +42,13 @@ class TransformHandle;
 class SceneCanvas : public QGraphicsScene {
     Q_OBJECT
 public:
-    SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sheets, QString sceneId,
-                QObject* parent = nullptr);
+    SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sheets,
+                assets::FontCache& fonts, QString sceneId, QObject* parent = nullptr);
     ~SceneCanvas() override;
 
     core::ProjectDocument& document() const { return m_document; }
     assets::SheetCache& sheets() const { return m_sheets; }
+    assets::FontCache& fonts() const { return m_fonts; }
     /// Follows renames. Empty once the scene is removed. For a preset, its tree's id.
     QString sceneId() const { return m_sceneId; }
     /// The preset it shows, or null for a scene.
@@ -170,6 +173,11 @@ public:
     /// The natural size and pivot of images, from the sheets: what core needs to place an
     /// entity whose size or pivot is automatic.
     core::ImageMetricsFn imageMetrics() const;
+    /// A new video's rect: 16:9, a quarter of the design resolution's width, since Shoal
+    /// doesn't decode video to know its own.
+    core::SizeF newVideoSize() const;
+    /// `text` laid out as it is drawn, in its font, its lines no wider than `width`.
+    TextLayout layOutText(const core::Text& text, double width) const;
     /// The atlas `visual` draws from, multiplied by `tint`'s color (its alpha is the
     /// painter's to apply).
     QPixmap tintedAtlas(const SpriteVisual& visual, const core::Color& tint) const;
@@ -200,6 +208,7 @@ private:
 
     core::ProjectDocument& m_document;
     assets::SheetCache& m_sheets;
+    assets::FontCache& m_fonts;
     QString m_sceneId;
     QHash<core::EntityPath, EntityItem*> m_items;
     QStringList m_treeShape;  ///< Of the scene the items were built from.

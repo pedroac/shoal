@@ -41,6 +41,8 @@ public:
     QString pathOf(const QString& key) const;
 
     QJsonValue value(const QString& key);
+    /// The member, without marking it consumed, so it stays among the extras.
+    QJsonValue peek(const QString& key) const;
     QString string(const QString& key);
     QString optionalString(const QString& key);
     bool boolean(const QString& key, bool fallback);

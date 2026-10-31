@@ -373,6 +373,124 @@ private slots:
         QCOMPARE(serializeProject(*second.project), canonical);
     }
 
+    void readsAndWritesText()
+    {
+        ProjectFiles files = minimalProject();
+        files[paths::scene(QStringLiteral("a"))] = sceneWithEntity(R"(
+            {"size": [200, 40],
+             "text": {"font": "body", "string": "Start\nGame", "key": "menu.start", "size": 24,
+                      "color": "\u0023FFCC00", "align": [0, 1], "wrap": "none",
+                      "line_height": 1.5, "outline": 2}},
+            {"size": [100, 20], "text": {"font": "body", "string": "Go", "size": 32,
+                                         "wrap": "word", "align": [0.5, 0.5]}},
+            {"text": "Old"})");
+
+        const ParseResult parsed = parseProject(files);
+        QVERIFY2(parsed.project, qPrintable(errorStrings(parsed.errors).join(u'\n')));
+        const std::vector<Entity>& entities =
+            parsed.project->scenes.value(QStringLiteral("a")).entities;
+        QVERIFY(entities.at(0).text);
+        const Text& text = *entities.at(0).text;
+        QCOMPARE(text.font, QStringLiteral("body"));
+        QCOMPARE(text.string, QStringLiteral("Start\nGame"));
+        QCOMPARE(text.key, QStringLiteral("menu.start"));
+        QCOMPARE(text.size, 24.0);
+        QCOMPARE(text.color, (Color{255, 204, 0, 255}));
+        QCOMPARE(text.align, (Point{0, 1}));
+        QCOMPARE(text.wrap, TextWrap::None);
+        QCOMPARE(text.lineHeight, 1.5);
+        QCOMPARE(text.extras.value(QStringLiteral("outline")), QJsonValue(2));
+        QCOMPARE(kindOf(entities.at(0)), QStringLiteral("text"));
+        // A string, as the editor drew text before the part, stays as written.
+        QVERIFY(!entities.at(2).text);
+        QCOMPARE(entities.at(2).extras.value(QStringLiteral("text")),
+                 QJsonValue(QStringLiteral("Old")));
+
+        // The defaults are left out.
+        const QString written = QString::fromUtf8(
+            serializeProject(*parsed.project).at(paths::scene(QStringLiteral("a"))));
+        QVERIFY(
+            written.contains(QStringLiteral("\"text\": {\n"
+                                            "        \"font\": \"body\",\n"
+                                            "        \"string\": \"Go\"\n"
+                                            "      }")));
+        QVERIFY(written.contains(QStringLiteral("\"line_height\": 1.5")));
+        QVERIFY(written.contains(QStringLiteral("\"text\": \"Old\"")));
+        const ParseResult again = parseProject(serializeProject(*parsed.project));
+        QVERIFY(again.project);
+        QCOMPARE(*again.project, *parsed.project);
+    }
+
+    void readsAndWritesVideo()
+    {
+        ProjectFiles files = minimalProject();
+        files[paths::scene(QStringLiteral("a"))] = sceneWithEntity(R"(
+            {"size": [160, 90], "video": {"clip": "intro", "loop": true, "autoplay": true,
+                                          "mode": "fit", "muted": true}},
+            {"size": [160, 90], "video": {"clip": "intro", "loop": false, "mode": "stretch"}})");
+
+        const ParseResult parsed = parseProject(files);
+        QVERIFY2(parsed.project, qPrintable(errorStrings(parsed.errors).join(u'\n')));
+        const std::vector<Entity>& entities =
+            parsed.project->scenes.value(QStringLiteral("a")).entities;
+        QVERIFY(entities.at(0).video);
+        const Video& video = *entities.at(0).video;
+        QCOMPARE(video.clip, QStringLiteral("intro"));
+        QVERIFY(video.loop);
+        QVERIFY(video.autoplay);
+        QCOMPARE(video.mode, VideoMode::Fit);
+        QCOMPARE(video.extras.value(QStringLiteral("muted")), QJsonValue(true));
+        QCOMPARE(kindOf(entities.at(0)), QStringLiteral("video"));
+
+        // The defaults are left out.
+        const QString written = QString::fromUtf8(
+            serializeProject(*parsed.project).at(paths::scene(QStringLiteral("a"))));
+        QVERIFY(
+            written.contains(QStringLiteral("\"video\": {\n"
+                                            "        \"clip\": \"intro\"\n"
+                                            "      }")));
+        QVERIFY(written.contains(QStringLiteral("\"mode\": \"fit\"")));
+        const ParseResult again = parseProject(serializeProject(*parsed.project));
+        QVERIFY(again.project);
+        QCOMPARE(*again.project, *parsed.project);
+    }
+
+    void readsAndWritesAudio()
+    {
+        ProjectFiles files = minimalProject();
+        files[paths::scene(QStringLiteral("a"))] = sceneWithEntity(R"(
+            {"audio": {"clip": "door", "volume": 0.5, "loop": true, "autoplay": true,
+                       "radius": 400, "bus": "sfx"}},
+            {"audio": {"clip": "music", "volume": 1, "loop": false}})");
+
+        const ParseResult parsed = parseProject(files);
+        QVERIFY2(parsed.project, qPrintable(errorStrings(parsed.errors).join(u'\n')));
+        const std::vector<Entity>& entities =
+            parsed.project->scenes.value(QStringLiteral("a")).entities;
+        QVERIFY(entities.at(0).audio);
+        const Audio& audio = *entities.at(0).audio;
+        QCOMPARE(audio.clip, QStringLiteral("door"));
+        QCOMPARE(audio.volume, 0.5);
+        QVERIFY(audio.loop);
+        QVERIFY(audio.autoplay);
+        QCOMPARE(audio.radius, std::optional(400.0));
+        QCOMPARE(audio.extras.value(QStringLiteral("bus")), QJsonValue(QStringLiteral("sfx")));
+        QCOMPARE(kindOf(entities.at(0)), QStringLiteral("sound"));
+        QVERIFY(!entities.at(1).audio->radius);
+
+        // The defaults are left out.
+        const QString written = QString::fromUtf8(
+            serializeProject(*parsed.project).at(paths::scene(QStringLiteral("a"))));
+        QVERIFY(
+            written.contains(QStringLiteral("\"audio\": {\n"
+                                            "        \"clip\": \"music\"\n"
+                                            "      }")));
+        QVERIFY(written.contains(QStringLiteral("\"radius\": 400")));
+        const ParseResult again = parseProject(serializeProject(*parsed.project));
+        QVERIFY(again.project);
+        QCOMPARE(*again.project, *parsed.project);
+    }
+
     void reportsWhatTheModelCannotRepresent_data()
     {
         QTest::addColumn<QString>("path");
@@ -646,6 +764,34 @@ private slots:
         QTest::newRow("scene folder name")
             << QStringLiteral("scenes/level 1/scene.json") << sceneWithEntity({})
             << R"(scenes/level 1/scene.json: "level 1" is not a valid scene id (use letters, digits, _ and -, starting with a letter or _))";
+        QTest::newRow("text without a font")
+            << scene << sceneWithEntity(R"({"size": [10, 10], "text": {"string": "A"}})")
+            << "scenes/a/scene.json: entities[0].text.font: missing";
+        QTest::newRow("text size 0")
+            << scene << sceneWithEntity(R"({"size": [10, 10], "text": {"font": "f", "size": 0}})")
+            << "scenes/a/scene.json: entities[0].text.size: expected a number more than 0, found 0";
+        QTest::newRow("text wrap")
+            << scene
+            << sceneWithEntity(R"({"size": [10, 10], "text": {"font": "f", "wrap": "all"}})")
+            << R"(scenes/a/scene.json: entities[0].text.wrap: expected "word" or "none", found "all")";
+        QTest::newRow("video without a clip")
+            << scene << sceneWithEntity(R"({"size": [10, 10], "video": {"loop": true}})")
+            << "scenes/a/scene.json: entities[0].video.clip: missing";
+        QTest::newRow("video mode")
+            << scene
+            << sceneWithEntity(R"({"size": [10, 10], "video": {"clip": "v", "mode": "crop"}})")
+            << R"(scenes/a/scene.json: entities[0].video.mode: expected "stretch", "fit" or "fill", found "crop")";
+        QTest::newRow("audio without a clip")
+            << scene << sceneWithEntity(R"({"audio": {"loop": true}})")
+            << "scenes/a/scene.json: entities[0].audio.clip: missing";
+        QTest::newRow("audio volume")
+            << scene << sceneWithEntity(R"({"audio": {"clip": "a", "volume": 2}})")
+            << "scenes/a/scene.json: entities[0].audio.volume: expected a number from 0 to 1, "
+               "found 2";
+        QTest::newRow("audio radius")
+            << scene << sceneWithEntity(R"({"audio": {"clip": "a", "radius": 0}})")
+            << "scenes/a/scene.json: entities[0].audio.radius: expected a number more than 0, "
+               "found 0";
         QTest::newRow("modifier without its scene")
             << paths::modifier(QStringLiteral("ghost"), QStringLiteral("m"))
             << QByteArray(R"({"format": "shoal-modifier", "version": 1})")

@@ -72,7 +72,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     // selected in the current tab. Both go beside each project's tabs.
     m_scenes = new ScenesPanel(this);
     m_presets = new PresetsPanel(this);
-    m_assetBrowser = new AssetBrowserPanel(m_sheets, this);
+    m_assetBrowser = new AssetBrowserPanel(m_sheets, m_fonts, this);
     m_projectPanel = new QTabWidget(this);
     m_projectPanel->setObjectName(QStringLiteral("projectPanel"));
     m_projectPanel->setDocumentMode(true);
@@ -101,7 +101,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
     connect(m_presets, &PresetsPanel::editRequested, this,
             [this](const QString& id) { openPresets(id); });
     connect(m_scenes, &ScenesPanel::sceneActivated, this, &MainWindow::openScene);
-    connect(m_assetBrowser, &AssetBrowserPanel::placeRequested, this, &MainWindow::placeSheetItem);
+    connect(m_assetBrowser, &AssetBrowserPanel::placeRequested, this, &MainWindow::placeAssetItem);
     connect(m_presets, &PresetsPanel::placeRequested, this, &MainWindow::placePreset);
     connect(m_assetBrowser, &AssetBrowserPanel::assetFilesDropped, this, &MainWindow::addAssets);
     createActions();
@@ -374,7 +374,7 @@ void MainWindow::setDocument(std::unique_ptr<core::ProjectDocument> document)
         m_flowView = new FlowView(*m_flowScene, m_tabs);
         m_flowView->setObjectName(QStringLiteral("flowView"));
         m_tabs->addTab(m_flowView, tr("Flow"));
-        m_presetsView = new PresetsView(*m_document, m_sheets, m_tabs);
+        m_presetsView = new PresetsView(*m_document, m_sheets, m_fonts, m_tabs);
         m_presetsView->setObjectName(QStringLiteral("presetsView"));
         m_presetsView->setSnapping(m_snapAction->isChecked());
         m_tabs->addTab(m_presetsView, tr("Presets"));
@@ -501,7 +501,7 @@ SceneView* MainWindow::openScene(const QString& sceneId)
             return view;
         }
     }
-    auto* view = new SceneView(*m_document, m_sheets, sceneId, m_tabs);
+    auto* view = new SceneView(*m_document, m_sheets, m_fonts, sceneId, m_tabs);
     view->setObjectName(QStringLiteral("sceneView"));
     view->canvas().setSnapping(m_snapAction->isChecked());
     connect(&view->canvas(), &QGraphicsScene::selectionChanged, this, &MainWindow::updateActions);
@@ -585,6 +585,7 @@ void MainWindow::updateAssets()
         m_declaredAssets = declared;
         m_assetsBase = base;
         m_sheets.setSheets(declared.sheets, base, declared.images);
+        m_fonts.setFonts(declared.fonts, base);
         m_assetBrowser->setAssets(declared, base);
     }
 }
@@ -629,11 +630,11 @@ QStringList MainWindow::addAssets(const QStringList& files)
     return added;
 }
 
-void MainWindow::placeSheetItem(const SheetItem& item)
+void MainWindow::placeAssetItem(const AssetItem& item)
 {
     SceneView* view = currentSceneView();
     if (!view) {
-        const QString name = item.kind == SheetItem::Kind::Image ? item.sheet : item.name;
+        const QString name = item.kind == AssetItem::Kind::Image ? item.alias : item.name;
         statusBar()->showMessage(tr("Open a scene to place %1 in it.").arg(name),
                                  STATUS_TIMEOUT_MS);
         return;

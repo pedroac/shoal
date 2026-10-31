@@ -12,10 +12,11 @@
 namespace shoal::editor {
 
 PresetsView::PresetsView(core::ProjectDocument& document, assets::SheetCache& sheets,
-                         QWidget* parent)
+                         assets::FontCache& fonts, QWidget* parent)
     : QWidget(parent),
       m_document(document),
       m_sheets(sheets),
+      m_fonts(fonts),
       m_placeholder(new QLabel(tr("Select a preset in the Presets list to edit it."), this))
 {
     m_placeholder->setAlignment(Qt::AlignCenter);
@@ -46,7 +47,7 @@ void PresetsView::showPreset(const QString& presetId)
     }
     m_placeholder->setVisible(presetId.isEmpty());
     if (!presetId.isEmpty()) {
-        m_view = new SceneView(m_document, m_sheets, tree, this);
+        m_view = new SceneView(m_document, m_sheets, m_fonts, tree, this);
         m_view->setObjectName(QStringLiteral("presetView"));
         m_view->canvas().setSnapping(m_snapping);
         layout()->addWidget(m_view);

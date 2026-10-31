@@ -55,6 +55,15 @@ constexpr EnumName<AssetKind> ASSET_KIND_NAMES[] = {
     {AssetKind::Audio, "audio"},  {AssetKind::Video, "video"},
 };
 
+constexpr EnumName<TextWrap> TEXT_WRAP_NAMES[] = {
+    {TextWrap::Word, "word"},
+    {TextWrap::None, "none"},
+};
+constexpr EnumName<VideoMode> VIDEO_MODE_NAMES[] = {
+    {VideoMode::Stretch, "stretch"},
+    {VideoMode::Fit, "fit"},
+    {VideoMode::Fill, "fill"},
+};
 constexpr EnumName<ContainerType> CONTAINER_TYPE_NAMES[] = {
     {ContainerType::Tiled, "tiled"},
 };
@@ -178,6 +187,14 @@ std::span<const EnumName<TintMode>> enumNames(TintMode)
 std::span<const EnumName<ContainerType>> enumNames(ContainerType)
 {
     return CONTAINER_TYPE_NAMES;
+}
+std::span<const EnumName<TextWrap>> enumNames(TextWrap)
+{
+    return TEXT_WRAP_NAMES;
+}
+std::span<const EnumName<VideoMode>> enumNames(VideoMode)
+{
+    return VIDEO_MODE_NAMES;
 }
 std::span<const EnumName<TransitionMode>> enumNames(TransitionMode)
 {

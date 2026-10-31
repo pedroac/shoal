@@ -61,7 +61,7 @@ public:
     /// Takes the entity's own fields; its children are items of their own.
     void setEntity(const core::Entity& entity, const Placement& placement);
     void setEntity(const core::Entity& entity) { setEntity(entity, m_placement); }
-    /// Recomputes what it draws, after a sheet changed.
+    /// Recomputes what it draws, after a sheet or a font changed.
     void refreshVisual();
 
 protected:
@@ -74,6 +74,11 @@ protected:
 
 private:
     void paintImage(QPainter* painter);
+    void paintText(QPainter* painter, const core::Text& text, const QRectF& rect,
+                   const core::Color& tint) const;
+    void paintSound(QPainter* painter, const core::Audio& audio, bool selected) const;
+    void paintVideo(QPainter* painter, const core::Video& video, const QRectF& rect,
+                    const core::Color& tint) const;
     void paintGuide(QPainter* painter);
     QPainterPath guidePath() const;
 

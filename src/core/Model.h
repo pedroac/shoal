@@ -71,6 +71,8 @@ enum class Area { Viewport, Safe };
 enum class ImageMode { Stretch, NineSlice };
 enum class TintMode { Mix, Inherit, Override };
 enum class ContainerType { Tiled };
+enum class TextWrap { Word, None };
+enum class VideoMode { Stretch, Fit, Fill };
 enum class TransitionMode { Replace, Push, PushModifier, Pop };
 enum class Underlying { Paused, Running, Hidden };
 enum class RestoreMode { Commit, Restore };
@@ -293,9 +295,47 @@ struct Container {
     bool operator==(const Container&) const = default;
 };
 
+/// Text in its entity's rect, in a font the manifest declares. The engine lays it out; the
+/// editor's preview, with Qt, is approximate.
+struct Text {
+    QString font;           ///< A `fonts` alias.
+    QString string;         ///< As written; `\n` breaks a line.
+    QString key;            ///< A localization key, or empty; `string` is then the fallback.
+    double size = 32;       ///< The font's em, in pixels.
+    Color color;            ///< Multiplied by the entity's tint.
+    Point align{0.5, 0.5};  ///< Where the text sits in the rect, as a pivot.
+    TextWrap wrap = TextWrap::Word;
+    double lineHeight = 1.2;  ///< A multiple of `size`.
+    QJsonObject extras;
+    bool operator==(const Text&) const = default;
+};
+
+/// A video in its entity's rect, from a `video` alias. Shoal doesn't decode it: the editor
+/// draws the rect with the clip's name.
+struct Video {
+    QString clip;  ///< A `video` alias.
+    bool loop = false;
+    bool autoplay = false;
+    VideoMode mode = VideoMode::Stretch;  ///< How the frames fill the rect.
+    QJsonObject extras;
+    bool operator==(const Video&) const = default;
+};
+
+/// A sound source at its entity's origin, from an `audio` alias. Shoal doesn't decode it.
+struct Audio {
+    QString clip;       ///< An `audio` alias.
+    double volume = 1;  ///< 0 to 1; a hint.
+    bool loop = false;
+    bool autoplay = false;
+    /// Heard from the origin, fading out at it, in pixels; null is heard everywhere.
+    std::optional<double> radius;
+    QJsonObject extras;
+    bool operator==(const Audio&) const = default;
+};
+
 /// A node of a scene's tree: the same fields for every entity, and the parts it has, which
-/// say what it is. Parts the editor doesn't model yet (`view`, `layout`, `shape`, `path`,
-/// `text`) are kept in `extras`.
+/// say what it is. Parts the editor doesn't model yet (`view`, `layout`, `shape`, `path`)
+/// are kept in `extras`.
 struct Entity {
     QString id;  ///< Optional: only entities something refers to need one.
     QStringList classes;
@@ -319,6 +359,9 @@ struct Entity {
     bool clip = false;
     /// How it places its children; null places them freely.
     std::optional<Container> container;
+    std::optional<Text> text;
+    std::optional<Video> video;
+    std::optional<Audio> audio;
     QJsonObject props;  ///< Kept as written until typed props are modeled.
     QJsonObject extras;
     std::vector<Entity> children;
@@ -388,6 +431,8 @@ std::span<const EnumName<Area>> enumNames(Area);
 std::span<const EnumName<ImageMode>> enumNames(ImageMode);
 std::span<const EnumName<TintMode>> enumNames(TintMode);
 std::span<const EnumName<ContainerType>> enumNames(ContainerType);
+std::span<const EnumName<TextWrap>> enumNames(TextWrap);
+std::span<const EnumName<VideoMode>> enumNames(VideoMode);
 std::span<const EnumName<TransitionMode>> enumNames(TransitionMode);
 std::span<const EnumName<Underlying>> enumNames(Underlying);
 std::span<const EnumName<RestoreMode>> enumNames(RestoreMode);

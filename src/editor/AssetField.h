@@ -4,7 +4,7 @@
 #include <QWidget>
 #include <optional>
 
-#include "editor/SheetItem.h"
+#include "editor/AssetItem.h"
 
 class QAction;
 class QCompleter;
@@ -13,32 +13,45 @@ class QStandardItemModel;
 class QToolButton;
 
 namespace shoal::assets {
+class FontCache;
 class SheetCache;
-}
+}  // namespace shoal::assets
 
 namespace shoal::editor {
 
-/// The inspector's field for an entity's image: a sprite or an animation of a sheet, or a
-/// standalone image, shown with its thumbnail by its path in the asset browser
-/// ("Sprites / hero / Animations / run", see SheetItem::path()).
+/// An inspector field for an asset of an entity's: what one of its parts draws, or, as the
+/// Asset field, any asset, whose kind says what the entity is (see Accepts). It shows
+/// the asset with its thumbnail, by its path in the asset browser ("Sprites / hero /
+/// Animations / run", see AssetItem::path()).
 ///
-/// It is chosen by dropping it from the asset browser, by typing (the popup lists the assets
-/// whose path contains the text, with thumbnails; Enter or a click chooses one), or from the
-/// whole list (the browse button); the clear button takes it away. Text that names no asset
-/// is shown in red and never chosen: Escape, or leaving the field, shows the image again. An
-/// image whose asset is gone stays, shown in red as missing.
+/// An asset is chosen by dropping it from the asset browser, by typing (the popup lists the
+/// assets whose path contains the text, with thumbnails; Enter or a click chooses one), or
+/// from the whole list (the browse button); the clear button takes it away. It lists and
+/// takes only the assets it accepts. Text that names none is shown in red and never chosen:
+/// Escape, or leaving the field, shows the asset again. An asset that is gone stays, shown
+/// in red as missing.
 ///
 /// It only shows: choosing emits chosen(), and the entity, changed, sets it back.
 class AssetField : public QWidget {
     Q_OBJECT
 public:
-    explicit AssetField(QWidget* parent = nullptr);
+    /// What it takes: what an image draws (sprites, animations and images), fonts, audio
+    /// clips, videos, or any of those, for the Asset field.
+    enum class Accepts { Images, Fonts, Sounds, Videos, Any };
 
-    /// What it lists, and follows; null lists nothing.
-    void setSheets(assets::SheetCache* sheets);
+    explicit AssetField(Accepts accepts, QWidget* parent = nullptr);
+
+    Accepts accepted() const { return m_accepts; }
+    bool accepts(const AssetItem& item) const;
+
+    /// What it lists, and follows; null lists none of that kind.
+    void setCaches(assets::SheetCache* sheets, assets::FontCache* fonts);
+    /// The audio and video aliases the manifest declares, which Shoal lists without decoding
+    /// them.
+    void setClips(const QStringList& audio, const QStringList& videos);
     /// Shows `item`, or none; text being typed stays.
-    void setItem(const std::optional<SheetItem>& item);
-    const std::optional<SheetItem>& item() const { return m_item; }
+    void setItem(const std::optional<AssetItem>& item);
+    const std::optional<AssetItem>& item() const { return m_item; }
 
     QLineEdit* lineEdit() const { return m_edit; }
     QToolButton* browseButton() const { return m_browseButton; }
@@ -51,12 +64,12 @@ public:
     /// Whether the text names an asset: the item's, or one it lists; empty names none.
     bool isValid() const;
     /// Chooses the asset whose path is `text`, ignoring case, or none for empty text; false,
-    /// choosing nothing, if no asset has that path.
+    /// choosing nothing, if no asset it lists has that path.
     bool choose(const QString& text);
 
 signals:
     /// The user chose `item`, or none.
-    void chosen(const std::optional<shoal::editor::SheetItem>& item);
+    void chosen(const std::optional<shoal::editor::AssetItem>& item);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -66,17 +79,22 @@ protected:
     void changeEvent(QEvent* event) override;
 
 private:
-    /// Lists the cache's sprites, animations and images.
+    /// Lists the assets it accepts, from the caches.
     void rebuild();
     /// Shows the item: its path, thumbnail and whether it is missing.
     void showItem();
     void showValidity();
+    QIcon thumbnailOf(const AssetItem& item) const;
     /// The listed asset whose path is `text`, ignoring case.
-    std::optional<SheetItem> listed(const QString& text) const;
-    void emitChosen(const std::optional<SheetItem>& item);
+    std::optional<AssetItem> listed(const QString& text) const;
+    void emitChosen(const std::optional<AssetItem>& item);
 
+    Accepts m_accepts;
     QPointer<assets::SheetCache> m_sheets;
-    std::optional<SheetItem> m_item;
+    QPointer<assets::FontCache> m_fonts;
+    QStringList m_audio;
+    QStringList m_videos;
+    std::optional<AssetItem> m_item;
     QLineEdit* m_edit;
     QAction* m_icon;
     QToolButton* m_browseButton;

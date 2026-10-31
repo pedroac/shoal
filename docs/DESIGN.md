@@ -1024,13 +1024,14 @@ Problems panel warns.
     resizes what is in percent of it.
   - The inspector edits the selected entity's id, classes, active and visible
     flags, position, angle (degrees), scale and flips, then its parts: its size
-    and pivot, its image (its asset field, and its mode), its fill, its tint and tint mode,
+    and pivot, its asset (see below) and its image's mode, its fill, its tint and tint mode,
     whether it clips, its container, its space and its parallax. A check box adds or removes each part that can be absent. Each change
     is one undo step. The fields are in sections, under the id, classes and flags:
     Transform (position, offset, angle, scale, flips), Rect (size, pivot), Look
-    (image, fill, tint), Text, Audio, Video, Children (clip, container, tile pivot)
+    (asset, mode, fill, tint), Text, Audio, Video, Children (clip, container, tile pivot)
     and Camera (space, parallax). Text, Audio and Video show only for an entity
-    with that part, each with a button that removes it. A position's or a size's axes are a line each, with their units, so
+    with that part. Audio has a button that removes it; the Asset field's `✕`, or
+    the font's or a clip's field's, removes any of them. A position's or a size's axes are a line each, with their units, so
     the inspector fits a narrow panel, and it scrolls when the panel is shorter than it; a scale can't be zero. An entity with a size of its own shows
     its scale only when it isn't 1.
   - Size and pivot each have an "Own" check box, off for an entity placed from a
@@ -1047,14 +1048,16 @@ Problems panel warns.
   - The pivot is a 3×3 grid of points (top-left, top, top-right, ...,
     bottom-right), with fields for other fractions. Changing it keeps the rect
     where it is drawn. Tint and fill are colors with alpha.
-  - **Text** has the font (a list of the project's fonts), a multi-line text area
-    for the string, the localization key, the size, the color, the alignment (a
+  - **Text** has a multi-line text area for the string, the localization key, the size, the color, the alignment (a
     3×3 grid of points, like the pivot's), wrapping and the line height. The text
     area applies on leaving it, or on Ctrl+Enter, as one undo step; Enter breaks a
-    line.
-  - **Audio** has the clip, the volume, loop and autoplay, and a Positional check
-    box that sets the radius (400 px when turned on) or leaves it out. **Video** has
-    the clip, loop, autoplay and the mode.
+    line. An entity whose asset is its image and that has a text too (a button with
+    a label) shows the text's font here, in a field of its own.
+  - **Audio** has the volume, loop and autoplay, and a Positional check box that
+    sets the radius (400 px when turned on) or leaves it out, and the clip when the
+    entity's asset is another part's. **Video** has
+    loop, autoplay and the mode (Stretch, Fit, Fill), and the clip when the entity's
+    asset is its image.
   - The container is Free or Tiled. Tiled shows the tile size and the tile pivot,
     a 3×3 grid of points like the pivot's; a new tiled container has 32×32 tiles
     centered on their pivots, and an entity without a rect is given one (64×64).
@@ -1077,7 +1080,7 @@ Problems panel warns.
     the sheet's order, and its animations), Images, Fonts, Audio and Video. Sprites
     and images show as thumbnails, fonts as their name in the font, sounds and
     videos as an icon with the file's name and type. A filter matches names and
-    paths. An asset that didn't load says why. It follows the asset caches, so a
+    paths. An asset that didn't load says why, and can't be dragged until it does. It follows the asset caches, so a
     sheet written again by sprat, or an image or a font saved again, shows up at
     once.
   - **It only browses.** Clicking a row selects it and nothing else: the browser
@@ -1085,25 +1088,41 @@ Problems panel warns.
     click never changes one by accident. Dragging a row places a new entity, or,
     dropped on an inspector field, gives the entity that asset; double-clicking one
     places it.
-  - **An entity's assets are chosen in the inspector**, each part with a field of
-    its own kind: the image's field takes sprites, animations and images; the
-    text's will take fonts, the sound's clips and the video's videos. A field shows
-    the asset's thumbnail and its path in the browser, `Sprites / hero / Animations
-    / run` or `Images / title`, and chooses one, one undo step:
-    - dropped from the asset browser; one of another kind is refused;
+  - **An entity's asset is chosen in the inspector**, in Look's Asset field, and its
+    kind says what the entity is: nothing assumes an entity is a sprite. The field
+    shows the entity's asset: its image, else its video's clip, else its text's
+    font, else its sound's clip. It takes any asset: a sprite, an animation or an
+    image makes the entity an image, a video a video, a font a text, and a clip a
+    sound.
+    - An asset of another part replaces the entity's asset's part, in the rect that
+      part was drawn in, so nothing moves. An entity with no asset is given the
+      part: a text, "Text", in a rect sized to it, or a video in a new video's rect
+      (see placing below), if it has no rect.
+    - An image replacing another part takes the sprite's size and pivot, as placed
+      from it, and a sound leaves the rect out, unless a fill, a clip, a container, a
+      text or a video needs the rect; an image replaces an image as below.
+    - A part that isn't the entity's asset (a button's label, beside its image, or a
+      torch's sound) has a field of its own in its section: the text's font, the
+      sound's clip, the video's clip.
+    A field shows the asset's thumbnail and its path in the browser, `Sprites / hero
+    / Animations / run`, `Images / title` or `Fonts / body`, and chooses one, one
+    undo step:
+    - dropped from the asset browser; one of a kind the field doesn't take is
+      refused;
     - typed: a popup lists the assets whose path contains the text, ignoring case,
       with thumbnails, and Enter or a click chooses one. Text that names no asset is
       shown in red and never chosen; Escape, or leaving the field, shows the asset
       again;
     - browsed: `…` opens the whole list;
     - cleared: `✕` removes the image, keeping the size and pivot it gave the
-      entity. An entity without an image shows the field empty, to give it one.
+      entity, or else the video, or else the text, or else the sound. An entity with
+      none shows the field empty, to give it one.
     A nine-slice stays one with another sprite, and a size of its own stays. An
     asset that is gone (its alias undeclared, or its sprite no longer in the sheet)
     stays, shown in red as missing, so nothing is lost until another is chosen.
-  - Until the text, audio and video parts come (roadmap step 5), fonts, clips and
-    videos are listed by alias, with their file as a tooltip and a missing file
-    shown in red, and can't be placed or chosen.
+  - Clips and videos are listed by alias, since Shoal doesn't decode them, with
+    their file as a tooltip and a missing file shown in red; they are placed and
+    chosen by alias, their file there or not.
   - Dropping files on the asset browser declares them in the manifest, in one undo
     step, each in the kind its extension says, under an alias made from its file
     name (characters an id can't have become `_`, and `_2`, `_3`, ... avoids a

@@ -115,6 +115,11 @@ QJsonValue ObjectReader::value(const QString& key)
     return take(key);
 }
 
+QJsonValue ObjectReader::peek(const QString& key) const
+{
+    return m_object.value(key);
+}
+
 QString ObjectReader::string(const QString& key)
 {
     if (!has(key)) {

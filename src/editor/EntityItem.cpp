@@ -8,6 +8,7 @@
 
 #include "assets/SpriteSheet.h"
 #include "editor/SceneCanvas.h"
+#include "editor/TextLayout.h"
 
 namespace shoal::editor {
 
@@ -21,6 +22,12 @@ const QColor MARK_COLOR(255, 160, 40);
 const QColor REGION_COLOR(40, 180, 200);
 const QColor CAMERA_COLOR(120, 200, 255);
 const QColor PLACEHOLDER_COLOR(255, 0, 200);
+/// A video's rect, standing in for its frames, and its play mark and name.
+constexpr core::Color VIDEO_COLOR{24, 24, 32, 255};
+const QColor VIDEO_MARK_COLOR(220, 220, 230);
+/// A sound source's speaker, at its origin, and its radius.
+constexpr double SPEAKER_SIZE = 16;
+const QColor SOUND_COLOR(120, 220, 120);
 constexpr double INACTIVE_OPACITY = 0.4;
 
 QPointF pointOf(const QJsonValue& value)
@@ -47,7 +54,8 @@ QColor tinted(const core::Color& color, const core::Color& tint)
     return qColor(color.multiplied(tint));
 }
 
-QString textOf(const core::Entity& entity)
+/// A string as the editor drew it before the text part, kept as written.
+QString legacyTextOf(const core::Entity& entity)
 {
     return entity.extras.value(QStringLiteral("text")).toString();
 }
@@ -84,7 +92,8 @@ core::Point EntityItem::entityPosition() const
 
 bool EntityItem::isGuide() const
 {
-    return !m_entity.image && !m_entity.fill && textOf(m_entity).isEmpty();
+    return !m_entity.image && !m_entity.fill && !m_entity.text && !m_entity.video &&
+           !m_entity.audio && legacyTextOf(m_entity).isEmpty();
 }
 
 void EntityItem::refreshVisual()
@@ -121,7 +130,8 @@ void EntityItem::refreshVisual()
                                                     PLACEHOLDER_SIZE, PLACEHOLDER_SIZE));
         }
     }
-    if (m_rect && (m_entity.fill || !textOf(m_entity).isEmpty())) {
+    if (m_rect &&
+        (m_entity.fill || m_entity.text || m_entity.video || !legacyTextOf(m_entity).isEmpty())) {
         bounds = bounds.united(mirror.mapRect(*m_rect));
     }
     if (isGuide()) {
@@ -132,6 +142,10 @@ void EntityItem::refreshVisual()
                 QRectF(-MIN_PICK_SIZE / 2, -MIN_PICK_SIZE / 2, MIN_PICK_SIZE, MIN_PICK_SIZE));
         }
     }
+    if (m_entity.audio) {
+        bounds =
+            bounds.united(QRectF(-SPEAKER_SIZE / 2, -SPEAKER_SIZE / 2, SPEAKER_SIZE, SPEAKER_SIZE));
+    }
     m_bounds = bounds;
     m_grid = core::tileGrid(m_entity, m_placement.frame, metrics);
     update();
@@ -139,6 +153,11 @@ void EntityItem::refreshVisual()
 
 QRectF EntityItem::boundingRect() const
 {
+    // Its radius is drawn when it is selected, but picking it takes its speaker (shape()).
+    if (m_entity.audio && m_entity.audio->radius) {
+        const double radius = *m_entity.audio->radius;
+        return m_bounds.united(QRectF(-radius, -radius, 2 * radius, 2 * radius));
+    }
     return m_bounds;
 }
 
@@ -169,9 +188,20 @@ void EntityItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
     if (m_entity.image) {
         paintImage(painter);
     }
+    if (m_entity.video && m_rect) {
+        // Not decoded: the rect, mirrored as its frames would be, with the clip's name upright.
+        paintVideo(painter, *m_entity.video,
+                   QTransform::fromScale(m_entity.transform.flipX ? -1 : 1,
+                                         m_entity.transform.flipY ? -1 : 1)
+                       .mapRect(*m_rect),
+                   tint);
+    }
     painter->save();
     painter->scale(m_entity.transform.flipX ? -1 : 1, m_entity.transform.flipY ? -1 : 1);
-    if (const QString text = textOf(m_entity); !text.isEmpty() && m_rect) {
+    if (m_entity.text && m_rect) {
+        paintText(painter, *m_entity.text, *m_rect, tint);
+    }
+    else if (const QString text = legacyTextOf(m_entity); !text.isEmpty() && m_rect) {
         painter->setPen(tinted(core::Color{}, tint));
         painter->drawText(*m_rect, Qt::AlignCenter | Qt::TextWordWrap, text);
     }
@@ -179,10 +209,75 @@ void EntityItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option
         paintGuide(painter);
     }
     painter->restore();
+    if (m_entity.audio) {
+        paintSound(painter, *m_entity.audio, option->state & QStyle::State_Selected);
+    }
     if (option->state & QStyle::State_Selected) {
         painter->setPen(cosmeticPen(option->palette.color(QPalette::Highlight), 1, Qt::DashLine));
         painter->setBrush(Qt::NoBrush);
         painter->drawRect(m_bounds);
+    }
+}
+
+void EntityItem::paintSound(QPainter* painter, const core::Audio& audio, bool selected) const
+{
+    const QColor color = m_canvas.classColor(m_entity.classes, SOUND_COLOR);
+    if (selected && audio.radius) {
+        painter->setPen(cosmeticPen(color, 1, Qt::DashLine));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(QPointF(), *audio.radius, *audio.radius);
+    }
+    // A speaker: its box and its cone, and a wave.
+    const double s = SPEAKER_SIZE / 2;
+    QColor fill = color;
+    fill.setAlpha(80);
+    painter->setPen(cosmeticPen(color, 1.5));
+    painter->setBrush(fill);
+    painter->drawPolygon(QPolygonF({QPointF(-s, -s * 0.35), QPointF(-s * 0.45, -s * 0.35),
+                                    QPointF(s * 0.15, -s * 0.9), QPointF(s * 0.15, s * 0.9),
+                                    QPointF(-s * 0.45, s * 0.35), QPointF(-s, s * 0.35)}));
+    painter->setBrush(Qt::NoBrush);
+    painter->drawArc(QRectF(-s * 0.4, -s * 0.7, s * 1.4, s * 1.4), -50 * 16, 100 * 16);
+}
+
+void EntityItem::paintVideo(QPainter* painter, const core::Video& video, const QRectF& rect,
+                            const core::Color& tint) const
+{
+    painter->fillRect(rect, tinted(VIDEO_COLOR, tint));
+    painter->setPen(cosmeticPen(VIDEO_MARK_COLOR, 1, Qt::SolidLine));
+    painter->setBrush(Qt::NoBrush);
+    painter->drawRect(rect);
+    // A play mark, and the clip's name under it, as large as the rect lets them be.
+    const double mark = std::min(rect.width(), rect.height()) / 4;
+    const QPointF center = rect.center() - QPointF(0, mark / 4);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(VIDEO_MARK_COLOR);
+    painter->drawPolygon(
+        QPolygonF({center + QPointF(-mark / 3, -mark / 2), center + QPointF(-mark / 3, mark / 2),
+                   center + QPointF(mark * 2 / 3, 0)}));
+    QFont font = painter->font();
+    font.setPixelSize(std::max(1, int(mark / 2)));
+    painter->setFont(font);
+    painter->setPen(VIDEO_MARK_COLOR);
+    painter->drawText(QRectF(rect.left(), center.y() + mark * 0.6, rect.width(), mark),
+                      Qt::AlignHCenter | Qt::AlignTop, video.clip);
+}
+
+void EntityItem::paintText(QPainter* painter, const core::Text& text, const QRectF& rect,
+                           const core::Color& tint) const
+{
+    const TextLayout layout = m_canvas.layOutText(text, rect.width());
+    if (layout.missing) {
+        // Its font isn't loaded: the application's stands in, in a placeholder's box.
+        painter->setPen(cosmeticPen(PLACEHOLDER_COLOR, 1, Qt::DashLine));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRect(rect);
+    }
+    painter->setPen(tinted(text.color, tint));
+    painter->setFont(layout.font);
+    const QPointF origin = layout.origin(text, rect);
+    for (const TextLayout::Line& line : layout.lines) {
+        painter->drawText(layout.lineStart(text, line, origin), line.text);
     }
 }
 

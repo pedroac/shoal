@@ -7,6 +7,7 @@
 #include <cmath>
 #include <memory>
 
+#include "assets/FontCache.h"
 #include "assets/SheetCache.h"
 #include "assets/SpriteSheet.h"
 #include "core/CommandStack.h"
@@ -66,8 +67,12 @@ QStringList treeShape(const core::Scene& scene)
 }  // namespace
 
 SceneCanvas::SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sheets,
-                         QString sceneId, QObject* parent)
-    : QGraphicsScene(parent), m_document(document), m_sheets(sheets), m_sceneId(std::move(sceneId))
+                         assets::FontCache& fonts, QString sceneId, QObject* parent)
+    : QGraphicsScene(parent),
+      m_document(document),
+      m_sheets(sheets),
+      m_fonts(fonts),
+      m_sceneId(std::move(sceneId))
 {
     connect(&m_document, &core::ProjectDocument::sceneContentChanged, this,
             [this](const QString& id) {
@@ -109,6 +114,11 @@ SceneCanvas::SceneCanvas(core::ProjectDocument& document, assets::SheetCache& sh
         }
     });
     connect(&m_sheets, &assets::SheetCache::sheetChanged, this, &SceneCanvas::onSheetChanged);
+    connect(&m_fonts, &assets::FontCache::fontChanged, this, [this] {
+        for (EntityItem* entityItem : std::as_const(m_items)) {
+            entityItem->refreshVisual();
+        }
+    });
     connect(this, &QGraphicsScene::selectionChanged, this, &SceneCanvas::updateHandles);
     connect(this, &SceneCanvas::currentParentChanged, this, &SceneCanvas::updateGrids);
 
@@ -780,6 +790,17 @@ QSizeF SceneCanvas::designResolution() const
 {
     const core::Size size = m_document.project().manifest.designResolution;
     return {double(size.width), double(size.height)};
+}
+
+core::SizeF SceneCanvas::newVideoSize() const
+{
+    const double width = std::round(designResolution().width() / 4);
+    return {width, std::round(width * 9 / 16)};
+}
+
+TextLayout SceneCanvas::layOutText(const core::Text& text, double width) const
+{
+    return TextLayout::of(text, m_fonts.family(text.font), width);
 }
 
 void SceneCanvas::onSheetChanged(const QString& alias)

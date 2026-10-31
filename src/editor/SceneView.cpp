@@ -6,6 +6,7 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QPainter>
+#include <cmath>
 
 #include "assets/SpriteSheet.h"
 #include "editor/EntityItem.h"
@@ -19,9 +20,9 @@ constexpr double PRESET_CROSS = 24;  ///< On screen, in pixels.
 }  // namespace
 
 SceneView::SceneView(core::ProjectDocument& document, assets::SheetCache& sheets,
-                     const QString& sceneId, QWidget* parent)
+                     assets::FontCache& fonts, const QString& sceneId, QWidget* parent)
     : CanvasView(nullptr, parent),
-      m_canvas(std::make_unique<SceneCanvas>(document, sheets, sceneId))
+      m_canvas(std::make_unique<SceneCanvas>(document, sheets, fonts, sceneId))
 {
     setScene(m_canvas.get());
     watchScene(m_canvas.get());
@@ -33,12 +34,42 @@ SceneView::~SceneView()
     setScene(nullptr);
 }
 
-core::EntityPath SceneView::place(const SheetItem& item, QPointF scenePosition)
+core::Entity SceneView::entityFor(const AssetItem& item) const
 {
-    core::Entity entity = item.toEntity();
+    core::Entity entity;
+    if (item.kind == AssetItem::Kind::Font) {
+        // "Text" in a rect sized to it, centered on its origin.
+        core::Text text;
+        text.font = item.alias;
+        text.string = tr("Text");
+        text.wrap = core::TextWrap::None;
+        const TextLayout layout = m_canvas->layOutText(text, 0);
+        text.wrap = core::TextWrap::Word;
+        entity.text = text;
+        entity.size =
+            core::Extent::px({std::ceil(layout.size.width()), std::ceil(layout.size.height())});
+        entity.pivot = core::Point{0.5, 0.5};
+        return entity;
+    }
+    if (item.kind == AssetItem::Kind::Audio) {
+        // A sound source where it is, heard everywhere until given a radius.
+        core::Audio audio;
+        audio.clip = item.alias;
+        entity.audio = audio;
+        return entity;
+    }
+    if (item.kind == AssetItem::Kind::Video) {
+        core::Video video;
+        video.clip = item.alias;
+        entity.video = video;
+        entity.size = core::Extent::px(m_canvas->newVideoSize());
+        entity.pivot = core::Point{0.5, 0.5};
+        return entity;
+    }
+    entity.image = item.toImage();
     // A sprite with nine-slice insets is placed as a nine-slice, its natural size set so
     // the scale handle resizes it.
-    if (entity.image && !entity.image->isAnimation()) {
+    if (!entity.image->isAnimation()) {
         const SceneCanvas::SpriteVisual visual = m_canvas->visualOf(*entity.image);
         if (visual.sprite && visual.sprite->hasSlice) {
             entity.image->mode = core::ImageMode::NineSlice;
@@ -46,14 +77,19 @@ core::EntityPath SceneView::place(const SheetItem& item, QPointF scenePosition)
             entity.size = core::Extent::px({size.width(), size.height()});
         }
     }
-    const core::EntityPath path = m_canvas->addEntity(std::move(entity), scenePosition);
+    return entity;
+}
+
+core::EntityPath SceneView::place(const AssetItem& item, QPointF scenePosition)
+{
+    const core::EntityPath path = m_canvas->addEntity(entityFor(item), scenePosition);
     if (!path.isEmpty()) {
         setFocus();  // so Delete and the arrow keys reach the new entity
     }
     return path;
 }
 
-core::EntityPath SceneView::placeAtCenter(const SheetItem& item)
+core::EntityPath SceneView::placeAtCenter(const AssetItem& item)
 {
     return place(item, visibleCenter());
 }
@@ -154,7 +190,7 @@ void SceneView::dragEnterEvent(QDragEnterEvent* event)
 void SceneView::dragMoveEvent(QDragMoveEvent* event)
 {
     const QMimeData* mime = event->mimeData();
-    if (!SheetItem::fromMimeData(mime) && !PresetsPanel::presetFromMimeData(mime)) {
+    if (!AssetItem::fromMimeData(mime) && !PresetsPanel::presetFromMimeData(mime)) {
         CanvasView::dragMoveEvent(event);
         return;
     }
@@ -173,7 +209,7 @@ void SceneView::dropEvent(QDropEvent* event)
     // The drop is in viewport pixels; mapToScene() undoes the zoom and the pan.
     const QPointF at = mapToScene(event->position().toPoint());
     bool placed = false;
-    if (const std::optional<SheetItem> item = SheetItem::fromMimeData(mime)) {
+    if (const std::optional<AssetItem> item = AssetItem::fromMimeData(mime)) {
         placed = !place(*item, at).isEmpty();
     }
     else if (const std::optional<QString> preset = PresetsPanel::presetFromMimeData(mime)) {

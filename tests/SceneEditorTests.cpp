@@ -61,9 +61,9 @@ const EntityPath WORLD{1};
 const EntityPath PLAYER{1, 1};
 const EntityPath ALTAR{1, 2};
 const EntityPath DOOR{1, 3};
-const SheetItem IDLE_SPRITE{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+const AssetItem IDLE_SPRITE{AssetItem::Kind::Sprite, QStringLiteral("hero"),
                             QStringLiteral("hero/idle.png")};
-const SheetItem IDLE_ANIMATION{SheetItem::Kind::Animation, QStringLiteral("hero"),
+const AssetItem IDLE_ANIMATION{AssetItem::Kind::Animation, QStringLiteral("hero"),
                                QStringLiteral("idle")};
 
 /// Replaces what `field` holds by typing, then presses Return, as a user would.
@@ -163,7 +163,7 @@ struct Fixture {
 
     /// Drags `item` from the sheet browser over the view and drops it at `at`; returns
     /// whether the view accepted the drop.
-    bool dropOnView(const SheetItem& item, QPoint at)
+    bool dropOnView(const AssetItem& item, QPoint at)
     {
         const std::unique_ptr<QMimeData> data(item.toMimeData());
         return dropOnView(data.get(), at);
@@ -411,7 +411,7 @@ private slots:
     {
         Fixture f;
         // A sprite with insets is placed as a nine-slice, its natural size set.
-        const SheetItem panelItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+        const AssetItem panelItem{AssetItem::Kind::Sprite, QStringLiteral("hero"),
                                   QStringLiteral("ui/panel.9.png")};
         QVERIFY(f.dropOnView(panelItem, f.at(QPointF(320, 600))));
         const EntityPath path{int(f.scene().entities.size()) - 1};
@@ -661,7 +661,7 @@ private slots:
         // A drag carries the sprite, not the sheet.
         const std::unique_ptr<QMimeData> data(
             browser->tree()->model()->mimeData({browser->tree()->indexFromItem(idle)}));
-        QCOMPARE(SheetItem::fromMimeData(data.get()), IDLE_SPRITE);
+        QCOMPARE(AssetItem::fromMimeData(data.get()), IDLE_SPRITE);
     }
 
     void droppingFilesOnTheAssetBrowserDeclaresThem()
@@ -710,7 +710,7 @@ private slots:
         QCOMPARE(row->text(0), alias);
         QCOMPARE(row->child(0)->text(0), QStringLiteral("Sprites (4)"));
         QVERIFY(
-            browser->itemRow({SheetItem::Kind::Sprite, alias, QStringLiteral("hero/idle.png")}));
+            browser->itemRow({AssetItem::Kind::Sprite, alias, QStringLiteral("hero/idle.png")}));
 
         // Dropping it again adds nothing; it's one undo step either way.
         QVERIFY(drop({QUrl::fromLocalFile(sheetFile)}));
@@ -725,13 +725,13 @@ private slots:
         QVERIFY(drop({QUrl::fromLocalFile(elsewhere.filePath(QStringLiteral("hero.png")))}));
         const QString image = QStringLiteral("hero_2");
         QVERIFY(assets().images.contains(image));
-        QTreeWidgetItem* imageRow = browser->itemRow({SheetItem::Kind::Image, image, {}});
+        QTreeWidgetItem* imageRow = browser->itemRow({AssetItem::Kind::Image, image, {}});
         QVERIFY(imageRow);
         QCOMPARE(imageRow->parent(), browser->kindRow(AssetKind::Image));
         QVERIFY(!imageRow->icon(0).isNull());
         QVERIFY(imageRow->flags() & Qt::ItemIsDragEnabled);
 
-        // A font is listed under Fonts, by alias; it can't be placed yet.
+        // A font is listed under Fonts, by alias; one that isn't a font can't be dragged.
         const QString font = elsewhere.filePath(QStringLiteral("Body.TTF"));
         QVERIFY(QFile(font).open(QIODevice::WriteOnly));
         QVERIFY(drop({QUrl::fromLocalFile(font)}));
@@ -739,7 +739,8 @@ private slots:
         QTreeWidgetItem* fontRow = browser->assetRow(QStringLiteral("Body"));
         QVERIFY(fontRow);
         QCOMPARE(fontRow->parent(), browser->kindRow(AssetKind::Font));
-        QVERIFY(!AssetBrowserPanel::itemOf(fontRow));
+        QCOMPARE(fontRow->text(0), QStringLiteral("Body (not loaded)"));
+        QVERIFY(!(fontRow->flags() & Qt::ItemIsDragEnabled));
         f.window.document()->commands().undo();
         QVERIFY(!browser->kindRow(AssetKind::Font));
 
@@ -800,7 +801,7 @@ private slots:
         Fixture f;
         AssetBrowserPanel* browser = f.window.assetBrowser();
         browser->setFilter(QStringLiteral("DOOR"));
-        const auto door = SheetItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+        const auto door = AssetItem{AssetItem::Kind::Sprite, QStringLiteral("hero"),
                                     QStringLiteral("props/door.png")};
         QVERIFY(!browser->itemRow(door)->isHidden());
         QVERIFY(browser->itemRow(IDLE_SPRITE)->isHidden());
@@ -821,15 +822,275 @@ private slots:
         QFile file(f.dir.filePath(QStringLiteral("art/hero.sprat")));
         QVERIFY(file.open(QIODevice::WriteOnly) && file.write(sheet) == sheet.size());
         file.close();
-        const auto tree = SheetItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+        const auto tree = AssetItem{AssetItem::Kind::Sprite, QStringLiteral("hero"),
                                     QStringLiteral("props/tree.png")};
         QTRY_VERIFY(browser->itemRow(tree));
-        QVERIFY(!browser->itemRow(SheetItem{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+        QVERIFY(!browser->itemRow(AssetItem{AssetItem::Kind::Sprite, QStringLiteral("hero"),
                                             QStringLiteral("props/bush.png")}));
 
         // Closing the project empties it.
         f.window.setDocument(nullptr);
         QCOMPARE(browser->tree()->topLevelItemCount(), 0);
+    }
+
+    void aFontIsDraggedAndPlacedAsAText()
+    {
+        Fixture f;
+        AssetBrowserPanel* browser = f.window.assetBrowser();
+        const QString body = QStringLiteral("body");
+        QVERIFY(QFile::copy(support::fixturePath(QStringLiteral("fonts/box.ttf")),
+                            f.dir.filePath(QStringLiteral("art/box.ttf"))));
+        f.document().commands().push(std::make_unique<SetAssetCommand>(
+            f.document(), AssetKind::Font, body, QStringLiteral("art/box.ttf")));
+        QCOMPARE(f.window.fonts().family(body), QStringLiteral("Shoal Box"));
+
+        // Listed by alias, in itself, and dragged as a font.
+        const AssetItem item{AssetItem::Kind::Font, body, {}};
+        QTreeWidgetItem* row = browser->itemRow(item);
+        QVERIFY(row);
+        QCOMPARE(row->text(0), body);
+        QCOMPARE(row->font(0).family(), QStringLiteral("Shoal Box"));
+        QVERIFY(row->flags() & Qt::ItemIsDragEnabled);
+        const std::unique_ptr<QMimeData> data(
+            browser->tree()->model()->mimeData({browser->tree()->indexFromItem(row)}));
+        QCOMPARE(AssetItem::fromMimeData(data.get()), std::optional(item));
+        QCOMPARE(item.path(), QStringLiteral("Fonts / body"));
+
+        // Dropped, it is a text, "Text", in a rect sized to it, centered on its origin: in the
+        // box font every glyph is 0.6 em wide, and a line 1.2 em high.
+        QVERIFY(f.dropOnView(data.get(), f.at(QPointF(400, 300))));
+        const EntityPath path{int(f.scene().entities.size()) - 1};
+        const Entity* text = entityAt(f.scene(), path);
+        QVERIFY(text->text && !text->image);
+        QCOMPARE(text->text->font, body);
+        QCOMPARE(text->text->string, QStringLiteral("Text"));
+        QCOMPARE(text->text->wrap, TextWrap::Word);
+        QCOMPARE(text->size,
+                 std::optional(Extent::px({std::ceil(4 * 0.6 * 32), std::ceil(1.2 * 32)})));
+        QCOMPARE(text->pivot, std::optional(Point{0.5, 0.5}));
+        QCOMPARE(kindOf(*text), QStringLiteral("text"));
+
+        // The inspector shows the font as its asset, and the text's section.
+        InspectorPanel* inspector = f.window.inspector();
+        AssetField* field = inspector->assetField();
+        QCOMPARE(f.canvas().selectedPaths(), QList<EntityPath>{path});
+        QCOMPARE(field->item(), std::optional(item));
+        QCOMPARE(field->lineEdit()->text(), QStringLiteral("Fonts / body"));
+        QVERIFY(!field->isMissing());
+        QVERIFY(!inspector->textSection()->isHidden());
+        QVERIFY(!inspector->showsImage());
+        field->completer()->setCompletionPrefix(QStringLiteral("BODY"));
+        QCOMPARE(field->completer()->completionCount(), 1);
+
+        // A sprite makes it an image, as placed from the sprite.
+        const std::unique_ptr<QMimeData> sprite(IDLE_SPRITE.toMimeData());
+        QVERIFY(dropOn(field, sprite.get()));
+        text = entityAt(f.scene(), path);
+        QVERIFY(text->image && !text->text);
+        QVERIFY(!text->size && !text->pivot);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Make text an image"));
+        QVERIFY(inspector->showsImage());
+        QVERIFY(inspector->textSection()->isHidden());
+        const std::optional<RectF> rect = entityRect(*text, Frame{}, f.canvas().imageMetrics());
+        QVERIFY(rect);
+
+        // A font makes it a text again, in the rect the sprite drew, so nothing moves.
+        QVERIFY(dropOn(field, data.get()));
+        text = entityAt(f.scene(), path);
+        QVERIFY(text->text && !text->image);
+        QCOMPARE(text->text->string, QStringLiteral("Text"));
+        QCOMPARE(text->size, std::optional(Extent::px({rect->width, rect->height})));
+        QCOMPARE(entityRect(*text, Frame{}, f.canvas().imageMetrics()), rect);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Make sprite a text"));
+
+        // An image with a text shows its image as its asset, and its text's font apart.
+        f.document().commands().undo();
+        inspector->setTextFont(body);
+        text = entityAt(f.scene(), path);
+        QVERIFY(text->image && text->text);
+        QCOMPARE(field->item(), std::optional(IDLE_SPRITE));
+        QCOMPARE(inspector->fontField()->item(), std::optional(item));
+        QVERIFY(!inspector->fontField()->isHidden());
+        // Cleared, it loses its image first, then its text.
+        field->clearButton()->click();
+        text = entityAt(f.scene(), path);
+        QVERIFY(!text->image && text->text);
+        QCOMPARE(field->item(), std::optional(item));
+        field->clearButton()->click();
+        QVERIFY(!entityAt(f.scene(), path)->text);
+        QVERIFY(field->lineEdit()->text().isEmpty());
+        QVERIFY(inspector->textSection()->isHidden());
+
+        // Typed, a font gives a guide a text in a rect of its own.
+        f.canvas().select({{1, 2, 0}});
+        QVERIFY(!entityAt(f.scene(), {1, 2, 0})->image);
+        type(field->lineEdit(), QStringLiteral("fonts / body"));
+        QVERIFY(entityAt(f.scene(), {1, 2, 0})->text);
+    }
+
+    void aVideoIsDraggedAndPlacedInARectOfItsOwn()
+    {
+        Fixture f;
+        AssetBrowserPanel* browser = f.window.assetBrowser();
+        const QString intro = QStringLiteral("intro");
+        f.document().commands().push(std::make_unique<SetAssetCommand>(
+            f.document(), AssetKind::Video, intro, QStringLiteral("video/intro.webm")));
+
+        // Listed by alias, and dragged as a video though Shoal doesn't decode it.
+        const AssetItem item{AssetItem::Kind::Video, intro, {}};
+        QTreeWidgetItem* row = browser->itemRow(item);
+        QVERIFY(row);
+        QCOMPARE(row->parent(), browser->kindRow(AssetKind::Video));
+        QVERIFY(row->flags() & Qt::ItemIsDragEnabled);
+        const std::unique_ptr<QMimeData> data(
+            browser->tree()->model()->mimeData({browser->tree()->indexFromItem(row)}));
+        QCOMPARE(AssetItem::fromMimeData(data.get()), std::optional(item));
+        QCOMPARE(item.path(), QStringLiteral("Video / intro"));
+
+        // Dropped, it is a video in a 16:9 rect a quarter of the design width, centered.
+        QVERIFY(f.dropOnView(data.get(), f.at(QPointF(400, 300))));
+        const EntityPath path{int(f.scene().entities.size()) - 1};
+        const Entity* video = entityAt(f.scene(), path);
+        QVERIFY(video->video && !video->image && !video->text);
+        QCOMPARE(video->video->clip, intro);
+        const double width =
+            std::round(f.document().project().manifest.designResolution.width / 4.0);
+        QCOMPARE(video->size, std::optional(Extent::px({width, std::round(width * 9 / 16)})));
+        QCOMPARE(video->pivot, std::optional(Point{0.5, 0.5}));
+        QCOMPARE(kindOf(*video), QStringLiteral("video"));
+        QVERIFY(!f.canvas().item(path)->boundingRect().isEmpty());
+
+        // The inspector shows the clip as its asset, and the video's section.
+        InspectorPanel* inspector = f.window.inspector();
+        AssetField* field = inspector->assetField();
+        QCOMPARE(field->item(), std::optional(item));
+        QCOMPARE(field->lineEdit()->text(), QStringLiteral("Video / intro"));
+        QVERIFY(!field->isMissing());
+        QVERIFY(!inspector->videoSection()->isHidden());
+        QVERIFY(inspector->videoField()->isHidden());
+        field->completer()->setCompletionPrefix(QStringLiteral("INTRO"));
+        QCOMPARE(field->completer()->completionCount(), 1);
+        inspector->videoLoopBox()->click();
+        QVERIFY(entityAt(f.scene(), path)->video->loop);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Loop the video of video"));
+        inspector->videoAutoplayBox()->click();
+        QVERIFY(entityAt(f.scene(), path)->video->autoplay);
+        inspector->videoModeBox()->setCurrentIndex(
+            inspector->videoModeBox()->findData(int(VideoMode::Fill)));
+        emit inspector->videoModeBox()->activated(inspector->videoModeBox()->currentIndex());
+        QCOMPARE(entityAt(f.scene(), path)->video->mode, VideoMode::Fill);
+
+        // A sprite makes it an image, as placed from the sprite.
+        const std::unique_ptr<QMimeData> sprite(IDLE_SPRITE.toMimeData());
+        QVERIFY(dropOn(field, sprite.get()));
+        video = entityAt(f.scene(), path);
+        QVERIFY(video->image && !video->video);
+        QVERIFY(!video->size && !video->pivot);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Make video an image"));
+        QVERIFY(inspector->videoSection()->isHidden());
+        const std::optional<RectF> rect = entityRect(*video, Frame{}, f.canvas().imageMetrics());
+        QVERIFY(rect);
+
+        // A video makes it a video again, in the rect the sprite drew, so nothing moves.
+        QVERIFY(dropOn(field, data.get()));
+        video = entityAt(f.scene(), path);
+        QVERIFY(video->video && !video->image);
+        QCOMPARE(video->size, std::optional(Extent::px({rect->width, rect->height})));
+        QCOMPARE(entityRect(*video, Frame{}, f.canvas().imageMetrics()), rect);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Make sprite a video"));
+
+        // An undeclared clip stays, shown as missing; cleared, the video goes.
+        f.document().commands().push(
+            std::make_unique<SetAssetCommand>(f.document(), AssetKind::Video, intro, std::nullopt));
+        QVERIFY(field->isMissing());
+        field->clearButton()->click();
+        QVERIFY(!entityAt(f.scene(), path)->video);
+        QVERIFY(inspector->videoSection()->isHidden());
+    }
+
+    void aClipIsDraggedAndPlacedAsASound()
+    {
+        Fixture f;
+        AssetBrowserPanel* browser = f.window.assetBrowser();
+        const QString door = QStringLiteral("door");
+        f.document().commands().push(std::make_unique<SetAssetCommand>(
+            f.document(), AssetKind::Audio, door, QStringLiteral("audio/door.ogg")));
+
+        // Listed by alias, and dragged as a clip though Shoal doesn't decode it.
+        const AssetItem item{AssetItem::Kind::Audio, door, {}};
+        QTreeWidgetItem* row = browser->itemRow(item);
+        QVERIFY(row);
+        QCOMPARE(row->parent(), browser->kindRow(AssetKind::Audio));
+        QVERIFY(row->flags() & Qt::ItemIsDragEnabled);
+        const std::unique_ptr<QMimeData> data(
+            browser->tree()->model()->mimeData({browser->tree()->indexFromItem(row)}));
+        QCOMPARE(AssetItem::fromMimeData(data.get()), std::optional(item));
+        QCOMPARE(item.path(), QStringLiteral("Audio / door"));
+
+        // Dropped, it is a sound source where it is, heard everywhere, with no rect.
+        const QPointF where(400, 300);
+        QVERIFY(f.dropOnView(data.get(), f.at(where)));
+        const EntityPath path{int(f.scene().entities.size()) - 1};
+        const Entity* sound = entityAt(f.scene(), path);
+        QVERIFY(sound->audio && !sound->image && !sound->size);
+        QCOMPARE(sound->audio->clip, door);
+        QVERIFY(!sound->audio->radius);
+        QCOMPARE(kindOf(*sound), QStringLiteral("sound"));
+        // Its speaker is what picks it.
+        EntityItem* speaker = f.canvas().item(path);
+        QVERIFY(!speaker->visualRect().isEmpty());
+        QVERIFY(speaker->visualRect().width() < 32);
+
+        // The inspector shows the clip as its asset, and the sound's section.
+        InspectorPanel* inspector = f.window.inspector();
+        AssetField* field = inspector->assetField();
+        QCOMPARE(field->item(), std::optional(item));
+        QCOMPARE(field->lineEdit()->text(), QStringLiteral("Audio / door"));
+        QVERIFY(!field->isMissing());
+        QVERIFY(!inspector->audioSection()->isHidden());
+        QVERIFY(inspector->audioField()->isHidden());
+        QVERIFY(inspector->radiusBox()->isHidden());
+
+        // Positional, it has a radius, drawn when selected but never picked.
+        inspector->positionalBox()->click();
+        QCOMPARE(entityAt(f.scene(), path)->audio->radius, std::optional(400.0));
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Position the sound of sound"));
+        QVERIFY(!inspector->radiusBox()->isHidden());
+        inspector->radiusBox()->setValue(250);
+        QCOMPARE(entityAt(f.scene(), path)->audio->radius, std::optional(250.0));
+        QVERIFY(speaker->boundingRect().contains(QRectF(-250, -250, 500, 500)));
+        QVERIFY(speaker->visualRect().width() < 32);
+        inspector->volumeBox()->setValue(0.5);
+        QCOMPARE(entityAt(f.scene(), path)->audio->volume, 0.5);
+        inspector->audioLoopBox()->click();
+        inspector->audioAutoplayBox()->click();
+        QVERIFY(entityAt(f.scene(), path)->audio->loop);
+        QVERIFY(entityAt(f.scene(), path)->audio->autoplay);
+        inspector->positionalBox()->click();
+        QVERIFY(!entityAt(f.scene(), path)->audio->radius);
+
+        // A sprite makes it an image; a clip makes it a sound again, with no rect.
+        const std::unique_ptr<QMimeData> sprite(IDLE_SPRITE.toMimeData());
+        QVERIFY(dropOn(field, sprite.get()));
+        sound = entityAt(f.scene(), path);
+        QVERIFY(sound->image && !sound->audio);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Make sound an image"));
+        QVERIFY(dropOn(field, data.get()));
+        sound = entityAt(f.scene(), path);
+        QVERIFY(sound->audio && !sound->image && !sound->size && !sound->pivot);
+        QCOMPARE(f.document().commands().undoText(), QStringLiteral("Make sprite a sound"));
+
+        // A sprite with a sound, like a torch: the image is its asset, the clip apart.
+        f.document().commands().undo();
+        inspector->setSoundClip(door);
+        sound = entityAt(f.scene(), path);
+        QVERIFY(sound->image && sound->audio);
+        QCOMPARE(field->item(), std::optional(IDLE_SPRITE));
+        QCOMPARE(inspector->audioField()->item(), std::optional(item));
+        QVERIFY(!inspector->audioField()->isHidden());
+        inspector->removeAudioButton()->click();
+        QVERIFY(!entityAt(f.scene(), path)->audio);
+        QVERIFY(inspector->audioSection()->isHidden());
     }
 
     void aStandaloneImageIsPlacedAndDrawnAsASprite()
@@ -839,7 +1100,7 @@ private slots:
         const QString title = QStringLiteral("title");
         f.document().commands().push(std::make_unique<SetAssetCommand>(
             f.document(), AssetKind::Image, title, QStringLiteral("art/hero.png")));
-        const SheetItem item{SheetItem::Kind::Image, title, {}};
+        const AssetItem item{AssetItem::Kind::Image, title, {}};
         QVERIFY(browser->itemRow(item));
         const QSize pixels = QImage(f.dir.filePath(QStringLiteral("art/hero.png"))).size();
         QVERIFY(!pixels.isEmpty());
@@ -860,9 +1121,9 @@ private slots:
         QCOMPARE(rect->height, double(pixels.height()));
         QCOMPARE(f.canvas().item(path)->sceneBoundingRect().size().toSize(), pixels);
 
-        // With it selected, the image field shows it, and chooses among images too.
+        // With it selected, the asset field shows it, and chooses among images too.
         f.canvas().select({path});
-        AssetField* field = f.window.inspector()->imageField();
+        AssetField* field = f.window.inspector()->assetField();
         QCOMPARE(field->item(), std::optional(item));
         QCOMPARE(field->lineEdit()->text(), QStringLiteral("Images / title"));
         QCOMPARE(f.window.inspector()->summary()->text(), QStringLiteral("image · title"));
@@ -974,12 +1235,12 @@ private slots:
         QVERIFY(!inspector->showsTopLevel());
     }
 
-    void theImageFieldChoosesTheSelectedEntitysImage()
+    void theAssetFieldChoosesTheSelectedEntitysImage()
     {
         Fixture f;
         f.window.show();
         InspectorPanel* inspector = f.window.inspector();
-        AssetField* field = inspector->imageField();
+        AssetField* field = inspector->assetField();
         QLineEdit* edit = field->lineEdit();
         // Nothing selected: nothing to choose for.
         QVERIFY(!field->isEnabled());
@@ -1032,7 +1293,7 @@ private slots:
         completer->popup()->hide();
 
         // Dropped from the asset browser.
-        const SheetItem door{SheetItem::Kind::Sprite, QStringLiteral("hero"),
+        const AssetItem door{AssetItem::Kind::Sprite, QStringLiteral("hero"),
                              QStringLiteral("props/door.png")};
         const std::unique_ptr<QMimeData> data(door.toMimeData());
         QVERIFY(dropOn(field, data.get()));
@@ -1067,7 +1328,8 @@ private slots:
         QCOMPARE(entityAt(f.scene(), PLAYER)->image->sprite, gone.sprite);
 
         // A nine-slice stays one with another sprite.
-        Entity panel = IDLE_SPRITE.toEntity();
+        Entity panel;
+        panel.image = IDLE_SPRITE.toImage();
         panel.image->sprite = QStringLiteral("ui/panel.9.png");
         panel.image->mode = ImageMode::NineSlice;
         panel.size = Extent::px({30, 30});
@@ -1088,7 +1350,7 @@ private slots:
         f.window.projectPanel()->setCurrentWidget(f.window.assetBrowser());
         AssetBrowserPanel* assets = f.window.assetBrowser();
         QTreeWidget* tree = assets->tree();
-        const auto centerOf = [&](const SheetItem& item) {
+        const auto centerOf = [&](const AssetItem& item) {
             QTreeWidgetItem* row = assets->itemRow(item);
             tree->scrollToItem(row);
             return tree->visualItemRect(row).center();
@@ -1892,7 +2154,7 @@ private slots:
         QVERIFY(inspector->showsImage());
         inspector->setImageMode(ImageMode::NineSlice);
         QCOMPARE(entityAt(f.scene(), PLAYER)->image->mode, ImageMode::NineSlice);
-        inspector->imageField()->clearButton()->click();
+        inspector->assetField()->clearButton()->click();
         const Entity* player = entityAt(f.scene(), PLAYER);
         QVERIFY(!player->image);
         QCOMPARE(player->size, std::optional(Extent::px({16, 24})));

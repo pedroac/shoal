@@ -56,7 +56,8 @@ changes.
   - `SpriteSheet`: `loadSheet()` copies a sheet into Qt types, and `placeSprite()`
     is sprat-lib's drawing recipe; `loadImageAsSheet()` makes a standalone image a
     sheet of one sprite, so it draws, tints and sizes as a sprite does. `SheetCache`: a
-    project's sheets and standalone images by alias, with hot reload.
+    project's sheets and standalone images by alias, with hot reload. `FontCache`: its
+    fonts by alias, registered with `QFontDatabase` from their files, with hot reload.
 - `src/editor/`: the Qt Widgets application, built as a library (`shoal_editor`)
   so tests can create its windows. `main.cpp` is the executable's only source.
   - `MainWindow`: one open `ProjectDocument`, the menus, New/Open/Save, and the
@@ -75,10 +76,11 @@ changes.
     in place otherwise, since an item may be inside its own mouse handler.
     `SceneView` is its tab, `SceneTreePanel` its entity tree.
     `TileGridOverlay` draws the tiled containers' grids above them, when they help.
-    `CanvasView` holds the zoom and pan both views share.
+    `CanvasView` holds the zoom and pan both views share. `TextLayout` lays a text
+    part out as the editor previews it.
   - `AssetBrowserPanel`: the project's assets, by kind: sheets with their sprites and
     animations, and standalone images, as thumbnails (`Thumbnails`); fonts, audio and
-    video by alias. It only browses: a drag or a double-click hands a `SheetItem` to
+    video by alias. It only browses: a drag or a double-click hands an `AssetItem` to
     `SceneView`, which places it, and a drag onto an `AssetField` gives it to the
     selected entity.
     `PresetsPanel` does the same with presets, and adds, duplicates and removes them.
@@ -87,8 +89,8 @@ changes.
     entity, with unit boxes for positions and sizes, a `PointGrid` for pivots and a
     `ColorButton` for tints and fills, or, with none selected, the top level's scene
     settings (a `SceneSettingsPanel`), or a preset's (a `PresetSettingsPanel`). Its
-    `AssetField` chooses the entity's image: dropped, typed with a completer, browsed
-    or cleared.
+    `AssetField` chooses the entity's asset, whose kind makes it an image, a video, a text or a sound:
+    dropped, typed with a completer, browsed or cleared.
   - Views never change the model directly: they push commands, and redraw from
     the document's signals, so undo and redo need no special handling.
 - `tests/`: one Qt Test executable per area, registered with CTest and run on the

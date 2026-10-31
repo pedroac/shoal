@@ -1,11 +1,13 @@
 #include "editor/Thumbnails.h"
 
+#include <QApplication>
 #include <QPainter>
+#include <QPalette>
 #include <algorithm>
 
 #include "assets/SheetCache.h"
 #include "assets/SpriteSheet.h"
-#include "editor/SheetItem.h"
+#include "editor/AssetItem.h"
 
 namespace shoal::editor {
 
@@ -33,20 +35,37 @@ QIcon spriteThumbnail(const assets::Sheet& sheet, const assets::Sprite& sprite,
     return QIcon(pixmap);
 }
 
-QIcon itemThumbnail(const assets::SheetCache& sheets, const SheetItem& item, int size,
+QIcon fontThumbnail(const QString& family, int size, double pixelRatio)
+{
+    const int pixels = int(size * pixelRatio);
+    QPixmap pixmap(pixels, pixels);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    QFont font(family);
+    font.setPixelSize(pixels * 3 / 5);
+    painter.setFont(font);
+    painter.setPen(QApplication::palette().color(QPalette::Text));
+    painter.drawText(QRect(0, 0, pixels, pixels), Qt::AlignCenter, QStringLiteral("Aa"));
+    painter.end();
+    pixmap.setDevicePixelRatio(pixelRatio);
+    return QIcon(pixmap);
+}
+
+QIcon itemThumbnail(const assets::SheetCache& sheets, const AssetItem& item, int size,
                     double pixelRatio)
 {
-    const std::shared_ptr<const assets::Sheet> sheet = sheets.sheet(item.sheet);
+    const std::shared_ptr<const assets::Sheet> sheet =
+        item.isImage() ? sheets.sheet(item.alias) : nullptr;
     if (!sheet || sheet->sprites.empty()) {
         return {};
     }
     const assets::Sprite* sprite = nullptr;
     bool flipX = false;
     bool flipY = false;
-    if (item.kind == SheetItem::Kind::Image) {
+    if (item.kind == AssetItem::Kind::Image) {
         sprite = &sheet->sprites.front();
     }
-    else if (item.kind == SheetItem::Kind::Sprite) {
+    else if (item.kind == AssetItem::Kind::Sprite) {
         sprite = sheet->sprite(item.name);
     }
     else if (const assets::Animation* animation = sheet->animation(item.name);

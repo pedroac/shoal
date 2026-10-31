@@ -340,6 +340,61 @@ Container readContainer(ObjectReader& reader)
     return container;
 }
 
+Text readText(ObjectReader& reader)
+{
+    Text text;
+    text.font = reader.id(QStringLiteral("font"));
+    text.string = reader.optionalString(QStringLiteral("string"));
+    text.key = reader.optionalString(QStringLiteral("key"));
+    const auto positive = [&](const QString& key, double fallback) {
+        const double value = reader.number(key, fallback);
+        if (!(value > 0)) {
+            reader.fail(key, QStringLiteral("a number more than 0"), reader.value(key));
+        }
+        return value;
+    };
+    text.size = positive(QStringLiteral("size"), Text{}.size);
+    text.color = reader.color(QStringLiteral("color"), Color{});
+    text.align = reader.point(QStringLiteral("align"), Text{}.align);
+    text.wrap = reader.enumValue(QStringLiteral("wrap"), TextWrap::Word);
+    text.lineHeight = positive(QStringLiteral("line_height"), Text{}.lineHeight);
+    text.extras = reader.extras();
+    return text;
+}
+
+Video readVideo(ObjectReader& reader)
+{
+    Video video;
+    video.clip = reader.id(QStringLiteral("clip"));
+    video.loop = reader.boolean(QStringLiteral("loop"), false);
+    video.autoplay = reader.boolean(QStringLiteral("autoplay"), false);
+    video.mode = reader.enumValue(QStringLiteral("mode"), VideoMode::Stretch);
+    video.extras = reader.extras();
+    return video;
+}
+
+Audio readAudio(ObjectReader& reader)
+{
+    Audio audio;
+    audio.clip = reader.id(QStringLiteral("clip"));
+    const QString volume = QStringLiteral("volume");
+    audio.volume = reader.number(volume, Audio{}.volume);
+    if (!(audio.volume >= 0 && audio.volume <= 1)) {
+        reader.fail(volume, QStringLiteral("a number from 0 to 1"), audio.volume);
+    }
+    audio.loop = reader.boolean(QStringLiteral("loop"), false);
+    audio.autoplay = reader.boolean(QStringLiteral("autoplay"), false);
+    const QString radius = QStringLiteral("radius");
+    if (reader.has(radius)) {
+        audio.radius = reader.number(radius, 0);
+        if (!(*audio.radius > 0)) {
+            reader.fail(radius, QStringLiteral("a number more than 0"), *audio.radius);
+        }
+    }
+    audio.extras = reader.extras();
+    return audio;
+}
+
 /// The fields every entity has, in both formats.
 void readCommonFields(ObjectReader& reader, Entity& entity)
 {
@@ -395,6 +450,19 @@ Entity readEntityFields(ObjectReader& reader, int version = SCENE_FORMAT_VERSION
     if (reader.has(QStringLiteral("container"))) {
         ObjectReader container = reader.child(QStringLiteral("container"));
         entity.container = readContainer(container);
+    }
+    // A string is what the editor drew as text before the part: it stays as written.
+    if (reader.has(QStringLiteral("text")) && !reader.peek(QStringLiteral("text")).isString()) {
+        ObjectReader text = reader.child(QStringLiteral("text"));
+        entity.text = readText(text);
+    }
+    if (reader.has(QStringLiteral("video"))) {
+        ObjectReader video = reader.child(QStringLiteral("video"));
+        entity.video = readVideo(video);
+    }
+    if (reader.has(QStringLiteral("audio"))) {
+        ObjectReader audio = reader.child(QStringLiteral("audio"));
+        entity.audio = readAudio(audio);
     }
     entity.props = reader.object(QStringLiteral("props"));
     const Format2Place childPlace =
@@ -1226,6 +1294,87 @@ void writeEntity(JsonWriter& writer, const Entity& entity)
             writePoint(writer, container.tilePivot);
         }
         writeExtras(writer, container.extras);
+        writer.endObject();
+    }
+    if (entity.text) {
+        const Text& text = *entity.text;
+        writer.key(u"text");
+        writer.beginObject();
+        writer.key(u"font");
+        writer.string(text.font);
+        writer.key(u"string");
+        writer.string(text.string);
+        if (!text.key.isEmpty()) {
+            writer.key(u"key");
+            writer.string(text.key);
+        }
+        if (text.size != Text{}.size) {
+            writer.key(u"size");
+            writer.number(text.size);
+        }
+        if (text.color != Color{}) {
+            writer.key(u"color");
+            writer.string(text.color.name());
+        }
+        if (text.align != Text{}.align) {
+            writer.key(u"align");
+            writePoint(writer, text.align);
+        }
+        if (text.wrap != TextWrap::Word) {
+            writer.key(u"wrap");
+            writer.string(enumName(text.wrap));
+        }
+        if (text.lineHeight != Text{}.lineHeight) {
+            writer.key(u"line_height");
+            writer.number(text.lineHeight);
+        }
+        writeExtras(writer, text.extras);
+        writer.endObject();
+    }
+    if (entity.video) {
+        const Video& video = *entity.video;
+        writer.key(u"video");
+        writer.beginObject();
+        writer.key(u"clip");
+        writer.string(video.clip);
+        if (video.loop) {
+            writer.key(u"loop");
+            writer.boolean(true);
+        }
+        if (video.autoplay) {
+            writer.key(u"autoplay");
+            writer.boolean(true);
+        }
+        if (video.mode != VideoMode::Stretch) {
+            writer.key(u"mode");
+            writer.string(enumName(video.mode));
+        }
+        writeExtras(writer, video.extras);
+        writer.endObject();
+    }
+    if (entity.audio) {
+        const Audio& audio = *entity.audio;
+        writer.key(u"audio");
+        writer.beginObject();
+        writer.key(u"clip");
+        writer.string(audio.clip);
+        if (audio.volume != Audio{}.volume) {
+            writer.key(u"volume");
+            writer.number(audio.volume);
+        }
+        if (audio.loop) {
+            writer.key(u"loop");
+            writer.boolean(true);
+        }
+        if (audio.autoplay) {
+            writer.key(u"autoplay");
+            writer.boolean(true);
+        }
+        if (audio.radius) {
+            writer.key(u"radius");
+            writer.number(*audio.radius);
+        }
+        writeExtras(writer, audio.extras);
         writer.endObject();
     }
     if (!entity.props.isEmpty()) {

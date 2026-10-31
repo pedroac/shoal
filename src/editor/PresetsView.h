@@ -5,8 +5,9 @@
 class QLabel;
 
 namespace shoal::assets {
+class FontCache;
 class SheetCache;
-}
+}  // namespace shoal::assets
 
 namespace shoal::core {
 class ProjectDocument;
@@ -23,7 +24,7 @@ class PresetsView : public QWidget {
     Q_OBJECT
 public:
     PresetsView(core::ProjectDocument& document, assets::SheetCache& sheets,
-                QWidget* parent = nullptr);
+                assets::FontCache& fonts, QWidget* parent = nullptr);
 
     /// The current preset's canvas, or null when there is none.
     SceneView* view() const { return m_view; }
@@ -39,6 +40,7 @@ signals:
 private:
     core::ProjectDocument& m_document;
     assets::SheetCache& m_sheets;
+    assets::FontCache& m_fonts;
     QLabel* m_placeholder;
     SceneView* m_view = nullptr;
     bool m_snapping = false;

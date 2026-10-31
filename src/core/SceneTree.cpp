@@ -174,7 +174,10 @@ QString kindOf(const Entity& entity)
                : entity.image->mode == ImageMode::NineSlice ? QStringLiteral("nine-slice")
                                                             : QStringLiteral("sprite");
     }
-    if (has("text")) {
+    if (entity.video) {
+        return QStringLiteral("video");
+    }
+    if (entity.text) {
         return QStringLiteral("text");
     }
     if (has("path")) {
@@ -182,6 +185,9 @@ QString kindOf(const Entity& entity)
     }
     if (has("shape")) {
         return QStringLiteral("shape");
+    }
+    if (entity.audio && !entity.fill) {
+        return QStringLiteral("sound");
     }
     if (entity.size) {
         return entity.fill ? QStringLiteral("rect") : QStringLiteral("region");

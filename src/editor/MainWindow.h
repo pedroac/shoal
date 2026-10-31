@@ -7,6 +7,7 @@
 #include <optional>
 #include <utility>
 
+#include "assets/FontCache.h"
 #include "assets/SheetCache.h"
 #include "core/ProjectStore.h"
 #include "core/SceneTree.h"
@@ -34,7 +35,7 @@ class SceneTreePanel;
 class SceneCanvas;
 class SceneView;
 class AssetBrowserPanel;
-struct SheetItem;
+struct AssetItem;
 class WorkspaceTabs;
 
 /// The editor's top-level window: one open project, with the flow in the first tab, the
@@ -68,6 +69,7 @@ public:
     ScenesPanel* scenesPanel() const { return m_scenes; }
     SceneSettingsPanel* sceneSettingsPanel() const { return m_sceneSettings; }
     assets::SheetCache& sheets() { return m_sheets; }
+    assets::FontCache& fonts() { return m_fonts; }
     /// The Presets tab.
     PresetsView* presetsView() const { return m_presetsView; }
     /// The current tab's scene view, the current preset's in the Presets tab, or null
@@ -127,7 +129,7 @@ private:
     /// and lists its other assets.
     void updateAssets();
     /// Places a sprite or animation from the sheet browser in the current scene's view.
-    void placeSheetItem(const SheetItem& item);
+    void placeAssetItem(const AssetItem& item);
     /// Places what a preset creates in the current scene's view.
     void placePreset(const QString& presetId);
     /// Points the panels that follow the current scene at `view`'s canvas, or nothing.
@@ -142,6 +144,7 @@ private:
     QPointer<SceneCanvas> m_presetCanvas;  ///< The presets tab's, connected to this window.
     WorkspaceTabs* m_tabs = nullptr;
     assets::SheetCache m_sheets;
+    assets::FontCache m_fonts;
     core::Assets m_declaredAssets;
     QString m_assetsBase;
     QTabWidget* m_projectPanel = nullptr;

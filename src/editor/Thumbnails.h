@@ -10,16 +10,19 @@ class SheetCache;
 
 namespace shoal::editor {
 
-struct SheetItem;
+struct AssetItem;
 
 /// `sprite` drawn whole in a square of `size` pixels on screen, upright and flipped as the
 /// canvas draws it, scaled to fill the square; pixel art stays sharp. Empty without an atlas.
 QIcon spriteThumbnail(const assets::Sheet& sheet, const assets::Sprite& sprite,
                       const QPixmap& atlas, bool flipX, bool flipY, int size, double pixelRatio);
 
-/// What `item` draws, as spriteThumbnail() does, an animation by its first frame; empty if
-/// the cache doesn't have it.
-QIcon itemThumbnail(const assets::SheetCache& sheets, const SheetItem& item, int size,
+/// "Aa" in `family`, in a square of `size` pixels on screen.
+QIcon fontThumbnail(const QString& family, int size, double pixelRatio);
+
+/// What an image item draws, as spriteThumbnail() does, an animation by its first frame;
+/// empty if the cache doesn't have it, or for a font.
+QIcon itemThumbnail(const assets::SheetCache& sheets, const AssetItem& item, int size,
                     double pixelRatio);
 
 }  // namespace shoal::editor
